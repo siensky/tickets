@@ -62,9 +62,15 @@ Används den av *flera* → `shared/domain/`.
 - **All SQL i `repositories/`** — ingen SQL någon annanstans
 - Varje skrivande operation i en transaktion
 - **`ORDER BY` alltid före `FOR UPDATE`**
-- **Shard-nyckel (`event_id`) i varje fråga mot shardad tabell**
+- **Shard-nyckel (`event_id`) i varje fråga mot shardad tabell** — och `event_id` finns på
+  *varje* shardad tabell, även när värdet går att härleda. Routinglagret måste veta vilken
+  shard raden ligger på innan frågan ställs.
+- **Tider som systemet litar på beräknas alltid med `now()` från Postgres** — aldrig i
+  appservern (klockskev mellan poddar), aldrig i klienten (förfalskbart). Gäller
+  `expires_at`, `release_after`, `payment_frozen_until`.
 - **Migrations måste vara framåtkompatibla** — en ny migration ska kunna köras *innan*
-  ny kod deployas. Annars fungerar inte zero-downtime.
+  ny kod deployas. Annars fungerar inte zero-downtime. De körs som ett eget Job med
+  advisory lock, mot båda shardarna, aldrig som init-container.
 
 ## 5. Felhantering
 

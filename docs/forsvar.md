@@ -270,11 +270,17 @@ Användaren kan stänga fliken innan webbläsaren hinner skicka händelsen. Krit
 konverteringshändelser blir därför systematiskt underrapporterade om de skickas
 klientsidigt. Mindre kritiska händelser (sidvisningar, klick) skickas från klienten.
 
-## Varför en `oversell_total`-metrik som alltid är noll?
+## Varför `oversell_prevented_total` och inte `oversell_total`?
 
-Det är invarianten gjord mätbar. Ett larm som aldrig får gå är ett starkare påstående än
-"jag har testat" — det säger att systemet *övervakar* sin egen kärngaranti kontinuerligt,
-inte bara vid testtillfället.
+Den ursprungliga idén var en räknare för "översäljning inträffade", som alltid skulle vara
+noll. Men det är en **tautologi**: unique-constrainten gör översäljning fysiskt omöjlig, så
+räknaren kunde aldrig öka — och en metrik som aldrig kan ändras bevisar ingenting.
+
+Omdefinierad mäter den i stället *förhindrade* försök: den inkrementeras när ett insert på
+`tickets` fallerar på unique violation. Nu säger den något verkligt — "databasen fångade N
+försök som applikationslogiken släppte igenom" — och påståendet blir både starkare och sant.
+
+Det är invarianten gjord mätbar, kontinuerligt och inte bara vid testtillfället.
 
 ## Varför KEDA och inte bara HPA?
 
@@ -285,7 +291,7 @@ medan kön växer obehindrat. KEDA skalar på **RabbitMQ-ködjup** och kan gå t
 Dessutom blir demon ärlig: med CPU-baserad skalning måste man konstruera artificiell last.
 Med KEDA kör man bara lasttestet och poddarna går synligt 1 → 8 → 1.
 
-## Varför proof of work, och varför två lasttestkörningar?
+## Varför proof of work — och varför är det inte byggt?
 
 PoW är **asymmetriskt**: klienten provar miljontals hashningar (~200 ms), servern
 verifierar med *en* hashning (~0,01 ms). 20 000 riktiga användare kostar alltså servern
@@ -294,13 +300,19 @@ betalar däremot 10 000 × 200 ms CPU.
 
 Turnstile och PoW gör samma sak vid samma steg; staplade på varje användare lägger de
 500–1000 ms innan någon kommer in i kön, och Turnstile är ett externt nätverksberoende på
-den hetaste vägen. Därför **adaptiv eskalering** — Turnstile bara vid misstänkta signaler.
+den hetaste vägen. Därför var planen **adaptiv eskalering** — Turnstile bara vid misstänkta
+signaler.
 
-**Två lasttestkörningar:** i testet spelar *en* maskin alla 20 000 klienter och skulle
-behöva 4 000 sekunders CPU för att lösa pusslen — då mäts lastgeneratorn, inte systemet.
-Huvudtestet körs därför med sänkt svårighet (hela kodvägen testas ändå), och ett separat
-litet test med skarp svårighet använder **förberäknade lösningar**.
-Princip: *lastgeneratorn får aldrig vara flaskhalsen.*
+**Båda är medvetet flyttade till efter inlämningen.** Varken PoW eller Turnstile är
+betygsgrundande, och tiden behövdes till observability och VG-kraven. Kvar finns de två lager
+som faktiskt bär skyddet: rate limiting per IP, och **en aktiv reservation per kötoken**
+upprätthållet av ett partiellt index i databasen. Det sista är mekanismen som gör de andra
+lagren meningsfulla — utan den spelar det ingen roll hur dyra tokens är att skaffa.
+
+**Lasttest-principen gäller ändå:** *lastgeneratorn får aldrig vara flaskhalsen.* Den
+tillämpas nu på anslutningar i stället för pussel — fd-gränser, `somaxconn` och
+`ip_local_port_range` höjs på både generatorer och noder, eftersom 20 000 WebSockets
+inte är default-territorium.
 
 ## Varför inloggning först vid betalning?
 
@@ -417,3 +429,227 @@ person som förstår och kan stå för varje ändring. Att låta ett verktyg com
 skulle göra det möjligt att få kod i repot som aldrig faktiskt lästs — vilket undergräver
 hela poängen med det muntliga försvaret, där den sökande ska kunna förklara varje rad.
 Reglen är därför en hård spärr, inte en rekommendation (se `rules.md`, avsnitt 12).
+
+---
+
+# Tillägg efter extern granskning av planen
+
+Följande punkter kom ur en granskning av systemdesignen. De är med här eftersom var och en
+är en fråga som rimligen kan komma — och flera av dem är ställen där den ursprungliga planen
+hade en lucka.
+
+## Vad händer om betalningen kommer efter att reservationen löpt ut?
+
+Det här är den enda punkten i systemet där **riktiga pengar kan försvinna**: Stripe har
+dragit beloppet, reservationen har löpt ut, stolarna är sålda till någon annan. Med
+5-minutershold och Checkout i ett annat fönster är det inte ett hypotetiskt kantfall — det
+kommer att hända.
+
+**Två mekanismer, inte en.** Primärt **fryser** vi utgången: när Checkout-sessionen skapas går
+reservationen till `pending_payment` och slutar räkna ner, med ett eget tak
+(`payment_frozen_until`, t.ex. 10 min) och **en aktiv Checkout per kötoken** så att
+frysningen inte blir ett sätt att hålla stolar gratis. Som **skyddsnät** återbetalas en
+betalning som ändå kommer efter det frysta taket automatiskt, med förklarande mejl.
+
+Frysningen löser det normala fallet. Återbetalningen finns för att även frysningen kan ta
+slut — fördröjda Stripe-retries, en flik som lämnats öppen. Att bara ha den ena hade lämnat
+ett hål.
+
+## Varför är kötoken signerad och stateless i stället för att bara ligga i Redis?
+
+Ursprungligen var Redis enda hemmet för kötokens. Men Redis är **en podd**, och
+reservationer binds till kötoken snarare än till inloggning. En Redis-omstart mitt i
+försäljningsfönstret hade därför betytt: alla 20 000 köplatser borta, alla tokens ogiltiga,
+och — värst — **alla pågående reservationer omöjliga att slutföra**, eftersom ägarens token
+inte längre existerade. Stolarna hade legat låsta till expiry medan ingen kunde köpa dem.
+
+Lösningen är att göra signaturen *tillräcklig*: tokenen är en HMAC/JWT med `queue_token_id`
+och `exp`, och validering kräver ingen uppslagning. Redis används till revokering och
+aktivitetsspårning, inte som enda sanning. Plus AOF-persistens.
+
+Resten av Redis-användningen tål en omstart — cachen byggs om, rate limits nollställs,
+ett dubbelt mejl är irriterande men ofarligt. Det var kön och tokens som var farliga.
+
+## Varför DNS-01 i stället för HTTP-01 för certifikaten?
+
+HTTP-01 genom proxad Cloudflare i Full (strict) har ett **bootstrap-problem**: Cloudflare
+kräver ett giltigt certifikat på origin för att nå det över 443 — men det är just det
+certifikatet som ska hämtas. Dessutom kan "Always Use HTTPS", botskydd på
+`/.well-known/acme-challenge/` och cachning var för sig sabotera valideringen, med
+svårlästa fel.
+
+DNS-01 kräver ingen port 80 alls, vilket matchar vår egen brandväggsdesign (endast 443 från
+Cloudflares intervall), och ger wildcard-certifikat på köpet. Vi äger redan DNS i Terraform,
+så API-tokenen finns där.
+
+**Let's Encrypt staging-issuer används tills kedjan är stabil.** LE ger 5 identiska
+certifikat per vecka, och upprepade `terraform destroy/apply` i Fas 1 bränner dem — att
+sitta certlös precis vid demon vore ett självmål.
+
+## Varför måste rate limitern läsa `CF-Connecting-IP`, och bara från Cloudflares intervall?
+
+Bakom Cloudflare ser varje request ut att komma från en CF-IP. Gör man ingenting räknas
+**hela världen som en användare** och systemet rate-limitar sig självt.
+
+Men att naivt lita på headern är värre: då kan vem som helst som når origin direkt sätta
+`CF-Connecting-IP` till ett offers adress och **låsa ut dem**. Rate limitern blir ett vapen
+mot användarna i stället för ett skydd.
+
+Därför: `use-forwarded-headers` med `proxy-real-ip-cidr` satt till Cloudflares publicerade
+intervall, så headern bara respekteras när den kommer därifrån. Samma princip gäller
+allowlistningen av lastgeneratorerna.
+
+## Varför garanterar inte `replicas: 1` att scheduler-workern är ensam?
+
+Det gör den inte — och det är lätt att tro motsatsen. En Deployment med `replicas: 1` och
+standardstrategin RollingUpdate har `maxSurge: 25%`, vilket **avrundas uppåt till 1**. Under
+varje deploy kan alltså två schemaläggare köra samtidigt, och då släpper insläppskontrollen
+in dubbelt så många.
+
+Två åtgärder: `strategy: Recreate` (den korta luckan är ofarlig för en bakgrundsprocess), och
+ett **Postgres advisory lock vid start** — håller någon annan låset avstår processen.
+Korrektheten ska inte vila på Kubernetes schemaläggning.
+
+## Varför körs migrations som ett eget Job och inte som init-container?
+
+En init-container i `booking-api` körs av *varje* podd. Med 2–10 repliker tävlar de om att
+migrera samma databas samtidigt. Ett separat Kubernetes Job med **Postgres advisory lock**,
+kört mot **båda shardarna** före rollout, gör migreringen till exakt en operation — och
+pipelinen avbryter deployen om den misslyckas.
+
+Det är också därför `rules.md §4` kräver **framåtkompatibla migrations**: en ny migration
+måste kunna köras *innan* den nya koden rullas ut, annars fungerar inte zero-downtime.
+
+## Varför nätverksvolymer i stället för k3s standardlagring?
+
+k3s default-storageclass är `local-path`, som binder volymen till den nod podden råkade
+hamna på. Två konsekvenser: **"döda shard-1 live" blir ett avbrottstest i stället för ett
+failover-test** (podden kan bara schemaläggas tillbaka på samma nod), och en förlorad nod
+tar shardens data med sig — upp till 24 timmars förlust med nattlig backup.
+
+Hetzner CSI ger nätverksvolymer som kan följa med podden. `storageClassName` skrivs ut
+**explicit** i manifesten; att förlita sig på default är precis hur sådant här missas.
+
+## Varför är `UNIQUE (event_id, seat_id)` partiellt?
+
+Den ursprungliga constrainten var rätt tänkt men för absolut: en biljett som ogiltigförklaras
+(t.ex. vid den automatiska återbetalningen ovan) hade blockerat stolen för alltid, eftersom
+raden låg kvar.
+
+Med `tickets.status` och `UNIQUE (event_id, seat_id) WHERE status = 'valid'` är garantin mot
+översäljning exakt lika stark — databasen kan fortfarande inte utfärda två *giltiga* biljetter
+för en stol — men återförsäljning blir möjlig.
+
+## Varför är QR-token en HMAC och inte en vanlig hash?
+
+Planen sa först "deterministisk hash av `order_id` + `seat_id`". Men en ren hash av två
+värden är inte hemlig: `order_id` och `seat_id` syns i API-svar till användaren. Vem som helst
+som kan gissa eller härleda ingångarna kan då **tillverka en giltig biljett**.
+
+HMAC-SHA256 med en serverhemlighet bevarar det vi var ute efter — samma indata ger samma
+token, så omkörning är idempotent — men utan nyckeln går den inte att konstruera.
+
+## Varför måste idempotensnyckeln vara scopad på vem som anropar?
+
+Utan scope räcker det att gissa eller snappa upp en nyckel för att få tillbaka **någon annans
+sparade svar**, och det svaret innehåller orderdata. Nyckeln är därför unik per
+`(event, principal, operation)`, där principal är kötoken eller user-id.
+
+Och in-flight-fallet: när INSERT-vinnaren fortfarande arbetar finns det inget sparat svar att
+returnera till de samtidiga försöken. De får **409**, inte ett tomt svar — därför asserterar
+kronjuveltestet `1 × 200 + 9 × 409` och exakt en order. Hade alla tio fått 200 med samma
+kropp vore det bara möjligt om nio av dem väntat, vilket är ett annat beteende än det vi
+påstår att vi har.
+
+## `SKIP LOCKED` — varför fel för stolar men rätt för outbox?
+
+Den här kontrasten är värd att ha klar, för båda sidorna förekommer i systemet.
+
+För **stolar** är `SKIP LOCKED` fel: användaren har valt *specifika* platser, så en överhoppad
+rad vore ett felaktigt svar ("stol 14 var ledig, men du fick stol 22"). Där används
+`ORDER BY id` + `FOR UPDATE NOWAIT`.
+
+För **outbox-relayn** är det exakt rätt: den vill ha *vilka N opublicerade rader som helst*,
+och ska inte blockera för att en annan relay-instans råkar hålla en rad. Samma verktyg,
+motsatt lämplighet — skillnaden ligger i om anroparen bryr sig om *vilka* rader den får.
+
+## Varför är WebSocket aldrig enda leveransvägen?
+
+Redis Pub/Sub är fire-and-forget: inget persisteras, ingen leverans garanteras. Deployas
+gatewayen i exakt den sekund ett insläpp publiceras försvinner meddelandet — men
+**insläppsplatsen är förbrukad**, och användaren väntar för alltid på ett besked som aldrig
+kommer.
+
+Därför principen: varje WS-meddelande måste motsvaras av tillstånd klienten kan **läsa om**
+vid återanslutning (`GET /queue/status`, `GET /reservations/:id`). WebSocket gör upplevelsen
+omedelbar; den bär aldrig ensam ansvaret för att något kommer fram. Samma lösning tar
+dessutom hand om att nedräkningen hamnar ur synk när anslutningen tappar.
+
+## Varför höjs `requests` till 250m på booking-api?
+
+HPA räknar utnyttjande mot **requests**, inte mot limits. Med `requests: 100m` visar en podd
+som drar 350m hela 350 % — och hoppar direkt till max 10 repliker vid första mätningen.
+Demon blir "2 → 10 på en gång" i stället för den gradvisa kurva som faktiskt visar att
+autoscaling fungerar. Dessutom ger CFS-throttling vid en snäv limit systematiskt sämre p99.
+
+`requests: 250m` med `limits: 500m` (2× request) ger både en läsbar kurva och utrymme för
+toppar. Kurvan mäts i Fas 6 **före** den stora körningen, inte under den.
+
+## Varför lovar vi inte nedskalning för realtime-gateway?
+
+Två skäl. Node återlämnar inte minne till operativsystemet, så RSS stannar uppe efter en
+topp — en minnesbaserad HPA skalar därför upp men i praktiken aldrig ner. Och att skala ner
+en WebSocket-gateway **dödar aktiva anslutningar**, vilket är precis fel beteende.
+
+Upp-och-ner demonstreras på booking-api, där skalningen är CPU-baserad och ärlig. Att lova
+något i en demo som synligt inte kommer att hända är sämre än att inte lova det.
+
+## Varför demonstreras inte nodskalning live?
+
+ingress-nginx körs som DaemonSet och Cloudflare pekar på specifika nod-IP:n. Nya noder får
+därför ingen trafik förrän Terraform uppdaterat A-posterna och TTL:en löpt ut — mitt i en
+demo är det minuter av ingenting.
+
+VG-kravet gäller dessutom att *antalet instanser* ökar och minskar med last, vilket HPA och
+KEDA sköter på poddnivå. Demonoderna provisioneras i förväg; nodskalning nämns som nästa steg.
+
+## Varför raderar vi inte personuppgifter på begäran?
+
+Därför att en hård radering skulle bryta mot **bokföringslagens krav på sju års bevarande**
+av bokföringsmaterial, och dessutom förstöra giltiga biljetter för evenemang som ännu inte
+ägt rum.
+
+Lösningen är **anonymisering**: personuppgifterna i `users` nollas, medan `orders` och
+`payments` behålls med ett anonymiserat `user_id`. GDPR art. 17(3)(b) tillåter uttryckligen
+fortsatt behandling när en rättslig förpliktelse kräver bevarande. Rätten till radering är
+alltså uppfylld — men den omsätts i rätt mekanism.
+
+## Vad är vårt RPO, och är det bra nog?
+
+**RPO är 24 timmar** (nattlig `pg_dump`) och **RTO är den uppmätta återställningstiden** från
+övningen i Fas 4.
+
+Det är **otillräckligt för riktig biljettförsäljning** — en krasch strax före midnatt skulle
+radera hela dagens försäljning, och hela systemets poäng är ett 15-minutersfönster.
+Point-in-time recovery med WAL-arkivering skulle ta ner RPO till sekunder, till priset av
+kontinuerlig WAL-lagring och mer driftkomplexitet.
+
+Det är ett medvetet val för projektets omfattning, inte ett förbiseende — och det står i
+`runbook.md` snarare än att upptäckas vid en följdfråga.
+
+## Varför ligger CDN, TLS-terminering, identitet och betalning utanför VPS:en?
+
+Systemet kör på vår egen VPS: applikationen, databaserna, kön, cachen och hela
+observability-stacken. Det som ligger utanför är **edge och identitet** — Cloudflare för
+TLS-terminering och cachning, Auth0 för inloggning, Stripe för betalning.
+
+Det är hur det görs i praktiken, och för två av dem finns ett konkret skäl: Stripe håller
+kortuppgifter borta från våra servrar så att vi aldrig hamnar under PCI DSS, och Cloudflare
+absorberar fan-out som en enskild VPS omöjligt kan ta.
+
+## Varför är `oversell_prevented_total` inte bara pynt?
+
+Se avsnittet ovan om varför metriken omdefinierades. Kortversionen: den ursprungliga
+formuleringen kunde aldrig öka och bevisade därför ingenting. Den nuvarande mäter något som
+faktiskt kan inträffa, och som berättar om applikationslagret har en bugg — databasen är
+sista försvarslinjen, och metriken visar hur ofta den behövde användas.
