@@ -1,0 +1,30 @@
+{
+  "name": "@tickets/realtime-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --target node22 --out-dir dist --clean",
+    "start": "node dist/index.js",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --dir tests/unit",
+    "test:integration": "vitest run --dir tests/integration"
+  },
+  "dependencies": {
+    "@fastify/websocket": "11.3.4",
+    "@tickets/domain": "workspace:*",
+    "@tickets/observability": "workspace:*",
+    "fastify": "5.12.7",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "tsup": "9.0.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5",
+    "@types/ws": "8.18.2"
+  }
+}

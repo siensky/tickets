@@ -1,0 +1,9 @@
+dist
+build
+.turbo
+coverage
+node_modules
+pnpm-lock.yaml
+.expo
+infra/terraform/**/.terraform
+docs/**/*.md

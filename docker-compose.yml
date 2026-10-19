@@ -1,0 +1,62 @@
+# Local development only. Two Postgres instances simulate the two shards
+# (docs/plan.md "Databas" — shard key is event_id; see docs/forsvar.md
+# "Vad gör man med data som saknar shard-nyckel?" for why shard-0 also
+# holds the global tables). Production runs these self-hosted in k3s
+# instead (Fas 1+), not via this file.
+services:
+  postgres-shard-0:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tickets
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-shard-0-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-shard-1:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tickets
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres-shard-1-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports:
+      - '5672:5672' # AMQP
+      - '15672:15672' # management UI (guest/guest)
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'check_running']
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  postgres-shard-0-data:
+  postgres-shard-1-data:

@@ -1,0 +1,23 @@
+{
+  "name": "@tickets/rabbit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "amqplib": "2.2.0"
+  },
+  "devDependencies": {
+    "@types/amqplib": "0.10.8",
+    "@types/node": "22.19.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

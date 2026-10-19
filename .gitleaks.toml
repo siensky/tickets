@@ -1,0 +1,18 @@
+# Gitleaks config — scans staged changes for secrets before they ever reach
+# a commit (docs/rules.md §0, §12). Repo is public, so a leaked key here
+# is a leaked key everywhere.
+title = "tickets gitleaks config"
+
+[extend]
+# Start from gitleaks' own maintained rule set and layer project-specific
+# allowlisting on top of it.
+useDefault = true
+
+[allowlist]
+description = "Known-safe paths"
+paths = [
+  '''\.env\.example$''',
+  '''pnpm-lock\.yaml$''',
+  '''docs/.*\.md$''',
+  '''infra/terraform/.*\.tfvars\.example$''',
+]
