@@ -1,0 +1,13 @@
+# docs/plan.md "Kubernetes — noder": ticketing · data · observability ·
+# ingress-nginx · keda · cert-manager. ingress-nginx och cert-manager
+# skapas av Terraform (helm.tf). observability och keda tillkommer i
+# Fas 4 respektive Fas 3. ticketing och data skapas här.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ticketing
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data

@@ -1,0 +1,19 @@
+# Kopiera till terraform.tfvars och fyll i. terraform.tfvars är
+# .gitignore:ad — committa aldrig den filen.
+#
+# Hemligheter (hcloud_token, cloudflare_api_token, tailscale_node_authkey)
+# hör INTE hemma ens här — sätt dem som miljövariabler istället, så de
+# aldrig kan hamna i en fil av misstag:
+#   export TF_VAR_hcloud_token="..."
+#   export TF_VAR_cloudflare_api_token="..."
+#   export TF_VAR_tailscale_node_authkey="..."
+
+domain_name       = "example.se"
+letsencrypt_email = "din@epost.se"
+
+ssh_public_key  = "ssh-ed25519 AAAA... din@dator"
+admin_ipv4_cidr = "203.0.113.42/32" # din egen publika IP, som /32
+
+# node_count          = 2      # 2 under utveckling, 3-4 under lasttest/demo
+# letsencrypt_use_staging = true  # byt till false när kedjan är stabil
+# tailscale_hostname  = "tickets-cp-1"

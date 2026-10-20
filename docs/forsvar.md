@@ -653,3 +653,30 @@ Se avsnittet ovan om varför metriken omdefinierades. Kortversionen: den ursprun
 formuleringen kunde aldrig öka och bevisade därför ingenting. Den nuvarande mäter något som
 faktiskt kan inträffa, och som berättar om applikationslagret har en bugg — databasen är
 sista försvarslinjen, och metriken visar hur ofta den behövde användas.
+
+## Varför öppnas 6443 aldrig i den publika brandväggen, inte ens mot ett Tailscale-intervall?
+
+Den första versionen av brandväggen öppnade 6443 mot `admin_ipv4_cidr`
+och ett Tailscale CGNAT-intervall (`100.64.0.0/10`), i tron att CI:s
+Tailscale-anslutna trafik skulle synas som en 100.64.x.x-adress mot
+nodens publika gränssnitt. Det är fel: Tailscale bygger en krypterad
+WireGuard-tunnel direkt mellan två noder i samma tailnet. Hetzners
+brandvägg filtrerar den publika nätverksgränssnittet och ser bara
+opaka, redan krypterade UDP-paket på Tailscales egen port — den vet
+inte att det finns en "6443-anslutning" inuti, och kan därför varken
+släppa igenom eller blockera den baserat på en regel för port 6443.
+En regel för ett Tailscale-CIDR på 6443 gör alltså ingenting alls.
+
+Den riktiga lösningen: control-plane-noden går själv med i tailnet
+(cloud-init, med en egen, **icke-ephemeral** auth-nyckel så den inte
+faller ur tailnet vid omstart). Både lokal kubectl och CI ansluter till
+samma tailnet och når API-servern via dess Tailscale-hostname —
+trafiken går aldrig via nodens publika IP eller genom den publika
+brandväggen. 6443 kan då strykas ur `hcloud_firewall` helt, vilket är
+en strängare och samtidigt enklare regel: inte "öppet mot ett brett
+intervall", utan "aldrig öppet publikt, oavsett källa".
+
+Konsekvensen är att *alla* som ska nå klustrets API — även
+utvecklarens egen maskin som kör `terraform apply` — måste vara
+ansluten till samma tailnet. SSH (port 22) är opåverkat och förblir
+den publika vägen in för Terraforms kubeconfig-hämtning.

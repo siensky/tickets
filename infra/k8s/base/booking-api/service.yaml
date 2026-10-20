@@ -1,0 +1,15 @@
+# docs/plan.md "Trafikväg": Service (ClusterIP) lastbalanserar över
+# friska poddar — det här är VG-kravet "minst två instanser bakom en
+# load balancer" i praktiken.
+apiVersion: v1
+kind: Service
+metadata:
+  name: booking-api
+  namespace: ticketing
+spec:
+  selector:
+    app: booking-api
+  ports:
+    - port: 80
+      targetPort: http
+      name: http

@@ -27,7 +27,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: tickets
     ports:
-      - '5433:5432'
+      - '5452:5432' # 5433/5434 upptagna av andra lokala projekt på den här maskinen
     volumes:
       - postgres-shard-1-data:/var/lib/postgresql/data
     healthcheck:

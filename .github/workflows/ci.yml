@@ -1,0 +1,13 @@
+name: CI
+
+# Körs på varje pull request och på push till alla grenar utom main —
+# main har sin egen gate inbyggd i deploy.yml (docs/rules.md §12:
+# "deploy-workflow triggas endast på push till main").
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml

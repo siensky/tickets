@@ -1,0 +1,20 @@
+#cloud-config
+# k3s agent (worker) node — går med i klustret via den privata
+# nätverksadressen till control-plane-noden, aldrig över internet.
+package_update: true
+packages:
+  - curl
+
+write_files:
+  - path: /etc/rancher/k3s/config.yaml
+    content: |
+      token: "${k3s_token}"
+      server: "https://${server_private_ip}:6443"
+      node-ip: "${private_ip}"
+      flannel-iface: "eth1"
+      kubelet-arg:
+        - "cloud-provider=external"
+    permissions: "0600"
+
+runcmd:
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" sh -s - agent

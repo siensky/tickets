@@ -1,0 +1,78 @@
+# docs/plan.md "Zero-downtime — kräver alla fyra": readinessProbe,
+# maxUnavailable: 0, preStop-hook + terminationGracePeriodSeconds, och
+# graceful shutdown i appen (redan byggt i src/index.ts — SIGTERM →
+# app.close()). HPA läggs till i Fas 6, repliker är statiska här.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: booking-api
+  namespace: ticketing
+  labels:
+    app: booking-api
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: booking-api
+  template:
+    metadata:
+      labels:
+        app: booking-api
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: booking-api
+          image: ghcr.io/siensky/tickets/booking-api:latest
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: BOOKING_API_PORT
+              value: '3000'
+          resources:
+            requests:
+              cpu: 250m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              # docs/forsvar.md "Varför kräver zero-downtime fyra saker?":
+              # ingress-nginx vet inte omedelbart att podden ska dö — ge
+              # den tid att tas ur rotation innan processen får SIGTERM.
+              exec:
+                command: ['sh', '-c', 'sleep 5']
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

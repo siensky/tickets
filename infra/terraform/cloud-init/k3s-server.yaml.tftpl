@@ -1,0 +1,67 @@
+#cloud-config
+# k3s control-plane (server) node. Installeras av k3s officiella
+# installationsskript vid boot — docs/forsvar.md "Varför infrastruktur
+# först (walking skeleton)".
+package_update: true
+packages:
+  - curl
+
+write_files:
+  - path: /etc/rancher/k3s/config.yaml
+    content: |
+      token: "${k3s_token}"
+      node-ip: "${private_ip}"
+      flannel-iface: "eth1"
+      disable:
+        - traefik
+        - servicelb
+        - cloud-controller
+      kubelet-arg:
+        - "cloud-provider=external"
+      secrets-encryption: true
+      write-kubeconfig-mode: "0600"
+    permissions: "0600"
+
+runcmd:
+  # Tailscale installeras och ansluter FÖRE k3s, så vi kan ta nodens
+  # tailnet-IP med i --tls-san. 6443 exponeras aldrig i den publika
+  # brandväggen (firewall.tf) — all åtkomst till Kubernetes-API, både
+  # lokal kubectl och CI, går via Tailscale. Se
+  # docs/forsvar.md "Varför öppnas 6443 aldrig i den publika brandväggen?".
+  - |
+    curl -fsSL https://tailscale.com/install.sh | sh
+    tailscale up --authkey="${tailscale_authkey}" --hostname="${tailscale_hostname}" --ssh
+  - |
+    for i in $(seq 1 30); do
+      TS_IP=$(tailscale ip -4 2>/dev/null) && [ -n "$TS_IP" ] && break
+      sleep 2
+    done
+    echo "$TS_IP" > /run/tailscale-ip
+  # Nodens publika IP hämtas från Hetzners metadata-tjänst vid boot, inte
+  # från Terraform — annars uppstår en självreferens (servern skulle
+  # referera till sin egen ännu-inte-skapade publika adress).
+  #
+  # cloud-provider=external + disable: cloud-controller: k3s kör INTE sin
+  # egen (no-op) cloud controller — Hetzners riktiga CCM installeras via
+  # Helm från Terraform efter att klustret är uppe (helm.tf), och sätter
+  # providerID på varje nod. Krävs av CSI-drivern för att veta vilken
+  # Hetzner-server en volym ska monteras på (docs/forsvar.md "Varför
+  # nätverksvolymer"). Noderna är otjänliga för schemaläggning tills CCM
+  # har körts — det är avsiktligt.
+  - |
+    PUBLIC_IP=$(curl -s http://169.254.169.254/hetzner/v1/metadata/public-ipv4)
+    TS_IP=$(cat /run/tailscale-ip)
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" sh -s - server \
+      --tls-san "$PUBLIC_IP" \
+      --tls-san "$TS_IP" \
+      --tls-san "${tailscale_hostname}"
+  - mkdir -p /root/.kube
+  - ln -sf /etc/rancher/k3s/k3s.yaml /root/.kube/config
+  # Vänta tills API-servern svarar (inte tills noden är fullt Ready — det
+  # blir den inte förrän Hetzners CCM satt providerID och tagit bort
+  # uninitialized-taint:en, vilket sker i ett senare Terraform-steg).
+  - |
+    for i in $(seq 1 60); do
+      /usr/local/bin/k3s kubectl get --raw=/readyz >/dev/null 2>&1 && break
+      sleep 5
+    done

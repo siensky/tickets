@@ -1,0 +1,143 @@
+name: Deploy
+
+# docs/plan.md "Deploy": bygg image → GHCR → migrations-Job mot båda
+# shardarna → kubectl apply → rollout status. Pipelinen avbryter deployen
+# om migrationen misslyckas. Triggas ENDAST på push till main
+# (docs/rules.md §12) — aldrig pull_request_target, så forkade PR:er kan
+# inte nå secrets.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_BASE: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.sha.outputs.short }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: sha
+        run: echo "short=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push booking-api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/booking-api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/booking-api:${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE_BASE }}/booking-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push migrations
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: shared/db/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/migrations:${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE_BASE }}/migrations:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    env:
+      SHA: ${{ needs.build-and-push.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Klustrets API exponeras aldrig publikt — se docs/forsvar.md
+      # "Varför öppnas 6443 aldrig i den publika brandväggen?". Köraren
+      # går med i samma tailnet som control-plane-noden under jobbets
+      # livstid (ephemeral auth-nyckel, städas bort automatiskt).
+      - uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          tags: tag:ci
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > "$HOME/.kube/config"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Verify cluster connectivity
+        run: kubectl get nodes
+
+      - name: Create namespaces
+        run: kubectl apply -f infra/k8s/base/namespaces/namespaces.yaml
+
+      # Lösenorden genereras EN gång och lever bara i klustret — ingen
+      # GitHub secret för dem. Rör aldrig en redan existerande secret
+      # (skulle göra en redan körande Postgres onåbar).
+      - name: Ensure Postgres credentials exist
+        run: |
+          for shard in 0 1; do
+            name="postgres-shard-${shard}-credentials"
+            if ! kubectl get secret "$name" -n data >/dev/null 2>&1; then
+              kubectl create secret generic "$name" -n data \
+                --from-literal=password="$(openssl rand -base64 32)"
+            fi
+          done
+
+      # Postgres (StatefulSets) måste finnas innan migrations-Jobbet kan
+      # ansluta. Appliceras direkt (inte via Kustomize-overlayn) så att
+      # booking-api inte av misstag rullas ut två gånger — en gång här
+      # med :latest, en gång i "Deploy"-steget med rätt :sha. Helt
+      # idempotent: körs steget igen senare via overlayn ändras inget.
+      - name: Deploy data layer (Postgres)
+        run: |
+          kubectl apply -f infra/k8s/base/postgres-shard-0/statefulset.yaml \
+                         -f infra/k8s/base/postgres-shard-0/service.yaml \
+                         -f infra/k8s/base/postgres-shard-1/statefulset.yaml \
+                         -f infra/k8s/base/postgres-shard-1/service.yaml
+          kubectl rollout status statefulset/postgres-shard-0 -n data --timeout=180s
+          kubectl rollout status statefulset/postgres-shard-1 -n data --timeout=180s
+
+      # migrations/job.yaml ingår MEDVETET inte i Kustomize-basen (se
+      # infra/k8s/base/kustomization.yaml) — Jobs är immutabla, så det
+      # måste raderas och återskapas för hand vid varje deploy, med det
+      # nya image-taggen insatt.
+      - name: Run migrations
+        run: |
+          kubectl delete job migrations -n ticketing --ignore-not-found
+          sed "s|:latest|:${SHA}|" infra/k8s/base/migrations/job.yaml | kubectl apply -f -
+          kubectl wait --for=condition=complete job/migrations -n ticketing --timeout=280s
+
+      - name: Set booking-api image tag
+        working-directory: infra/k8s/overlays/production
+        run: kubectl kustomize . | sed "s|/booking-api:latest|/booking-api:${SHA}|" > /tmp/manifests.yaml
+
+      - name: Deploy
+        run: kubectl apply -f /tmp/manifests.yaml
+
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/booking-api -n ticketing --timeout=180s

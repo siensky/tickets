@@ -1,0 +1,22 @@
+# Den enda miljö CI faktiskt deployar till just nu — se
+# infra/k8s/README.md. Bildtaggar sätts av deploy-workflowen vid varje
+# körning ("kustomize edit set image"), inte hårdkodade här.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# När certifikatkedjan är verifierad stabil (docs/plan.md "Certifikat —
+# DNS-01, och staging först"): byt letsencrypt-staging → production genom
+# att avkommentera patchen nedan, eller ändra direkt i
+# base/booking-api/ingress.yaml när bytet ska gälla permanent.
+#
+# patches:
+#   - target:
+#       kind: Ingress
+#       name: booking-api
+#     patch: |-
+#       - op: replace
+#         path: /metadata/annotations/cert-manager.io~1cluster-issuer
+#         value: letsencrypt-production
