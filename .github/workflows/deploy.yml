@@ -13,6 +13,16 @@ permissions:
   contents: read
   packages: write
 
+# Två merges med några minuters mellanrum ger annars två parallella
+# deploy-jobb. Det andra river migrations-Jobbet mitt i den förstas körning
+# ("kubectl delete job migrations") — node-pg-migrates advisory lock
+# skyddar bara mot samtidiga ANSLUTNINGAR, inte mot att podden dödas; låset
+# släpps med anslutningen. cancel-in-progress: false — en halvkörd
+# migration ska köras KLART, aldrig avbrytas, nästa push väntar i kö.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
 env:
   IMAGE_BASE: ghcr.io/${{ github.repository }}
 
@@ -95,16 +105,39 @@ jobs:
       - name: Create namespaces
         run: kubectl apply -f infra/k8s/base/namespaces/namespaces.yaml
 
+      # GHCR-paket pushade med GITHUB_TOKEN är PRIVATA som default — repots
+      # synlighet smittar inte av sig på paketet (verifiera under repots
+      # Packages-flik om det är oväntat). Pull-secreten byggs om och
+      # skrivs över i BÅDA namnrymderna vid varje körning, inte bara vid
+      # frånvaro som Postgres-lösenorden: GITHUB_TOKEN är giltigt bara
+      # under den här körningen, så en gammal secret pekar snart på ett
+      # utgånget token.
+      - name: Create GHCR pull secret
+        run: |
+          for ns in ticketing data; do
+            kubectl create secret docker-registry ghcr-pull-secret -n "$ns" \
+              --docker-server=ghcr.io \
+              --docker-username="${{ github.actor }}" \
+              --docker-password="${{ secrets.GITHUB_TOKEN }}" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          done
+
       # Lösenorden genereras EN gång och lever bara i klustret — ingen
       # GitHub secret för dem. Rör aldrig en redan existerande secret
       # (skulle göra en redan körande Postgres onåbar).
+      #
+      # "hex", inte "base64": base64-alfabetet innehåller +, / och = —
+      # alla tre betyder något särskilt i en "postgresql://user:PASS@host"
+      # URI (/ bryter authority-delen, + läses som mellanslag av vissa
+      # parsers). Jobbet bygger just en sådan URI (job.yaml). Samma
+      # entropi (32 byte), bara ett alfabet utan specialtecken.
       - name: Ensure Postgres credentials exist
         run: |
           for shard in 0 1; do
             name="postgres-shard-${shard}-credentials"
             if ! kubectl get secret "$name" -n data >/dev/null 2>&1; then
               kubectl create secret generic "$name" -n data \
-                --from-literal=password="$(openssl rand -base64 32)"
+                --from-literal=password="$(openssl rand -hex 32)"
             fi
           done
 
@@ -128,13 +161,49 @@ jobs:
       # nya image-taggen insatt.
       - name: Run migrations
         run: |
-          kubectl delete job migrations -n ticketing --ignore-not-found
-          sed "s|:latest|:${SHA}|" infra/k8s/base/migrations/job.yaml | kubectl apply -f -
-          kubectl wait --for=condition=complete job/migrations -n ticketing --timeout=280s
+          kubectl delete job migrations -n data --ignore-not-found --wait --cascade=foreground
+
+          sed "s|:latest|:${SHA}|" infra/k8s/base/migrations/job.yaml > /tmp/migrations-job.yaml
+          # kustomize normaliserar referenser och en bas kan skrivas om —
+          # verifiera att sed:en verkligen bytte taggen, annars har vi
+          # tyst applicerat ":latest" (och imagePullPolicy: Always kör då
+          # vad som råkar ligga där, utan att något fel syns).
+          grep -q "migrations:${SHA}" /tmp/migrations-job.yaml || {
+            echo "Image-taggen byttes inte i migrations-Jobbet (väntade migrations:${SHA})" >&2
+            exit 1
+          }
+          kubectl apply -f /tmp/migrations-job.yaml
+
+          # Egen pollning i stället för "kubectl wait --for=condition=complete":
+          # den ensam väntar ut hela 280s-timeouten även när Jobbet redan
+          # har misslyckats (condition=Failed), för att den bara bevakar
+          # Complete. Avbryt direkt när Failed=True, med loggarna kvar.
+          complete=""
+          for i in $(seq 1 56); do
+            complete=$(kubectl get job/migrations -n data -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
+            [ "$complete" = "True" ] && break
+            failed=$(kubectl get job/migrations -n data -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
+            if [ "$failed" = "True" ]; then
+              echo "Migrations-Jobbet misslyckades:" >&2
+              kubectl logs job/migrations -n data --tail=50 >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          if [ "$complete" != "True" ]; then
+            echo "Migrations-Jobbet svarade inte inom tidsgränsen (280s)." >&2
+            exit 1
+          fi
 
       - name: Set booking-api image tag
         working-directory: infra/k8s/overlays/production
-        run: kubectl kustomize . | sed "s|/booking-api:latest|/booking-api:${SHA}|" > /tmp/manifests.yaml
+        run: |
+          kubectl kustomize . | sed "s|/booking-api:latest|/booking-api:${SHA}|" > /tmp/manifests.yaml
+          # Samma verifiering som migrations-Jobbet — se kommentaren där.
+          grep -q "booking-api:${SHA}" /tmp/manifests.yaml || {
+            echo "Image-taggen byttes inte för booking-api (väntade booking-api:${SHA})" >&2
+            exit 1
+          }
 
       - name: Deploy
         run: kubectl apply -f /tmp/manifests.yaml

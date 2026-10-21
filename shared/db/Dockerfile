@@ -16,10 +16,10 @@ COPY shared/db/ shared/db/
 RUN pnpm --filter @tickets/db deploy --prod /app
 
 FROM node:22-alpine AS runtime
-RUN apk add --no-cache bash && addgroup -S app && adduser -S app -G app
+RUN apk add --no-cache bash && addgroup -S -g 10001 app && adduser -S -D -u 10001 -G app app
 WORKDIR /app
 COPY --from=prod-deps --chown=app:app /app ./
 
-USER app
+USER 10001
 ENV NODE_ENV=production
 CMD ["bash", "scripts/migrate-all-shards.sh"]

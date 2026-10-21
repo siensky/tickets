@@ -25,6 +25,22 @@ spec:
         app: booking-api
     spec:
       terminationGracePeriodSeconds: 30
+      # B16: utan den här kan båda replikerna hamna på samma nod på ett
+      # 2-nodskluster — "whenUnsatisfiable: ScheduleAnyway" (inte
+      # DoNotSchedule) eftersom en hård spridning plus maxUnavailable: 0
+      # på bara två noder hade kunnat låsa rollouten helt om en nod
+      # tillfälligt saknar kapacitet.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: booking-api
+      # ghcr.io-paket pushade med GITHUB_TOKEN är privata som default —
+      # secreten skapas/uppdateras av deploy.yml vid varje körning.
+      imagePullSecrets:
+        - name: ghcr-pull-secret
       containers:
         - name: booking-api
           image: ghcr.io/siensky/tickets/booking-api:latest
@@ -66,6 +82,12 @@ spec:
                 command: ['sh', '-c', 'sleep 5']
           securityContext:
             runAsNonRoot: true
+            # Numerisk, matchar "USER 10001" i Dockerfilen. Utan den här
+            # raden måste kubelet slå upp namnet "app" mot imagens
+            # /etc/passwd för att bevisa icke-root, vilket det INTE klarar
+            # med Alpines musl libc i vissa k3s/containerd-kombinationer —
+            # explicit UID gör introspektionen onödig helt och hållet.
+            runAsUser: 10001
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:

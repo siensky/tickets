@@ -12,9 +12,18 @@ runcmd:
   # brandväggen (firewall.tf) — all åtkomst till Kubernetes-API, både
   # lokal kubectl och CI, går via Tailscale. Se
   # docs/forsvar.md "Varför öppnas 6443 aldrig i den publika brandväggen?".
+  #
+  # VARKEN --ssh NOCH accept-dns: --ssh (Tailscale SSH) skulle ge VARJE
+  # enhet i tailnet root på noden under default-ACL:n ("*" -> "*:*") —
+  # inklusive CI-köraren (tag:ci), som därmed får mer än kubectl. Vanlig
+  # SSH på publik 22 (admin_ipv4_cidr, firewall.tf) räcker. --accept-dns=
+  # false hindrar Tailscale från att skriva om /etc/resolv.conf till sin
+  # egen resolver (100.100.100.100) — annars beror ALL extern DNS från
+  # klustrets poddar (ACME, GHCR, Stripe, Auth0, R2) tyst på tailscaled.
+  # Se docs/forsvar.md "Varför --ssh och accept-dns inte används".
   - |
     curl -fsSL https://tailscale.com/install.sh | sh
-    tailscale up --authkey="${tailscale_authkey}" --hostname="${tailscale_hostname}" --ssh
+    tailscale up --authkey="${tailscale_authkey}" --hostname="${tailscale_hostname}" --accept-dns=false
   - |
     for i in $(seq 1 30); do
       TS_IP=$(tailscale ip -4 2>/dev/null) && [ -n "$TS_IP" ] && break
@@ -76,8 +85,16 @@ runcmd:
     disable:
       - traefik
       - servicelb
-      - cloud-controller
       - local-storage
+    # "cloud-controller" är INTE ett giltigt värde i "disable:" (den
+    # listan är bara för paketerade komponenter: traefik, servicelb,
+    # local-storage, metrics-server, coredns). k3s:s inbyggda (no-op)
+    # cloud-controller-manager styrs av en egen, fristående flagga.
+    # Att skriva den som ett listvärde ignoreras TYST — inget fel, bara
+    # ingen effekt — så k3s egen CCM hade kunnat köra parallellt med
+    # Hetzners riktiga och slåss om providerID/nodadresser. Se
+    # docs/forsvar.md "Varför disable-cloud-controller, inte disable: [cloud-controller]?".
+    disable-cloud-controller: true
     kubelet-arg:
       - "cloud-provider=external"
       - "provider-id=hcloud://$INSTANCE_ID"

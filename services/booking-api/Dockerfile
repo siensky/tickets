@@ -29,10 +29,17 @@ COPY apps/web/package.json apps/web/
 RUN pnpm install --frozen-lockfile
 
 # --- source: full källkod för booking-api och dess workspace-beroenden ---
+#
+# HELA shared/ kopieras, inte bara de @tickets/*-paket booking-api råkar
+# importera i dag (domain, observability). Två handhållna listor — vad
+# som faktiskt importeras, och vad "deps"-steget ovan installerat
+# package.json för — höll på att glida isär: första importen av
+# @tickets/db eller @tickets/schemas i Fas 2 hade gett ett förvirrande
+# byggfel ("Cannot find module") i stället för att bara fungera.
+# shared/* är ren TS-källkod, kostar nästan ingenting extra att kopiera.
 FROM deps AS source
-COPY tsconfig.base.json ./
-COPY shared/domain/ shared/domain/
-COPY shared/observability/ shared/observability/
+COPY tsconfig.base.json tsup.base.ts ./
+COPY shared/ shared/
 COPY services/booking-api/ services/booking-api/
 
 # --- build: bunta booking-api med tsup ---
@@ -47,13 +54,13 @@ RUN pnpm --filter @tickets/booking-api deploy --prod /app
 
 # --- runtime: minimal, icke-root ---
 FROM node:22-alpine AS runtime
-RUN addgroup -S app && adduser -S app -G app
+RUN addgroup -S -g 10001 app && adduser -S -D -u 10001 -G app app
 WORKDIR /app
 COPY --from=prod-deps --chown=app:app /app/node_modules ./node_modules
 COPY --from=prod-deps --chown=app:app /app/package.json ./package.json
 COPY --from=build --chown=app:app /repo/services/booking-api/dist ./dist
 
-USER app
+USER 10001
 ENV NODE_ENV=production
 EXPOSE 3000
 CMD ["node", "dist/index.js"]

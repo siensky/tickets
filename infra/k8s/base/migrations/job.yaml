@@ -10,13 +10,17 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: migrations
-  namespace: ticketing
+  namespace: data
 spec:
   backoffLimit: 2
   activeDeadlineSeconds: 300
   template:
     spec:
       restartPolicy: Never
+      # Se infra/k8s/base/booking-api/deployment.yaml: samma GHCR-secret,
+      # skapad i båda namnrymderna av deploy.yml.
+      imagePullSecrets:
+        - name: ghcr-pull-secret
       containers:
         - name: migrate
           image: ghcr.io/siensky/tickets/migrations:latest
@@ -44,6 +48,12 @@ spec:
               memory: 256Mi
           securityContext:
             runAsNonRoot: true
+            # Numerisk, matchar "USER 10001" i Dockerfilen. Utan den här
+            # raden måste kubelet slå upp namnet "app" mot imagens
+            # /etc/passwd för att bevisa icke-root, vilket det INTE klarar
+            # med Alpines musl libc i vissa k3s/containerd-kombinationer —
+            # explicit UID gör introspektionen onödig helt och hållet.
+            runAsUser: 10001
             allowPrivilegeEscalation: false
             capabilities:
               drop: ['ALL']

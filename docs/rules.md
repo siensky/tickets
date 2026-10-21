@@ -184,3 +184,9 @@ fallgrop. Inga kommentarer som upprepar vad koden redan säger.
 - **Aldrig köra migrations mot produktion**
 - **Kör testerna innan något påstås fungera** — rapportera ärligt vad som hände
 - **Vid osäkerhet mellan två vägar: fråga, välj inte tyst**
+
+## Appendix — undantag från §8 ("minst ett lyckat och ett misslyckat fall")
+
+Parameterlösa GET-endpoints utan indata (`/health/live`, `/health/ready`, `/metrics`) har
+inget domänfel att testa — "misslyckat fall" för dem betyder fel metod/väg, inte ogiltig
+indata. Testas med en POST mot samma path och/eller en okänd path, båda förväntade `404`.

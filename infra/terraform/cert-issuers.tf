@@ -70,9 +70,15 @@ resource "null_resource" "cluster_issuers" {
   }
 }
 
-# Vilken issuer Ingress-resurserna faktiskt pekar på, styrt av
-# var.letsencrypt_use_staging (docs/plan.md "Certifikat — DNS-01, och
-# staging först"). Används som annotation-värde i infra/k8s-manifesten.
-output "cert_manager_cluster_issuer" {
-  value = var.letsencrypt_use_staging ? "letsencrypt-staging" : "letsencrypt-production"
-}
+# cluster-issuer-annotationen i infra/k8s/base/booking-api/ingress.yaml
+# är HÅRDKODAD till letsencrypt-staging, inte styrd av den här filen eller
+# av var.letsencrypt_use_staging. De två hör ihop (docs/plan.md
+# "Certifikat") men finns i två olika system (Terraform vs. Kustomize) med
+# ingen koppling mellan dem — en output härifrån som ingen läste var värre
+# än ingen output, för den såg ut som en koppling som inte fanns.
+#
+# Bytet från staging till production är en ENGÅNGSHÄNDELSE i projektets
+# liv, inte något som behöver automatiseras. Se docs/runbook.md
+# "Byt till produktionscertifikat" för ordningen (båda hälfterna, i rätt
+# ordning, verifierat med curl) — se även docs/forsvar.md "Varför är
+# Cloudflares SSL-läge kopplat till letsencrypt_use_staging?".

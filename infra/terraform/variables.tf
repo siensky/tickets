@@ -7,7 +7,18 @@ variable "hcloud_token" {
 }
 
 variable "cloudflare_api_token" {
-  description = "Cloudflare API-token med Zone:DNS:Edit för domänens zon. Sätts via TF_VAR_cloudflare_api_token."
+  description = "Cloudflare API-token för TERRAFORM: Zone:DNS:Edit + Zone Settings:Edit + Cache Rules:Edit (SSL-läge, cache-regel, DNS-poster). Används ALDRIG i klustret — se cloudflare_dns_token för den smalare token cert-manager får. Sätts via TF_VAR_cloudflare_api_token."
+  type        = string
+  sensitive   = true
+}
+
+# Separat, SMALARE token för cert-managers DNS-01-secret i klustret
+# (helm.tf). Den breda token ovan styr Terraform själv — sätts den i
+# klustret också har en podd rätt att ändra zonens SSL-läge och
+# cache-regler, inte bara DNS-poster för ACME-utmaningen. Se
+# docs/forsvar.md "Varför två Cloudflare-tokens?".
+variable "cloudflare_dns_token" {
+  description = "Cloudflare API-token för CERT-MANAGER i klustret: ENDAST Zone:DNS:Edit för domänens zon. Sätts via TF_VAR_cloudflare_dns_token."
   type        = string
   sensitive   = true
 }
@@ -56,7 +67,7 @@ variable "server_type" {
 }
 
 variable "node_count" {
-  description = "Antal noder i klustret. 2 under utveckling (1 server + 1 agent), 3-4 under lasttest/demo. Se docs/plan.md \"Kostnadsstrategi\"."
+  description = "Antal GRUNDNODER i klustret (kontrollplan + ordinarie workers), ALDRIG demonoder — se demo_node_count. 2 under utveckling (1 server + 1 agent). Se docs/plan.md \"Kostnadsstrategi\"."
   type        = number
   default     = 2
 
@@ -64,6 +75,24 @@ variable "node_count" {
     condition     = var.node_count >= 2
     error_message = "Minst 2 noder krävs: en k3s-server (control plane) och minst en agent."
   }
+}
+
+# Separat resurs (hcloud_server.demo_workers), separat servertyp — INTE
+# en höjning av node_count. node_count delar server_type med
+# control-plane-noden; att skala upp den för lasttest hade tvingat
+# Terraform att storleksändra (och därmed starta om) klustrets hjärna
+# mitt i demoförberedelserna. Se docs/forsvar.md "Varför en egen resurs
+# för demonoder, inte bara fler worker_count?".
+variable "demo_node_count" {
+  description = "Antal EXTRA noder, bara för lasttest/demo. 0 i vardagen, 2-3 inför Fas 6:s stora körning. Rivs efteråt (sätt tillbaka till 0 och apply)."
+  type        = number
+  default     = 0
+}
+
+variable "demo_server_type" {
+  description = "Hetzner servertyp för demonoderna (docs/plan.md \"Lasttest\" föreslår CPX32 — mer CPU/minne än den löpande CPX22 för att tåla lastgenerering utan att bli flaskhalsen själv)."
+  type        = string
+  default     = "cpx32"
 }
 
 variable "k3s_version" {

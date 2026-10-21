@@ -846,3 +846,224 @@ första certifikat — ett självförvållat avbrott, inte ett verkligt fel.
 när `letsencrypt_use_staging` sätts till `false`. De två besluten — vilket cert som utfärdas
 och hur strikt Cloudflare validerar det — kan annars råka hamna i otakt, och den kombinationen
 är tyst tills man faktiskt provar att nå sajten.
+
+## Varför --ssh och accept-dns inte används
+
+`tailscale up --ssh` aktiverar Tailscale SSH, som med tailnetets **default-ACL** ("*" →
+"*:*") gör noden nåbar via SSH från **alla** enheter i tailnet — inklusive CI-köraren, som
+ansluter med `tag:ci` bara för att nå 6443. En komprometterad Action, eller ett elakt
+transitivt beroende i workflowen, skulle då få root på hela noden, inte bara `kubectl`-åtkomst.
+Det urholkar också brandväggskommentaren i `firewall.tf` som säger att SSH är låst till
+`admin_ipv4_cidr` — Tailscale SSH bryr sig inte om den porten eller den brandväggen alls.
+Vanlig SSH på publik 22, redan tillåten för utvecklarens IP, räcker för nodfelsökning.
+
+(En alternativ, snävare lösning är en tailnet-ACL som begränsar `tag:ci` till `tcp:6443` mot
+just den här noden — det är inte kodifierat här eftersom projektet inte har någon
+Tailscale-provider i Terraform, men det är ett förberett svar om frågan kommer upp muntligt.)
+
+`tailscale up` utan `--accept-dns=false` skriver om nodens `/etc/resolv.conf` till
+`100.100.100.100` (Tailscales egen resolver). CoreDNS i k3s forwardar vidare dit, så **all**
+extern DNS från klustrets poddar — ACME-utmaningar, GHCR-pulls, och i senare faser Stripe,
+Auth0, R2 — beror tyst på att `tailscaled` kör. Stannar den processen slutar klustret nå
+internet, och felet syns inte som ett DNS-problem utan som att allt annat plötsligt är trasigt.
+`--accept-dns=false` håller nodens egen DNS-konfiguration opåverkad; Tailscale behövs bara för
+6443, inte för namnuppslagning.
+
+## Varför två Cloudflare-tokens?
+
+Terraform behövde höjda rättigheter (DNS:Edit räckte inte för `cloudflare_zone_setting`
+eller `cloudflare_ruleset`) — men den token som löste det höjdes för **hela** projektet,
+inklusive den secret som cert-manager läser inne i klustret (helm.tf). Resultatet: en podd i
+klustret fick rätt att ändra zonens SSL-läge och cache-regler, inte bara DNS-poster för en
+ACME-utmaning — mer access än den uppgiften någonsin behöver.
+
+`cloudflare_dns_token` är en andra, smalare token (endast Zone:DNS:Edit) som ENDAST
+cert-managers secret använder. `cloudflare_api_token` behåller sin bredare scope men lämnar
+aldrig Terraform-processen. Samma princip som de två Tailscale-nycklarna: rätt mängd access
+för vad som faktiskt konsumerar den, inte en delad, överdimensionerad hemlighet därför att det
+var enklast att återanvända en som redan fanns.
+
+## Varför disable-cloud-controller, inte disable: [cloud-controller]?
+
+k3s:s `disable:`-lista tar bara namn på **paketerade komponenter** — `traefik`, `servicelb`,
+`local-storage`, `metrics-server`, `coredns`. k3s:s inbyggda (no-op) cloud-controller-manager
+är inte en av dem; den styrs av en egen, fristående flagga: `disable-cloud-controller: true`
+i config.yaml (`--disable-cloud-controller` på kommandoraden).
+
+Ett okänt värde i `disable:`-listan ger **inget fel** — k3s ignorerar det tyst. Så
+`disable: [cloud-controller]` såg ut som att göra sitt jobb (inget klagade), men gjorde
+ingenting: k3s egen CCM hade kunnat fortsätta köra i samma process som Hetzners riktiga CCM
+(helm.tf), och de två hade kunnat slåss om att sätta `providerID` och nodadresser. Det är
+exakt den typen av bugg som är tyst tills nästa k3s-uppgradering eller en dag med konstiga
+node-events ingen kan förklara.
+
+## Varför ett regressionstest för lagergränserna?
+
+En extern granskning hittade att `eslint-plugin-boundaries` inte bevakade något alls — noll
+lint-fel på en avsiktlig överträdelse. Den verkliga orsaken visade sig vara **djupare och
+allvarligare** än det första, rimliga antagandet (fel API-form för v7).
+
+Felsökningen avslöjade två oberoende buggar, båda tysta (konfigurationen parsades utan fel,
+den bara tillämpades aldrig):
+
+1. **`boundaries/element-types` + `rules`** (v6-syntax) parsas av v7 utan fel, varnar en gång
+   i konsolen om att den är deprecated, och tillämpas sedan **inte alls**. Bytt till
+   `boundaries/dependencies` + `policies`, v7:s faktiska API.
+2. **Den verkliga boven:** eslint-plugin-boundaries resolver (via `eslint-module-utils`) kan
+   bara se lokala imports den kan slå upp på disk. Hela kodbasen skriver `.js` på importer av
+   `.ts`-källfiler (Node-ESM-konventionen — `from './routes/health.js'` i varje `index.ts`).
+   Utan en TypeScript-medveten resolver är **varenda sådan import** — alltså praktiskt taget
+   alla cross-layer-imports i hela repot — "okänd" för pluginet (filen `x.js` finns inte, bara
+   `x.ts`), och en okänd target hoppas tyst över som standard (`checkUnknownLocals: false`).
+   Det var inte `service-root`-mönstret som var den dominanta orsaken, även om det också var
+   fel (se nedan) — det var att **ingenting pluginet någonsin såg en enda verklig
+   cross-layer-import**, oavsett lager.
+
+   Löst med `eslint-import-resolver-typescript` (ny devDependency) och
+   `settings['import/resolver'] = { typescript: true }`.
+
+3. **`service-root`-mönstret** (`services/*/src/index.ts`) hade fortfarande fel: element-
+   deskriptorer matchar **mappar** som default (`mode: "folder"`), och biblioteket lägger då
+   till `/**/*` på mönstret internt — ett filmönster kan då aldrig matcha. `mode: "file"`
+   krävs (varnar om deprecation, men är bevisat korrekt — `partialMatch: false` utan `mode`
+   gav ett eget separat varningsmeddelande: "Element patterns match folders, not individual
+   files", och klassificerade filen inte alls).
+
+**Verifierat, inte bara läst i källkoden:** `boundaries/debug: { enabled: true }` slogs på
+tillfälligt för att se exakt vilket steg som gav `isUnknown: true` på importmålet — det var så
+den verkliga (resolver-)orsaken hittades, inte genom att gissa på dokumentationen.
+
+`scripts/verify-boundaries-enforcement.mjs` är regressionstestet reviewern efterfrågade:
+skriver en avsiktlig `controllers → repositories`-import till en riktig service, lintar den
+med ESLints Node-API, och **felar skriptet** om `boundaries/dependencies` inte flaggar den.
+Körs som ett eget steg i `test.yml`, direkt efter `pnpm lint` — eftersom `pnpm lint` själv
+passerar lika grönt oavsett om koden är korrekt eller om regeln inte bevakar något, vilket är
+precis vad som hände här i flera månader utan att synas.
+
+(`eslint-import-resolver-typescript` drog in en native binär, `unrs-resolver`, vars
+installations-script pnpm blockerar som standard av säkerhetsskäl — se
+`pnpm-workspace.yaml`s `allowBuilds`. Skriptet kör bara `napi-postinstall`, som bara väljer
+rätt förkompilerad binär för plattformen; samma mönster och förtroendenivå som `esbuild`,
+redan godkänd i samma fil.)
+
+## Varför tre redaction-djup, och varför remoteAddress?
+
+Verifierat genom att faktiskt starta booking-api och göra ett riktigt anrop: Fastifys
+standard-serializer loggar `remoteAddress`/`remotePort` på **varje** request, i klartext —
+`plan.md`s löfte ("IP-adresser anonymiseras i loggar") höll inte innan den här raden fanns.
+
+`fast-redact` (pinos redaction-motor) har inget rekursivt jokertecken — `*.password` matchar
+exakt EN nivå ner, aldrig djupare. `context.payment.cardNumber`, en helt realistisk form när
+`BaseError.context` börjar fyllas i Fas 2, är två nivåer — och skulle ha passerat orört. Samma
+fältnamnslista genereras därför på tre uttryckliga djup (`*`, `*.*`, `*.*.*`) i stället för att
+låtsas att ett jokertecken bevakar "allt under *", vilket det inte gör. Verifierat med en
+riktig loggrad: `remoteAddress`, `remotePort` och ett tvånivåers `cardNumber` maskeras alla
+korrekt.
+
+## Varför startupProbe och anti-affinity på Postgres?
+
+`pg_isready` som enda liveness-signal svarar inte under WAL-återuppspelning efter en hård
+nedstängning. Utan en `startupProbe` dödar kubelet instansen efter ~75s (default
+`failureThreshold`×`periodSeconds` på liveness), recovery börjar om från noll, och loopen
+upprepar sig i all evighet — en stor WAL hinner aldrig spelas upp klart. `startupProbe` ger
+5 minuter (30×10s) innan liveness/readiness börjar räknas över huvud taget, samma resonemang
+som redan gäller applikationens egen liveness.
+
+De två shardarna delade ingen etikett att anti-affinitera på (`app` och `shard` skiljer
+dem åt per design — annars kunde man inte rikta trafik mot en specifik shard). En delad
+`component: postgres`-etikett plus `podAntiAffinity` (preferred, inte required — en hård regel
+hade kunnat låsa schemaläggningen om bara en nod är tillgänglig) gör att de föredrar olika
+noder på det 2-nodskluster vi kör. Utan den kunde "döda shard-1 live" (Fas 6, failover-demot)
+råka landa på samma nod som shard-0 och bli ett totalavbrott i stället för det bevis på
+nätverksvolymernas värde det ska vara.
+
+## Varför är integrationstestet bara en platshållare i Fas 1?
+
+`services/booking-api/tests/integration/placeholder.test.ts` kontrollerar bara att `start`
+exporteras — inget mer. Det är inte en bugg som ska gömmas, det är ett ärligt uttryck för var
+projektet faktiskt står: Fas 1 har inget riktigt databasschema och inga riktiga endpoints
+(bara `/health/*` och `/metrics`) att integrationstesta mot än. `test:integration` är grönt
+i pipelinen, vilket uppfyller G-kravet "integrationstester körs i pipelinen" **strukturellt**
+— men den enda rimliga, rules.md §8-trogna vägen framåt är att vänta med RIKTIGA
+Testcontainers-baserade tester tills Fas 2 ger dem något genuint att testa (schema,
+reservationstransaktionen). Att hitta på ett påstått integrationstest mot ingenting nu hade
+varit precis den sortens teater rules.md §8 ("inga mockade databaser") finns för att
+förhindra — bara i en annan form.
+
+Värt att säga rakt ut om det kommer upp muntligt: en grön pipeline bevisar här bara att
+*stegen körs*, inte att de testar något meningsfullt än. Det blir sant först i Fas 2.
+
+## Varför en egen resurs för demonoder, inte bara fler worker_count?
+
+`node_count` och `hcloud_server.workers`/`control_plane` delar `server_type`. Att höja
+`node_count` för att få fler, starkare noder inför ett lasttest hade tvingat Terraform att
+**storleksändra samtliga noder, inklusive control-plane** — en omstart av klustrets hjärna
+mitt i demoförberedelserna, helt i onödan eftersom control-plane-noden aldrig är flaskhalsen
+under ett lasttest.
+
+`hcloud_server.demo_workers` är en separat resurs med sin egen variabel
+(`demo_server_type`, default CPX32 — mer CPU/minne än den löpande CPX22) och sitt eget antal
+(`demo_node_count`, default 0). De går med i klustret som vanliga k3s-agents (samma
+cloud-init-mall som `hcloud_server.workers`) och får DNS-poster precis som alla andra noder,
+men existerar bara när de medvetet beställs — och rivs lika medvetet efteråt genom att sätta
+`demo_node_count` tillbaka till 0 och köra `apply` igen.
+
+## Varför togs staging-overlayn bort?
+
+`infra/k8s/overlays/staging/kustomization.yaml` var en EXAKT kopia av `base/` — samma
+namnrymder, samma `api.<domän>`-host, samma resursnamn, utan en enda patch som faktiskt
+skilde den från produktion. Den gjorde inget av sig själv (`kustomize` renderar bara text,
+tar inga beslut), men applicerad av misstag mot ett riktigt kluster (`kubectl apply -k
+overlays/staging` i stället för `.../production`) hade den skrivit rakt över produktionen
+den påstod sig vara ett alternativ till.
+
+Borttagen i stället för att fyllas med ett hastigt `namePrefix` eller
+namnrymdsöverskrivning — en riktig stagingmiljö behöver mer än ett prefix (egna secrets, en
+egen Postgres-instans, ett eget värdnamn för TLS-certifikatet) och inget av det är planerat
+än. En tom platshållare som ser ut som den gör något är en risk utan att vara till någon
+nytta; den läggs till den dagen en riktig stagingmiljö faktiskt behövs.
+
+## Varför realpathSync + fileURLToPath för isMain-kontrollen?
+
+Verifierat med en riktig symlänk: `process.argv[1]` skrivs INTE symlänk-upplöst av Node, medan
+`import.meta.url` (och därmed `new URL(...).pathname`, procentkodad) skrivs det. En symlänk in
+i entry-filen räcker för att de två ska divergera trots att det är exakt samma fil — testat
+mot en symlänk i en sökväg med mellanslag (`/tmp/dir with space/entry.ts`), som dessutom
+triggar skillnaden i procentkodning.
+
+I dagens körtidsimage (`WORKDIR /app`, `CMD ["node","dist/index.js"]`, ingen symlänk i vägen)
+råkar de matcha — det är därför felet aldrig synts. Men går de isär exekveras modulen utan att
+`isMain`-grenen körs: processen avslutas med kod 0, utan ett enda loggutrymme, och podden
+startas om i evighet utan diagnostik att felsöka mot. `realpathSync` (löser symlänkar på båda
+sidor) + `fileURLToPath` (korrekt avkodning, i stället för manuell `.pathname`) stänger gapet.
+Verifierat: samma symlänk+mellanslag-scenario som innan skulle fått processen att tyst
+avsluta startar nu servern korrekt och svarar `200 {"status":"ok"}`.
+
+## Varför en delad tsup.base.ts?
+
+Fem byte-identiska kopior av `EXTERNAL_NPM_PACKAGES` och `defineConfig(...)` — verifierat med
+`shasum`. `*.config.ts` är globalt ignorerat i `eslint.config.js`, så en divergens mellan
+kopiorna (en tjänst glömmer ett nytt npm-paket i listan) hade varit tyst tills just den
+tjänstens build gav ett runtime-fel om ett saknat externt paket.
+
+`tsup.base.ts` ligger i repo-roten och exporterar `createServiceTsupConfig()`; varje tjänsts
+`tsup.config.ts` är nu tre rader som anropar den. Listan måste fortfarande hållas i synk för
+hand (tsup kan inte härleda "alla npm-paket som förekommer någonstans i shared/*" automatiskt)
+— men nu finns en lista att hålla i synk, inte fem. Verifierat: alla fem tjänster bygger
+fortfarande korrekt (bundlar `@tickets/*`, håller `fastify`/`pino`/`prom-client` externa), och
+`services/booking-api/Dockerfile` (det enda som finns än) uppdaterat att kopiera
+`tsup.base.ts` in i build-steget.
+
+## Varför ignoreras tsup.base.ts explicit i ESLint?
+
+Upptäckt av `husky`s pre-commit-hook, inte av mig: `tsup.base.ts` ligger i repo-roten och
+matchar inte `**/*.config.ts` (namnet är `.base.ts`, inte `.config.ts`). Ingen `tsconfig.json`
+har repo-roten i sitt `include`, så typescript-eslints `projectService` kunde inte
+typkontrollera filen alls — `Parsing error: ... was not found by the project service` — och
+`git commit` blockerades av `lint-staged`.
+
+Tillagd i `ignores`-listan explicit, i samma kategori som `*.config.ts`: det är
+byggverktygskonfiguration, inte applikationskod som lagergränserna (`boundaries/dependencies`)
+ska gälla för. Verifierat genom att återskapa exakt det `lint-staged` kör
+(`eslint --fix tsup.base.ts ...`) — ger nu bara samma ofarliga "File ignored"-varning som de
+andra `*.config.ts`-filerna redan hade.

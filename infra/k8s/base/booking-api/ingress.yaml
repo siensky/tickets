@@ -1,6 +1,7 @@
 # docs/plan.md "Certifikat — DNS-01, och staging först": letsencrypt-staging
 # tills kedjan är stabil, byt till letsencrypt-production en gång
-# (cert-manager.io/cluster-issuer-annotationen nedan).
+# (cert-manager.io/cluster-issuer-annotationen nedan, och
+# docs/runbook.md "Byt till produktionscertifikat").
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -18,6 +19,26 @@ spec:
     - host: api.tikknet.se
       http:
         paths:
+          # /metrics är INTE publikt tillgängligt. path: / Prefix nedan
+          # skulle annars ruta det rakt till booking-api — i dag läcker
+          # det bara Node-defaults, i Fas 4 läcker det sålda biljetter,
+          # ködjup och oversell_prevented_total. Prometheus skrapar
+          # podd-IP direkt (via ServiceMonitor i Fas 4), den går aldrig
+          # via ingress och behöver inte den här vägen.
+          #
+          # En exakt path-regel till en Service UTAN endpoints (nedan) gör
+          # jobbet deklarativt: ingress-nginx matchar den mer specifika
+          # regeln före "/" och svarar 503 — ingen snippet-annotation
+          # behövs (de är avstängda som standard i nyare ingress-nginx av
+          # säkerhetsskäl, och att slå på dem globalt för en enskild path
+          # är en större ändring än den här läckan motiverar).
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: metrics-blackhole
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:
@@ -25,3 +46,15 @@ spec:
                 name: booking-api
                 port:
                   number: 80
+---
+# Avsiktligt utan "selector" — får därmed aldrig några Endpoints.
+# ingress-nginx svarar 503 på allt som routas hit, vilket är precis
+# poängen: en path som ska vara stängd ska inte ha en riktig backend.
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-blackhole
+  namespace: ticketing
+spec:
+  ports:
+    - port: 80

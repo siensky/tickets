@@ -166,6 +166,12 @@ resource "helm_release" "cert_manager" {
 
 # Cloudflare API-token för DNS-01, som en secret i cert-manager-namnrymden
 # — cert-manager letar efter den när ClusterIssuer refererar den.
+#
+# var.cloudflare_dns_token, INTE var.cloudflare_api_token: den breda token
+# som Terraform själv använder (SSL-läge, cache-regler, DNS) hör aldrig
+# hemma i klustret — en podd som kan läsa den secreten skulle annars kunna
+# göra allt det en angripare kan göra med Terraforms egna uppgifter. Se
+# docs/forsvar.md "Varför två Cloudflare-tokens?".
 resource "kubernetes_secret" "cloudflare_api_token" {
   depends_on = [kubernetes_namespace.cert_manager]
   metadata {
@@ -173,6 +179,6 @@ resource "kubernetes_secret" "cloudflare_api_token" {
     namespace = "cert-manager"
   }
   data = {
-    api-token = var.cloudflare_api_token
+    api-token = var.cloudflare_dns_token
   }
 }

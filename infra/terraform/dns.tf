@@ -31,6 +31,11 @@ resource "cloudflare_dns_record" "api" {
 locals {
   node_ipv4_by_name = merge(
     { (hcloud_server.control_plane.name) = hcloud_server.control_plane.ipv4_address },
-    { for s in hcloud_server.workers : s.name => s.ipv4_address }
+    { for s in hcloud_server.workers : s.name => s.ipv4_address },
+    # Demonoderna kör ingress-nginx (DaemonSet) precis som alla andra
+    # noder — utan en DNS-post för dem får de aldrig trafik från
+    # Cloudflare, och hela poängen med att provisionera dem i förväg
+    # (docs/plan.md "Nodnivå") går förlorad.
+    { for s in hcloud_server.demo_workers : s.name => s.ipv4_address }
   )
 }

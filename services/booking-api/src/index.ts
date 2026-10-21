@@ -11,6 +11,8 @@
  * connections and waits for in-flight requests to finish before exiting.
  */
 import { createHttpMetrics, createLogger, createRegistry } from '@tickets/observability';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import Fastify, {
   type FastifyBaseLogger,
   type RawReplyDefaultExpression,
@@ -25,7 +27,14 @@ const SERVICE_NAME = 'booking-api';
 export async function start(): Promise<void> {
   const logger = createLogger({ serviceName: SERVICE_NAME });
   const registry = createRegistry(SERVICE_NAME);
-  createHttpMetrics(registry);
+  // RED-metriken (createHttpMetrics) registrerades i registret men
+  // ingenting ökade dem — de hade stått still på noll för alltid, vilket
+  // är SÄMRE än att sakna dem helt: i Fas 4 bygger Grafana-paneler på
+  // dem, och en platt nolla läser som "ingen trafik" i stället för "inte
+  // instrumenterat". routeOptions.url (inte den råa, dynamiska URL:en)
+  // håller kardinaliteten nere — en path med :id i hade annars gett en
+  // egen tidsserie per unikt ID.
+  const httpMetrics = createHttpMetrics(registry);
 
   const app = Fastify<
     RawServerDefault,
@@ -36,6 +45,16 @@ export async function start(): Promise<void> {
 
   registerHealthRoutes(app);
   registerMetricsRoutes(app, registry);
+
+  app.addHook('onResponse', async (request, reply) => {
+    const route = request.routeOptions.url ?? 'unmatched';
+    const status = String(reply.statusCode);
+    httpMetrics.requestsTotal.inc({ method: request.method, route, status });
+    httpMetrics.requestDuration.observe(
+      { method: request.method, route, status },
+      reply.elapsedTime / 1000,
+    );
+  });
 
   const port = Number(process.env['BOOKING_API_PORT'] ?? 3000);
   await app.listen({ port, host: '0.0.0.0' });
@@ -50,7 +69,17 @@ export async function start(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
-const isMain = process.argv[1] === new URL(import.meta.url).pathname;
+// process.argv[1] skrivs INTE symlänk-upplöst, medan import.meta.url
+// skrivs det — och är dessutom procentkodad. De två kan därför skilja
+// sig åt trots att det ÄR samma fil (verifierat: skiljer sig redan på
+// en symlänk till en sökväg utanför /tmp på macOS). I avbyggnadsimagen
+// (WORKDIR /app, CMD ["node","dist/index.js"]) råkar de matcha i dag —
+// men går de isär tyst avslutas processen med kod 0, utan ett enda
+// loggutrymme, och podden startas om i evighet utan diagnostik.
+// realpathSync + fileURLToPath normaliserar båda sidor på samma sätt.
+const isMain =
+  process.argv[1] !== undefined &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 if (isMain) {
   start().catch((error: unknown) => {
     // eslint-disable-next-line no-console -- logger isn't guaranteed to exist if start() failed early

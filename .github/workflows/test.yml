@@ -26,6 +26,14 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # Verifierar att eslint-plugin-boundaries (rules.md §1: lagergränser)
+      # faktiskt bevakar något. "pnpm lint" ovan passerar grönt även om
+      # ingenting bevakas — noll fel ser likadant ut oavsett om det beror
+      # på korrekt kod eller en obevakad regel. Se docs/forsvar.md "Varför
+      # ett regressionstest för lagergränserna?".
+      - name: Verify layer-boundary enforcement
+        run: node scripts/verify-boundaries-enforcement.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

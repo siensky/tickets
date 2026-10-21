@@ -11,10 +11,27 @@ Gjort enligt den manuella guiden du fått i chatten:
 
 - Domän köpt och tillagd som en zon i Cloudflare
 - Hetzner Cloud-konto + API-token (Read & Write)
-- Cloudflare-konto + API-token (Zone:DNS:Edit, specifik zon)
+- Cloudflare-konto + **två** API-tokens, med olika scope (se nedan)
 - Tailscale-konto, med **två** auth-nycklar (se nedan)
 - En SSH-nyckel (`ssh-keygen -t ed25519` om du inte redan har en)
 - `terraform`, `helm`, `kubectl` installerade lokalt
+
+### Två Cloudflare-tokens, inte en
+
+`TF_VAR_cloudflare_api_token` (Terraform) och `TF_VAR_cloudflare_dns_token` (cert-manager i
+klustret) har olika scope av samma skäl som de två Tailscale-nycklarna nedan har olika
+inställningar — rätt mängd access för vad som faktiskt använder den, inte en gemensam,
+överdimensionerad token.
+
+| Token                          | Används av                      | Zon-rättigheter                                        | Miljövariabel                       |
+| ------------------------------- | -------------------------------- | ------------------------------------------------------- | ------------------------------------ |
+| `cloudflare_api_token`          | Terraform (denna maskin/CI apply) | DNS:Edit, Zone Settings:Edit, Cache Rules:Edit            | `TF_VAR_cloudflare_api_token`        |
+| `cloudflare_dns_token`          | cert-manager (en secret i klustret) | **Endast** DNS:Edit                                      | `TF_VAR_cloudflare_dns_token`        |
+
+Skapa båda i Cloudflare Dashboard → **My Profile → API Tokens → Create Token → Custom
+token**, scopade mot din specifika zon. Den bredare token i klustret vore annars ett sätt för
+en komprometterad podd att ändra zonens SSL-läge eller cache-regler, inte bara DNS-poster för
+en ACME-utmaning. Se docs/forsvar.md "Varför två Cloudflare-tokens?".
 
 ### Två Tailscale-nycklar, inte en
 
@@ -46,6 +63,7 @@ cp terraform.tfvars.example terraform.tfvars
 
 export TF_VAR_hcloud_token="..."
 export TF_VAR_cloudflare_api_token="..."
+export TF_VAR_cloudflare_dns_token="..."
 export TF_VAR_tailscale_node_authkey="..."
 
 terraform init
@@ -71,8 +89,11 @@ kubectl get nodes
 ```
 
 (Kräver att din maskin är ansluten till tailnet — se ovan. Kubeconfig-
-filens serveradress pekar på nodens Tailscale-hostname, inte dess
-publika IP.)
+filens serveradress pekar på nodens Tailscale-IP — lästs av från noden
+själv vid varje hämtning, inte på dess MagicDNS-hostname. Se
+docs/forsvar.md "Varför pekar kubeconfig på Tailscale-IP i stället för
+MagicDNS-namnet?" — en riven och återskapad nod håller sitt namn men inte
+sin IP, och MagicDNS hade då pekat på en död nod.)
 
 Noderna visas som `NotReady` eller med en `uninitialized`-taint tills
 Hetzners Cloud Controller Manager (installeras av samma `apply`) har satt

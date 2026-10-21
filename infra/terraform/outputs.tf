@@ -8,6 +8,11 @@ output "worker_ipv4s" {
   value       = [for s in hcloud_server.workers : s.ipv4_address]
 }
 
+output "demo_worker_ipv4s" {
+  description = "Publika IPv4-adresser för demo-/lasttestnoderna (demo_node_count). Tom lista i vardagen."
+  value       = [for s in hcloud_server.demo_workers : s.ipv4_address]
+}
+
 output "all_node_ipv4s" {
   description = "Samtliga noders publika IPv4 — det som DNS-posterna för api.<domän> pekar på."
   value       = values(local.node_ipv4_by_name)

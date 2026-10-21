@@ -72,3 +72,37 @@ resource "hcloud_server" "workers" {
 
   depends_on = [hcloud_server.control_plane]
 }
+
+# Lasttest-/demonoder — en SEPARAT resurs med en EGEN servertyp
+# (var.demo_server_type, t.ex. CPX32), inte en höjning av node_count.
+# Skalade man i stället node_count skulle Terraform storleksändra
+# SAMTLIGA noder (server_type gäller alla), inklusive control-plane —
+# en omstart av klustrets hjärna mitt i demoförberedelserna. Se
+# docs/plan.md "Lasttest" och docs/forsvar.md "Varför en egen resurs för
+# demonoder, inte bara fler worker_count?".
+#
+# IP-intervallet (10.0.1.30+) kolliderar inte med hcloud_server.workers
+# (10.0.1.20 + index), som i praktiken aldrig blir fler än ett fåtal.
+resource "hcloud_server" "demo_workers" {
+  count        = var.demo_node_count
+  name         = "tickets-demo-worker-${count.index + 1}"
+  server_type  = var.demo_server_type
+  image        = "ubuntu-24.04"
+  location     = var.hcloud_location
+  ssh_keys     = [hcloud_ssh_key.admin.id]
+  firewall_ids = [hcloud_firewall.cluster.id]
+
+  network {
+    network_id = hcloud_network.cluster.id
+    ip         = "10.0.1.${30 + count.index}"
+  }
+
+  user_data = templatefile("${path.module}/cloud-init/k3s-agent.yaml.tftpl", {
+    k3s_token         = random_password.k3s_token.result
+    k3s_version       = var.k3s_version
+    private_ip        = "10.0.1.${30 + count.index}"
+    server_private_ip = local.control_plane_private_ip
+  })
+
+  depends_on = [hcloud_server.control_plane]
+}

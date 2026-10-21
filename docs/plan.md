@@ -442,6 +442,9 @@ testa — och misslyckas då av fel skäl. Kör försöken genom en pool.
 ## Infrastruktur
 
 - **Hetzner Cloud + Terraform + k3s**
+- **Tailscale:** enda vägen till Kubernetes-API:et (6443) — aldrig exponerat i den publika
+  brandväggen, varken för utvecklarens egen `kubectl` eller GitHub Actions. Se
+  `docs/adr/0001-tailscale-cluster-access.md`
 - **Kostnadsstrategi:** 2× CPX22 (2 vCPU, 4 GB, AMD — cx-serien var inte tillgänglig på
   kontot, se `docs/forsvar.md`), €0,078/h kombinerat ≈ 550 kr/mån vid kontinuerlig drift.
   Eftersom klustret inte körs 24/7 (mesta utvecklingen lokalt, se nedan) blir faktisk
@@ -504,7 +507,7 @@ testa — och misslyckas då av fel skäl. Kör försöken genom en pool.
 I vila: ~1,5 vCPU och ~3,5 GB i requests. **PWA:n körs inte i klustret** — den byggs till
 statiska filer på `cdn.<domän>`.
 
-**Manifest:** Kustomize — bas per tjänst + overlays för staging och produktion.
+**Manifest:** Kustomize — bas per tjänst + en produktions-overlay. Ingen staging-overlay finns (den fanns som en exakt, odifferentierad kopia av bas, och togs bort — se docs/forsvar.md "Varför togs staging-overlayn bort?"); läggs till den dagen en riktig stagingmiljö faktiskt planeras.
 **`storageClassName` skrivs ut explicit** i varje StatefulSet. k3s default är `local-path`,
 som binder volymen till noden: då blir "döda shard-1 live" ett avbrottstest i stället för ett
 failover-test, och en förlorad nod tar shardens data med sig. Att förlita sig på default är
@@ -551,10 +554,13 @@ Kubernetes.
   är CPU-baserat och ärligt
 - **KEDA på `notification-worker`**: RabbitMQ-ködjup, 100 meddelanden/podd, min 1, max 10
 - **`behavior.scaleDown.stabilizationWindowSeconds: 60`** (standard är 300)
-- **Nodnivå:** Terraform-variabel `worker_count`. **Demonoderna provisioneras i förväg** —
-  ingress-nginx är DaemonSet och Cloudflare pekar på specifika nod-IP:n, så nya noder får
-  ingen trafik förrän A-posterna uppdaterats och TTL:en löpt ut. VG kräver att
-  *instansantalet* skalar, vilket HPA och KEDA sköter; nodnivå nämns som nästa steg
+- **Nodnivå:** egen Terraform-resurs (`hcloud_server.demo_workers`, variabler
+  `demo_node_count` + `demo_server_type`, default CPX32) — INTE `node_count`, som delar
+  `server_type` med control-plane-noden och hade tvingat en omstart av klustrets hjärna för
+  att skala. **Demonoderna provisioneras i förväg** — ingress-nginx är DaemonSet och
+  Cloudflare pekar på specifika nod-IP:n, så nya noder får ingen trafik förrän A-posterna
+  uppdaterats och TTL:en löpt ut. VG kräver att *instansantalet* skalar, vilket HPA och KEDA
+  sköter; nodnivå nämns som nästa steg
 
 **NetworkPolicies** mellan tjänster. **PodDisruptionBudget `maxUnavailable: 1`** för
 enreplikstjänster (eller ingen PDB) — `minAvailable: 1` kan aldrig uppfyllas med en podd,
@@ -712,7 +718,12 @@ AI:ns verktyg scopas serversidigt till inloggad användare
 - **gitleaks** som pre-commit-hook och i CI
 - **k3s `--secret-encryption`** påslaget
 - **Deploy-workflow triggas endast på push till main**, aldrig `pull_request_target`
-- Containrar: `runAsNonRoot: true`, read-only rotfilsystem, droppade capabilities
+- Containrar: `runAsNonRoot: true`, read-only rotfilsystem, droppade capabilities.
+  **Avsiktligt undantag: Postgres-poddarna.** Den officiella `postgres:17-alpine`-imagens
+  entrypoint kör som root vid start för att `chown` datakatalogen innan den själv växlar till
+  `postgres`-användaren (`gosu`) — ett `securityContext` som tvingar `runAsNonRoot` hade gjort
+  containern oförmögen att starta. Gäller bara databasens egen image, inte
+  applikationscontainrarna
 - Lockfile committad, pinnade versioner
 
 ### GDPR
@@ -837,7 +848,9 @@ rörs sist.
    notification-worker på ködjup
 6. **Under lasten: deploya booking-api** → visa noll misslyckade requests
 7. Kön töms → poddarna skalar ner igen *(booking-api — gatewayen lovar ingen nedskalning)*
-8. **Döda shard-1 live** → evenemang på shard-0 fortsätter fungera, och podden
-   schemaläggs om på en annan nod tack vare nätverksvolymerna
+8. **Döda shard-1 live** (poddnivå — `kubectl delete pod`, ALDRIG en hel nod: Cloudflare
+   Free gör inga origin-healthchecks, så en död nod hade fått ~halva trafiken att fortsätta
+   gå dit och få 5xx tills `terraform apply` kört) → evenemang på shard-0 fortsätter fungera,
+   och podden schemaläggs om på en annan nod tack vare nätverksvolymerna
 9. **Trigga ett larm** → visa att det landar i Slack
 10. Visa återställningsövningen och dess tidtagning, och **RPO/RTO som medvetet val**
