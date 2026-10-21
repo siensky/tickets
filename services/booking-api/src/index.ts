@@ -65,8 +65,17 @@ export async function start(): Promise<void> {
     await app.close();
     process.exit(0);
   };
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  const shutdownOrCrash = (signal: string): void => {
+    shutdown(signal).catch((error: unknown) => {
+      // `void shutdown(...)` alone leaves a rejection here unhandled,
+      // which crashes the process via Node's default behaviour — same
+      // end result, but with a raw stack trace instead of a log line.
+      logger.error({ signal, error }, 'error during graceful shutdown');
+      process.exit(1);
+    });
+  };
+  process.on('SIGTERM', () => shutdownOrCrash('SIGTERM'));
+  process.on('SIGINT', () => shutdownOrCrash('SIGINT'));
 }
 
 // process.argv[1] skrivs INTE symlänk-upplöst, medan import.meta.url

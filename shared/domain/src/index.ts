@@ -5,3 +5,4 @@
  * subdirectories directly.
  */
 export * from './errors.js';
+export * from './outbox.js';

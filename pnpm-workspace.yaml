@@ -10,6 +10,14 @@ allowBuilds:
   # av applikationskoden. Se docs/forsvar.md "Varför behöver
   # eslint-plugin-boundaries en TypeScript-resolver?".
   unrs-resolver: true
+  # Transitiva beroenden till `testcontainers` (docs/rules.md §8: riktiga
+  # Postgres/RabbitMQ-containrar i integrationstester, inga mockar).
+  # ssh2 + cpu-features används för att prata med en Docker-daemon över
+  # SSH (fjärrvärdar/rootless Docker), protobufjs av docker-modem. Bara
+  # byggskript, körs aldrig av applikationskoden.
+  ssh2: true
+  cpu-features: true
+  protobufjs: true
 minimumReleaseAgeExclude:
   - '@tanstack/query-core@5.104.5'
   - '@tanstack/react-query@5.104.5'
