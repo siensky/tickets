@@ -1,0 +1,21 @@
+# Fas 1-scope (docs/plan.md "Fasplan"): booking-api + Postgres (båda
+# shards, tomt schema). Redis och RabbitMQ läggs till i Fas 3 när
+# realtime-gateway respektive notification-worker byggs.
+#
+# migrations/job.yaml ingår MEDVETET inte här — Jobs är immutabla i
+# Kubernetes, så att låta Kustomize hantera det skulle krascha vid varje
+# omdeploy (samma Job-namn, nytt image-tag, ingen patch tillåten på ett
+# redan skapat Job). Jobbet appliceras separat av deploy-workflowen,
+# med "kubectl delete --ignore-not-found" före varje ny körning.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespaces/namespaces.yaml
+  - postgres-shard-0/statefulset.yaml
+  - postgres-shard-0/service.yaml
+  - postgres-shard-1/statefulset.yaml
+  - postgres-shard-1/service.yaml
+  - booking-api/deployment.yaml
+  - booking-api/service.yaml
+  - booking-api/ingress.yaml

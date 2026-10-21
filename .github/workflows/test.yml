@@ -1,0 +1,46 @@
+name: Test
+
+# Återanvänds av både ci.yml (varje PR) och deploy.yml (push till main)
+# — docs/rules.md §8: lint, typecheck, unit, integration i pipelinen.
+on:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      # Verifierar att eslint-plugin-boundaries (rules.md §1: lagergränser)
+      # faktiskt bevakar något. "pnpm lint" ovan passerar grönt även om
+      # ingenting bevakas — noll fel ser likadant ut oavsett om det beror
+      # på korrekt kod eller en obevakad regel. Se docs/forsvar.md "Varför
+      # ett regressionstest för lagergränserna?".
+      - name: Verify layer-boundary enforcement
+        run: node scripts/verify-boundaries-enforcement.mjs
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Integration tests
+        # Testcontainers kräver Docker, som finns förinstallerat på
+        # GitHub-hostade ubuntu-körare — inget extra steg behövs.
+        run: pnpm test:integration

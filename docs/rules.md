@@ -62,9 +62,15 @@ Används den av *flera* → `shared/domain/`.
 - **All SQL i `repositories/`** — ingen SQL någon annanstans
 - Varje skrivande operation i en transaktion
 - **`ORDER BY` alltid före `FOR UPDATE`**
-- **Shard-nyckel (`event_id`) i varje fråga mot shardad tabell**
+- **Shard-nyckel (`event_id`) i varje fråga mot shardad tabell** — och `event_id` finns på
+  *varje* shardad tabell, även när värdet går att härleda. Routinglagret måste veta vilken
+  shard raden ligger på innan frågan ställs.
+- **Tider som systemet litar på beräknas alltid med `now()` från Postgres** — aldrig i
+  appservern (klockskev mellan poddar), aldrig i klienten (förfalskbart). Gäller
+  `expires_at`, `release_after`, `payment_frozen_until`.
 - **Migrations måste vara framåtkompatibla** — en ny migration ska kunna köras *innan*
-  ny kod deployas. Annars fungerar inte zero-downtime.
+  ny kod deployas. Annars fungerar inte zero-downtime. De körs som ett eget Job med
+  advisory lock, mot båda shardarna, aldrig som init-container.
 
 ## 5. Felhantering
 
@@ -178,3 +184,9 @@ fallgrop. Inga kommentarer som upprepar vad koden redan säger.
 - **Aldrig köra migrations mot produktion**
 - **Kör testerna innan något påstås fungera** — rapportera ärligt vad som hände
 - **Vid osäkerhet mellan två vägar: fråga, välj inte tyst**
+
+## Appendix — undantag från §8 ("minst ett lyckat och ett misslyckat fall")
+
+Parameterlösa GET-endpoints utan indata (`/health/live`, `/health/ready`, `/metrics`) har
+inget domänfel att testa — "misslyckat fall" för dem betyder fel metod/väg, inte ogiltig
+indata. Testas med en POST mot samma path och/eller en okänd path, båda förväntade `404`.

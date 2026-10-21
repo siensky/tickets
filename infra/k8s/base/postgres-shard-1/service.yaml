@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-shard-1
+  namespace: data
+spec:
+  clusterIP: None # headless — StatefulSet-standard, varje podd får ett stabilt DNS-namn
+  selector:
+    app: postgres-shard-1
+  ports:
+    - port: 5432
+      targetPort: 5432

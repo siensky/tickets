@@ -9,9 +9,11 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "migrate": "bash scripts/migrate-all-shards.sh"
   },
   "dependencies": {
+    "node-pg-migrate": "9.0.0",
     "pg": "8.23.1"
   },
   "devDependencies": {

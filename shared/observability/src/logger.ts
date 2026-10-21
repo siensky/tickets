@@ -10,18 +10,35 @@ import pino, { type Logger as PinoLogger } from 'pino';
 
 export type Logger = PinoLogger;
 
+const SENSITIVE_FIELD_NAMES = [
+  'password',
+  'token',
+  'accessToken',
+  'refreshToken',
+  'secret',
+  'apiKey',
+  'cardNumber',
+  'cvc',
+];
+
+// fast-redact (pinos redaction-motor) stödjer inget rekursivt jokertecken
+// — "*.password" matchar EN nivå ner, aldrig djupare. "context.payment.
+// cardNumber" (två nivåer, ett realistiskt djup för BaseError.context i
+// Fas 2) skulle alltså passera orört. Vi genererar därför samma fält på
+// flera uttryckliga djup i stället för att låtsas ett jokertecken
+// bevakar "allt under *" — det gör inte det.
+const DEPTHS = ['*', '*.*', '*.*.*'];
 const REDACT_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
   'res.headers["set-cookie"]',
-  '*.password',
-  '*.token',
-  '*.accessToken',
-  '*.refreshToken',
-  '*.secret',
-  '*.apiKey',
-  '*.cardNumber',
-  '*.cvc',
+  // Fastifys standard-serializer loggar klientens IP/port på VARJE
+  // request (verifierat: "req":{"remoteAddress":"127.0.0.1",...} i
+  // klartext) — plan.md lovar "IP-adresser anonymiseras i loggar", och
+  // det höll inte innan den här raden fanns.
+  'req.remoteAddress',
+  'req.remotePort',
+  ...DEPTHS.flatMap((depth) => SENSITIVE_FIELD_NAMES.map((field) => `${depth}.${field}`)),
 ];
 
 export interface CreateLoggerOptions {

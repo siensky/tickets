@@ -1,0 +1,131 @@
+#cloud-config
+# k3s control-plane (server) node. Installeras av k3s officiella
+# installationsskript vid boot — docs/forsvar.md "Varför infrastruktur
+# först (walking skeleton)".
+package_update: true
+packages:
+  - curl
+
+runcmd:
+  # Tailscale installeras och ansluter FÖRE k3s, så vi kan ta nodens
+  # tailnet-IP med i --tls-san. 6443 exponeras aldrig i den publika
+  # brandväggen (firewall.tf) — all åtkomst till Kubernetes-API, både
+  # lokal kubectl och CI, går via Tailscale. Se
+  # docs/forsvar.md "Varför öppnas 6443 aldrig i den publika brandväggen?".
+  #
+  # VARKEN --ssh NOCH accept-dns: --ssh (Tailscale SSH) skulle ge VARJE
+  # enhet i tailnet root på noden under default-ACL:n ("*" -> "*:*") —
+  # inklusive CI-köraren (tag:ci), som därmed får mer än kubectl. Vanlig
+  # SSH på publik 22 (admin_ipv4_cidr, firewall.tf) räcker. --accept-dns=
+  # false hindrar Tailscale från att skriva om /etc/resolv.conf till sin
+  # egen resolver (100.100.100.100) — annars beror ALL extern DNS från
+  # klustrets poddar (ACME, GHCR, Stripe, Auth0, R2) tyst på tailscaled.
+  # Se docs/forsvar.md "Varför --ssh och accept-dns inte används".
+  - |
+    curl -fsSL https://tailscale.com/install.sh | sh
+    tailscale up --authkey="${tailscale_authkey}" --hostname="${tailscale_hostname}" --accept-dns=false
+  - |
+    for i in $(seq 1 30); do
+      TS_IP=$(tailscale ip -4 2>/dev/null) && [ -n "$TS_IP" ] && break
+      sleep 2
+    done
+    echo "$TS_IP" > /run/tailscale-ip
+  # Hetzners cloud-init konfigurerar ENDAST det publika interfacet. Det
+  # privata nätverket finns som ett NIC men lämnas DOWN och utan adress —
+  # vi måste sätta upp det själva, annars startar kubelet aldrig (node-ip
+  # pekar på en adress som inte finns) medan api-servern ändå svarar:
+  # klustret ser igång ut men har noll noder. Interfacenamnet får inte
+  # hårdkodas (eth1/enp7s0/ens10 varierar med servertyp och image) — det
+  # slås upp via MAC-adressen från metadata-tjänsten. MTU 1450 krävs av
+  # Hetzners privata nätverk. Se docs/forsvar.md "Varför konfigurerar
+  # cloud-init Hetzners privata nätverk själv?".
+  - |
+    MAC=$(curl -s --max-time 10 http://169.254.169.254/hetzner/v1/metadata/private-networks | awk '/mac_address:/ {print $2; exit}')
+    if [ -z "$MAC" ]; then
+      echo "FEL: metadata rapporterade ingen MAC för privat nätverk." >&2
+      exit 1
+    fi
+    PRIV_IFACE=$(ip -o link show | grep -i "$MAC" | awk '{sub(/:$/,"",$2); print $2; exit}')
+    if [ -z "$PRIV_IFACE" ]; then
+      echo "FEL: hittade inget interface med MAC $MAC." >&2
+      ip -o link show >&2
+      exit 1
+    fi
+    cat > /etc/netplan/60-hetzner-private.yaml <<NETPLAN
+    network:
+      version: 2
+      ethernets:
+        $PRIV_IFACE:
+          dhcp4: true
+          mtu: 1450
+    NETPLAN
+    chmod 600 /etc/netplan/60-hetzner-private.yaml
+    netplan apply
+    for i in $(seq 1 60); do
+      ip -o -4 addr show dev "$PRIV_IFACE" | grep -q "${private_ip}/" && break
+      sleep 2
+    done
+    if ! ip -o -4 addr show dev "$PRIV_IFACE" | grep -q "${private_ip}/"; then
+      echo "FEL: ${private_ip} dök aldrig upp på $PRIV_IFACE." >&2
+      ip -o -4 addr show >&2
+      exit 1
+    fi
+    INSTANCE_ID=$(curl -s --max-time 10 http://169.254.169.254/hetzner/v1/metadata/instance-id)
+    case "$INSTANCE_ID" in
+      ''|*[!0-9]*)
+        echo "FEL: metadata gav inget numeriskt instance-id (fick: '$INSTANCE_ID')." >&2
+        exit 1
+        ;;
+    esac
+    mkdir -p /etc/rancher/k3s
+    cat > /etc/rancher/k3s/config.yaml <<CONFIG
+    token: "${k3s_token}"
+    node-ip: "${private_ip}"
+    flannel-iface: "$PRIV_IFACE"
+    disable:
+      - traefik
+      - servicelb
+      - local-storage
+    # "cloud-controller" är INTE ett giltigt värde i "disable:" (den
+    # listan är bara för paketerade komponenter: traefik, servicelb,
+    # local-storage, metrics-server, coredns). k3s:s inbyggda (no-op)
+    # cloud-controller-manager styrs av en egen, fristående flagga.
+    # Att skriva den som ett listvärde ignoreras TYST — inget fel, bara
+    # ingen effekt — så k3s egen CCM hade kunnat köra parallellt med
+    # Hetzners riktiga och slåss om providerID/nodadresser. Se
+    # docs/forsvar.md "Varför disable-cloud-controller, inte disable: [cloud-controller]?".
+    disable-cloud-controller: true
+    kubelet-arg:
+      - "cloud-provider=external"
+      - "provider-id=hcloud://$INSTANCE_ID"
+    secrets-encryption: true
+    write-kubeconfig-mode: "0600"
+    CONFIG
+    chmod 600 /etc/rancher/k3s/config.yaml
+  # Nodens publika IP hämtas från Hetzners metadata-tjänst vid boot, inte
+  # från Terraform — annars uppstår en självreferens (servern skulle
+  # referera till sin egen ännu-inte-skapade publika adress).
+  #
+  # cloud-provider=external + disable: cloud-controller: k3s kör INTE sin
+  # egen (no-op) cloud controller — Hetzners riktiga CCM installeras via
+  # Helm från Terraform efter att klustret är uppe (helm.tf).
+  #
+  # provider-id sätts explicit till hcloud://<instance-id>. k3s sätter
+  # annars k3s://<nodnamn>, vilket CCM inte kan tolka ("Provider ID does
+  # not have one of the expected prefixes"), och fältet är oföränderligt
+  # efter nodregistrering — det måste alltså vara rätt från början.
+  # Se docs/forsvar.md "Varför sätter cloud-init providerID själv?".
+  - |
+    PUBLIC_IP=$(curl -s http://169.254.169.254/hetzner/v1/metadata/public-ipv4)
+    TS_IP=$(cat /run/tailscale-ip)
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" sh -s - server \
+      --tls-san "$PUBLIC_IP" \
+      --tls-san "$TS_IP" \
+      --tls-san "${tailscale_hostname}"
+  - mkdir -p /root/.kube
+  - ln -sf /etc/rancher/k3s/k3s.yaml /root/.kube/config
+  - |
+    for i in $(seq 1 60); do
+      /usr/local/bin/k3s kubectl get --raw=/readyz >/dev/null 2>&1 && break
+      sleep 5
+    done

@@ -20,7 +20,12 @@ infra/terraform/**/*.tfstate
 infra/terraform/**/*.tfstate.*
 infra/terraform/**/*.tfvars
 !infra/terraform/**/*.tfvars.example
-infra/terraform/**/.terraform.lock.hcl
+# .terraform.lock.hcl is NOT gitignored — it has no secrets, only provider
+# checksums, and should be committed for reproducible provider versions.
+
+# Fetched kubeconfig — contains the cluster's client certificate/key.
+infra/terraform/**/.kube/
+infra/terraform/**/.kube-config-raw
 
 # Logs
 *.log

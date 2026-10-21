@@ -22,6 +22,13 @@ export default tseslint.config(
       '**/*.config.cjs',
       '**/*.config.mjs',
       '**/*.config.ts',
+      // Delad tsup-bas i repo-roten (tsup.base.ts) — matchar inte
+      // "*.config.ts", och ingen tsconfig.json täcker filer i repo-
+      // roten, så typescript-eslints projectService kan inte
+      // typkontrollera den ("was not found by the project service").
+      // Samma kategori fil som *.config.ts: byggverktygskonfiguration,
+      // inte applikationskod som lagergränserna gäller.
+      'tsup.base.ts',
       'infra/**',
     ],
   },
@@ -37,6 +44,20 @@ export default tseslint.config(
     },
     plugins: { boundaries },
     settings: {
+      // eslint-plugin-boundaries resolver (via eslint-module-utils) kan
+      // bara se lokala imports det kan slå upp på disk. Hela kodbasen
+      // skriver ".js" på TypeScript-källfiler (Node-ESM-konventionen,
+      // se index.ts: "from './routes/health.js'") — utan den här
+      // resolvern tolkas VARJE sådan import som "okänd" (filen
+      // "dummy.repository.js" finns inte, bara "dummy.repository.ts"),
+      // och en okänd target hoppas tyst över som standard
+      // (checkUnknownLocals: false). Det var INTE primärt service-roots
+      // mode-inställning som gjorde regeln verkningslös — det var detta.
+      // Verifierat med 'boundaries/debug' och ett avsiktligt brott, se
+      // eslint.config.test.ts.
+      'import/resolver': {
+        typescript: true,
+      },
       'boundaries/elements': [
         { type: 'routes', pattern: 'services/*/src/routes/**' },
         { type: 'controllers', pattern: 'services/*/src/controllers/**' },
@@ -44,7 +65,14 @@ export default tseslint.config(
         { type: 'repositories', pattern: 'services/*/src/repositories/**' },
         { type: 'mappers', pattern: 'services/*/src/mappers/**' },
         { type: 'schemas-layer', pattern: 'services/*/src/schemas/**' },
-        { type: 'service-root', pattern: 'services/*/src/index.ts', partialMatch: false },
+        // mode: 'file' krävs — default är 'folder', som tolkar mönstret
+        // som en MAPP och lägger till "/**/*" på det internt. Ett
+        // filmönster (index.ts) kan då aldrig matcha något, så
+        // service-root klassificerades aldrig: en controllers-fil som
+        // importerar från repositories/ (förbjudet nedan) flaggades
+        // korrekt, men index.ts fick ALDRIG en type alls — "from" eller
+        // "to" mot service-root slog därför aldrig in, obemärkt.
+        { type: 'service-root', pattern: 'services/*/src/index.ts', mode: 'file' },
         { type: 'shared', pattern: 'shared/*/src/**' },
       ],
     },
@@ -78,35 +106,77 @@ export default tseslint.config(
         { max: 50, skipBlankLines: true, skipComments: true, IIFEs: true },
       ],
 
-      // rules.md §1: layer boundaries.
-      'boundaries/element-types': [
+      // rules.md §1: layer boundaries. "boundaries/dependencies" +
+      // "policies", INTE "boundaries/element-types" + "rules" — den
+      // gamla formen är deprecated i v7 och varnar om det (icke-blockerande),
+      // men det riktigt farliga är att v7 fortfarande PARSAR den utan fel
+      // och sedan inte tillämpar den — noll lint-fel såg ut som "inga
+      // brott" när det egentligen var "ingenting bevakas". Verifierat med
+      // ett avsiktligt regressionstest, se eslint.config.test.ts.
+      'boundaries/dependencies': [
         'error',
         {
           default: 'disallow',
-          rules: [
-            { from: 'routes', allow: ['controllers', 'schemas-layer', 'shared'] },
+          policies: [
             {
-              from: 'controllers',
-              allow: ['services-layer', 'schemas-layer', 'mappers', 'shared'],
+              from: { element: { type: 'routes' } },
+              allow: {
+                to: {
+                  element: { types: { anyOf: ['controllers', 'schemas-layer', 'shared'] } },
+                },
+              },
             },
             {
-              from: 'services-layer',
-              allow: ['repositories', 'mappers', 'schemas-layer', 'shared'],
+              from: { element: { type: 'controllers' } },
+              allow: {
+                to: {
+                  element: {
+                    types: { anyOf: ['services-layer', 'schemas-layer', 'mappers', 'shared'] },
+                  },
+                },
+              },
             },
-            { from: 'repositories', allow: ['mappers', 'shared'] },
-            { from: 'mappers', allow: ['shared'] },
-            { from: 'schemas-layer', allow: ['shared'] },
             {
-              from: 'service-root',
-              allow: [
-                'routes',
-                'controllers',
-                'services-layer',
-                'repositories',
-                'mappers',
-                'schemas-layer',
-                'shared',
-              ],
+              from: { element: { type: 'services-layer' } },
+              allow: {
+                to: {
+                  element: {
+                    types: { anyOf: ['repositories', 'mappers', 'schemas-layer', 'shared'] },
+                  },
+                },
+              },
+            },
+            {
+              from: { element: { type: 'repositories' } },
+              allow: { to: { element: { types: { anyOf: ['mappers', 'shared'] } } } },
+            },
+            {
+              from: { element: { type: 'mappers' } },
+              allow: { to: { element: { type: 'shared' } } },
+            },
+            {
+              from: { element: { type: 'schemas-layer' } },
+              allow: { to: { element: { type: 'shared' } } },
+            },
+            {
+              from: { element: { type: 'service-root' } },
+              allow: {
+                to: {
+                  element: {
+                    types: {
+                      anyOf: [
+                        'routes',
+                        'controllers',
+                        'services-layer',
+                        'repositories',
+                        'mappers',
+                        'schemas-layer',
+                        'shared',
+                      ],
+                    },
+                  },
+                },
+              },
             },
           ],
         },
@@ -143,7 +213,7 @@ export default tseslint.config(
     // Frontend apps don't follow the service layer structure.
     files: ['apps/**/*.{ts,tsx}'],
     rules: {
-      'boundaries/element-types': 'off',
+      'boundaries/dependencies': 'off',
     },
   },
 );

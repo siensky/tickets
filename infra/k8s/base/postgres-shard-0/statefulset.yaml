@@ -1,0 +1,103 @@
+# docs/plan.md "Databas": två Postgres-poddar, shard-nyckel event_id.
+# docs/forsvar.md "Varför nätverksvolymer": storageClassName skrivs ut
+# explicit (hcloud-volumes, Hetzner CSI) — k3s default local-path binder
+# volymen till noden, vilket gör failover-demon till ett avbrottstest.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-shard-0
+  namespace: data
+  labels:
+    app: postgres-shard-0
+    shard: '0'
+    component: postgres
+spec:
+  serviceName: postgres-shard-0
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-shard-0
+  template:
+    metadata:
+      labels:
+        app: postgres-shard-0
+        shard: '0'
+        component: postgres
+    spec:
+      # B16: de två shardarna delar labeln "component: postgres" just för
+      # den här preferensen — "app" och "shard" skiljer dem åt, så det
+      # fanns ingen gemensam etikett att anti-affinitera på innan. Utan
+      # den kan båda shardarna hamna på samma nod på ett 2-nodskluster,
+      # och "döda shard-1 live" blir då ett totalavbrott i stället för det
+      # failover-test det ska vara. "preferred", inte "required" — ett
+      # krav hade kunnat göra schemaläggningen omöjlig om bara en nod är
+      # tillgänglig (t.ex. under underhåll).
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values: [postgres]
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_DB
+              value: tickets
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-shard-0-credentials
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          # B15: utan en startupProbe kan livenessProbe döda podden MITT I
+          # WAL-återuppspelning efter en hård nedstängning (pg_isready
+          # svarar inte under recovery). Kubelet dödar då instansen efter
+          # ~75s, recovery börjar om från noll, och loopen upprepar sig i
+          # all evighet. startupProbe ger generöst om tid (5 min) INNAN
+          # liveness/readiness börjar räknas över huvud taget — samma
+          # resonemang som forsvar.md redan för om applikationens egen
+          # liveness, applicerat på databasen.
+          startupProbe:
+            exec:
+              command: ['pg_isready', '-U', 'postgres']
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ['pg_isready', '-U', 'postgres']
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ['pg_isready', '-U', 'postgres']
+            periodSeconds: 20
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']
+        storageClassName: hcloud-volumes
+        resources:
+          requests:
+            storage: 10Gi

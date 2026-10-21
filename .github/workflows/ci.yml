@@ -1,0 +1,53 @@
+name: CI
+
+# Körs på varje pull request och på push till alla grenar utom main —
+# main har sin egen gate inbyggd i deploy.yml (docs/rules.md §12:
+# "deploy-workflow triggas endast på push till main").
+#
+# "pull_request" och "push" (branches-ignore: main) triggar BÅDA för en
+# push till en branch som redan har en öppen PR — utan concurrency-
+# gruppen körs test.yml två gånger parallellt för samma commit. Ingen av
+# jobben har sidoeffekter (bara lint/typecheck/test/build), så
+# cancel-in-progress: true är ofarligt här — annat än i deploy.yml, som
+# aldrig får avbrytas mitt i en migration.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  # Bygger (men pushar ALDRIG) samtliga Dockerfiles. Fyra nya
+  # build-stegskedjor (pnpm deploy --prod, tsup-bundling, non-root-steg)
+  # testades tidigare första gången på push: main — alltså EFTER merge,
+  # under en deploy som redan är igång. En PR som bryter en Dockerfile
+  # ska synas här, inte i produktionsdeployen.
+  docker-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - dockerfile: services/booking-api/Dockerfile
+            tag: booking-api
+          - dockerfile: shared/db/Dockerfile
+            tag: migrations
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.tag }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          tags: ${{ matrix.tag }}:ci
+          cache-from: type=gha,scope=${{ matrix.tag }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.tag }}

@@ -1,0 +1,59 @@
+# docs/plan.md "Deploy": migrations-Job mot båda shardarna, med Postgres
+# advisory lock (sköts av node-pg-migrate självt, se
+# shared/db/scripts/migrate-all-shards.sh). Aldrig init-container — se
+# docs/forsvar.md "Varför körs migrations som ett eget Job".
+#
+# Lösenorden återanvänds från samma secrets som Postgres-StatefulSets
+# konsumerar (postgres-shard-N-credentials) — connection-URL:erna byggs
+# ihop här, ingen egen "fullständig URL"-secret behövs.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrations
+  namespace: data
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      # Se infra/k8s/base/booking-api/deployment.yaml: samma GHCR-secret,
+      # skapad i båda namnrymderna av deploy.yml.
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: migrate
+          image: ghcr.io/siensky/tickets/migrations:latest
+          env:
+            - name: PGPASSWORD_SHARD_0
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-shard-0-credentials
+                  key: password
+            - name: PGPASSWORD_SHARD_1
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-shard-1-credentials
+                  key: password
+            - name: DATABASE_URL_SHARD_0
+              value: 'postgresql://postgres:$(PGPASSWORD_SHARD_0)@postgres-shard-0.data.svc.cluster.local:5432/tickets'
+            - name: DATABASE_URL_SHARD_1
+              value: 'postgresql://postgres:$(PGPASSWORD_SHARD_1)@postgres-shard-1.data.svc.cluster.local:5432/tickets'
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            # Numerisk, matchar "USER 10001" i Dockerfilen. Utan den här
+            # raden måste kubelet slå upp namnet "app" mot imagens
+            # /etc/passwd för att bevisa icke-root, vilket det INTE klarar
+            # med Alpines musl libc i vissa k3s/containerd-kombinationer —
+            # explicit UID gör introspektionen onödig helt och hållet.
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']

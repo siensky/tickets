@@ -4,6 +4,12 @@ packages:
   - 'apps/*'
 allowBuilds:
   esbuild: true
+  # Kör bara napi-postinstall (välja rätt förkompilerad binär för
+  # plattformen) — samma mönster och förtroendenivå som esbuild ovan.
+  # Krävs av eslint-import-resolver-typescript (eslint.config.js), inte
+  # av applikationskoden. Se docs/forsvar.md "Varför behöver
+  # eslint-plugin-boundaries en TypeScript-resolver?".
+  unrs-resolver: true
 minimumReleaseAgeExclude:
   - '@tanstack/query-core@5.104.5'
   - '@tanstack/react-query@5.104.5'

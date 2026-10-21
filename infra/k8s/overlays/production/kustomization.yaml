@@ -1,0 +1,15 @@
+# Den enda miljö CI faktiskt deployar till just nu — se
+# infra/k8s/README.md. Bildtaggar sätts av deploy-workflowen vid varje
+# körning (ett "sed" på kustomize-outputen, verifierat med en grep
+# efteråt — se .github/workflows/deploy.yml "Set booking-api image tag"),
+# inte hårdkodade här.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# Byte till produktionscertifikat: docs/runbook.md "Byt till
+# produktionscertifikat" — kräver både en ändring här (eller i
+# base/booking-api/ingress.yaml) och en Terraform-variabel, i en bestämd
+# ordning. Gör det inte bara halvvägs.
