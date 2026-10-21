@@ -1,10 +1,12 @@
 /**
- * Shard router, connection pools, and the migration runner for both
+ * Shard router, connection pools, and the transaction helper for both
  * Postgres shards (docs/plan.md "Databas" — shard key is event_id,
  * global tables live on shard-0). All raw SQL in the system lives behind
  * repositories that import from here (rules.md §4).
  *
- * Implemented in Fas 2 (docs/plan.md fasplan). Package scaffolded now so
- * the workspace layout is final from day one.
+ * The migration runner itself is node-pg-migrate via the CLI
+ * (scripts/migrate-all-shards.sh), not re-exported as code.
  */
-export const DB_PACKAGE_NAME = '@tickets/db';
+export * from './shard-router.js';
+export * from './pools.js';
+export * from './transaction.js';

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ActiveReservationExistsError,
   BaseError,
   ConflictError,
   ForbiddenError,
@@ -57,6 +58,14 @@ describe('BaseError hierarchy', () => {
     expect(new IdempotencyConflictError('key-1').httpStatus).toBe(409);
     expect(new ShardUnavailableError(1).httpStatus).toBe(500);
     expect(new ShardUnavailableError(1).isOperational).toBe(false);
+  });
+
+  it('ActiveReservationExistsError maps to 409 and carries the queue token', () => {
+    const error = new ActiveReservationExistsError('queue-token-1');
+    expect(error.httpStatus).toBe(409);
+    expect(error.code).toBe('ACTIVE_RESERVATION_EXISTS');
+    expect(error.context).toEqual({ queueTokenId: 'queue-token-1' });
+    expect(error instanceof ConflictError).toBe(true);
   });
 
   it('QueueTokenInvalidError carries the invalidation reason', () => {

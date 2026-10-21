@@ -146,6 +146,23 @@ export class ShardUnavailableError extends InternalError {
   }
 }
 
+/**
+ * Thrown when a queue token already owns an active reservation
+ * (docs/plan.md "Väntrum": "En aktiv reservation per kötoken" — enforced
+ * by `reservations_active_queue_token_unique`, a partial unique index,
+ * so this is the application-level mapping of that constraint's
+ * violation, not the only thing enforcing the rule).
+ */
+export class ActiveReservationExistsError extends ConflictError {
+  constructor(queueTokenId: string) {
+    super(
+      `Queue token ${queueTokenId} already has an active reservation`,
+      { queueTokenId },
+      'ACTIVE_RESERVATION_EXISTS',
+    );
+  }
+}
+
 // --- Helpers used by the outermost error handler (rules.md §5) -----------
 
 /** Narrows `unknown` (whatever a catch block caught) down to `BaseError`. */

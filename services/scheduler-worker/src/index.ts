@@ -1,10 +1,14 @@
 /**
  * Entrypoint for scheduler-worker. Runs a minimal HTTP server (health +
  * metrics only — Kubernetes probes need an httpGet target even for a
- * background worker) alongside the actual scheduling loop.
+ * background worker) alongside the two scheduling jobs this worker owns
+ * (docs/plan.md "Databas"/"Idempotens"): releasing expired reservations
+ * with jitter, and relaying the transactional outbox to RabbitMQ.
  *
- * replicas MUST stay at exactly 1 (see src/services/heartbeat.ts).
+ * replicas MUST stay at exactly 1 (see src/services/heartbeat.ts) — both
+ * jobs would double their effect with a second copy running.
  */
+import { closeShardPools, createShardPools } from '@tickets/db';
 import { createHttpMetrics, createLogger, createRegistry } from '@tickets/observability';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +21,8 @@ import Fastify, {
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { startHeartbeat } from './services/heartbeat.js';
+import { startOutboxRelay } from './services/outbox-relay-service.js';
+import { startReservationReleaseJob } from './services/reservation-release-service.js';
 
 const SERVICE_NAME = 'scheduler-worker';
 
@@ -56,11 +62,21 @@ export async function start(): Promise<void> {
   logger.info({ port }, `${SERVICE_NAME} listening`);
 
   const heartbeat = startHeartbeat(logger);
+  const shardPools = createShardPools();
+  const reservationRelease = startReservationReleaseJob(shardPools, logger);
+  const outboxRelay = startOutboxRelay(
+    shardPools,
+    process.env['RABBITMQ_URL'] ?? 'amqp://localhost',
+    logger,
+  );
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down gracefully');
     clearInterval(heartbeat);
+    clearInterval(reservationRelease);
     await app.close();
+    await outboxRelay.stop();
+    await closeShardPools(shardPools);
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
