@@ -1,10 +1,21 @@
-# docs/forsvar.md "Varför DNS-01 i stället för HTTP-01": SSL-läge måste
-# vara Full (strict) — Flexible skickar HTTP mot ett origin som bara
-# lyssnar på 443.
+# docs/forsvar.md "Varför DNS-01 i stället för HTTP-01": SSL-läge ska bli
+# Full (strict) — Flexible skickar HTTP mot ett origin som bara lyssnar på
+# 443. MEN strict validerar origin-certifikatet mot publika CA:er, och
+# Let's Encrypt staging-certifikat är AVSIKTLIGT inte betrodda av någon —
+# det är hela poängen med staging. Kör vi strict samtidigt som
+# letsencrypt_use_staging = true (docs/plan.md "staging först") får varje
+# request 526 "Invalid SSL certificate" så fort cert-manager utfärdar sitt
+# första certifikat.
+#
+# Läget kopplas därför till samma flagga som styr vilken ClusterIssuer som
+# faktiskt används (var.letsencrypt_use_staging): "full" (validerar inte
+# certifikatets utfärdare, bara att TLS fungerar) under staging, "strict"
+# när vi gått över till produktionscertet. Se docs/forsvar.md "Varför är
+# Cloudflares SSL-läge kopplat till letsencrypt_use_staging?".
 resource "cloudflare_zone_setting" "ssl_mode" {
   zone_id    = data.cloudflare_zone.this.zone_id
   setting_id = "ssl"
-  value      = "strict"
+  value      = var.letsencrypt_use_staging ? "full" : "strict"
 }
 
 # docs/plan.md "Realtid": edge-cachen är en förutsättning, inte ett

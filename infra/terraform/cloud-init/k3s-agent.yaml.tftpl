@@ -5,16 +5,67 @@ package_update: true
 packages:
   - curl
 
-write_files:
-  - path: /etc/rancher/k3s/config.yaml
-    content: |
-      token: "${k3s_token}"
-      server: "https://${server_private_ip}:6443"
-      node-ip: "${private_ip}"
-      flannel-iface: "eth1"
-      kubelet-arg:
-        - "cloud-provider=external"
-    permissions: "0600"
-
 runcmd:
-  - curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" sh -s - agent
+  # Samma uppsättning av Hetzners privata nätverk som på control-plane-
+  # noden: Hetzners cloud-init konfigurerar bara det publika interfacet,
+  # och utan det privata kan agenten varken nå api-servern eller sätta
+  # en giltig node-ip. Se docs/forsvar.md "Varför konfigurerar cloud-init
+  # Hetzners privata nätverk själv?".
+  - |
+    MAC=$(curl -s --max-time 10 http://169.254.169.254/hetzner/v1/metadata/private-networks | awk '/mac_address:/ {print $2; exit}')
+    if [ -z "$MAC" ]; then
+      echo "FEL: metadata rapporterade ingen MAC för privat nätverk." >&2
+      exit 1
+    fi
+    PRIV_IFACE=$(ip -o link show | grep -i "$MAC" | awk '{sub(/:$/,"",$2); print $2; exit}')
+    if [ -z "$PRIV_IFACE" ]; then
+      echo "FEL: hittade inget interface med MAC $MAC." >&2
+      ip -o link show >&2
+      exit 1
+    fi
+    cat > /etc/netplan/60-hetzner-private.yaml <<NETPLAN
+    network:
+      version: 2
+      ethernets:
+        $PRIV_IFACE:
+          dhcp4: true
+          mtu: 1450
+    NETPLAN
+    chmod 600 /etc/netplan/60-hetzner-private.yaml
+    netplan apply
+    for i in $(seq 1 60); do
+      ip -o -4 addr show dev "$PRIV_IFACE" | grep -q "${private_ip}/" && break
+      sleep 2
+    done
+    if ! ip -o -4 addr show dev "$PRIV_IFACE" | grep -q "${private_ip}/"; then
+      echo "FEL: ${private_ip} dök aldrig upp på $PRIV_IFACE." >&2
+      ip -o -4 addr show >&2
+      exit 1
+    fi
+    INSTANCE_ID=$(curl -s --max-time 10 http://169.254.169.254/hetzner/v1/metadata/instance-id)
+    case "$INSTANCE_ID" in
+      ''|*[!0-9]*)
+        echo "FEL: metadata gav inget numeriskt instance-id (fick: '$INSTANCE_ID')." >&2
+        exit 1
+        ;;
+    esac
+    mkdir -p /etc/rancher/k3s
+    cat > /etc/rancher/k3s/config.yaml <<CONFIG
+    token: "${k3s_token}"
+    server: "https://${server_private_ip}:6443"
+    node-ip: "${private_ip}"
+    flannel-iface: "$PRIV_IFACE"
+    kubelet-arg:
+      - "cloud-provider=external"
+      - "provider-id=hcloud://$INSTANCE_ID"
+    CONFIG
+    chmod 600 /etc/rancher/k3s/config.yaml
+  # Väntar in att control-plane-nodens API-server svarar på den privata
+  # adressen innan agenten försöker gå med — annars misslyckas join:en
+  # och systemd-enheten hamnar i backoff i flera minuter.
+  - |
+    for i in $(seq 1 90); do
+      curl -sk --connect-timeout 3 "https://${server_private_ip}:6443/readyz" >/dev/null 2>&1 && break
+      sleep 10
+    done
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" sh -s - agent

@@ -50,9 +50,9 @@ variable "hcloud_location" {
 }
 
 variable "server_type" {
-  description = "Hetzner servertyp för klusternoderna under normal drift."
+  description = "Hetzner servertyp för klusternoderna under normal drift. cpx22 (2 vCPU, 4 GB, AMD) i stället för cx22 — nya Hetzner-konton saknar ofta tillgång till cx-serien (Intel) förrän kontot 'mognat'; cpx-serien (AMD) har samma specifikation under ett annat namn."
   type        = string
-  default     = "cx22"
+  default     = "cpx22"
 }
 
 variable "node_count" {

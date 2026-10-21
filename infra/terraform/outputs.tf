@@ -15,7 +15,7 @@ output "all_node_ipv4s" {
 
 output "kubeconfig_path" {
   description = "Lokal sökväg till den hämtade kubeconfig-filen. export KUBECONFIG=<detta värde>."
-  value       = local_sensitive_file.kubeconfig.filename
+  value       = "${path.module}/.kube/config"
 }
 
 output "api_fqdn" {

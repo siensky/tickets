@@ -4,14 +4,14 @@
 # inte nu.
 
 resource "kubernetes_namespace" "ingress_nginx" {
-  depends_on = [local_sensitive_file.kubeconfig]
+  depends_on = [null_resource.fetch_kubeconfig]
   metadata {
     name = "ingress-nginx"
   }
 }
 
 resource "kubernetes_namespace" "cert_manager" {
-  depends_on = [local_sensitive_file.kubeconfig]
+  depends_on = [null_resource.fetch_kubeconfig]
   metadata {
     name = "cert-manager"
   }
@@ -21,7 +21,7 @@ resource "kubernetes_namespace" "cert_manager" {
 # "hcloud" med nyckeln "token", som är respektive projekts egen
 # standardkonvention.
 resource "kubernetes_secret" "hcloud" {
-  depends_on = [local_sensitive_file.kubeconfig]
+  depends_on = [null_resource.fetch_kubeconfig]
   metadata {
     name      = "hcloud"
     namespace = "kube-system"
@@ -31,9 +31,10 @@ resource "kubernetes_secret" "hcloud" {
   }
 }
 
-# Krävs av CSI-drivern för att veta vilken Hetzner-server en nod är — se
-# docs/forsvar.md "Varför nätverksvolymer". networking.enabled = false:
-# poddnätverket sköts av k3s egen flannel, inte Hetzners routningstabeller.
+# Hetzners CCM: sätter nodlabels (region, instanstyp), städar bort Node-objekt
+# för borttagna servrar och ger LoadBalancer-stöd. Ligger INTE på den kritiska
+# vägen för volymer — se docs/forsvar.md "Varför sätter cloud-init providerID
+# själv?" för smoketestet som visade det.
 resource "helm_release" "hcloud_ccm" {
   name       = "hcloud-cloud-controller-manager"
   repository = "https://charts.hetzner.cloud"
@@ -43,9 +44,35 @@ resource "helm_release" "hcloud_ccm" {
 
   depends_on = [kubernetes_secret.hcloud]
 
+  # networking.enabled = false: chartens networking-läge lägger till
+  # --allocate-node-cidrs och --cluster-cidr på CCM, men pod-CIDR:er delas
+  # redan ut av k3s egen controller-manager. Två allokerare för samma sak
+  # är en konflikt vi inte vill ha.
   set {
     name  = "networking.enabled"
     value = "false"
+  }
+  # HCLOUD_NETWORK måste ändå sättas, annars rapporterar CCM bara nodernas
+  # PUBLIKA adresser och avvisar vår privata node-ip i evig loop:
+  # "failed to get node address from cloud provider that matches ip: 10.0.1.x".
+  # Charten renderar bara HCLOUD_NETWORK själv när networking.enabled = true,
+  # så här sätts den direkt — ingen dubblett uppstår.
+  set {
+    name  = "env.HCLOUD_NETWORK.value"
+    value = hcloud_network.cluster.name
+    type  = "string"
+  }
+  # Flannel äger routingen mellan noderna (flannel-iface på det privata
+  # interfacet). CCM:s route-controller stängs därför av explicit — annars
+  # skriver två komponenter routes för samma pod-CIDR:er.
+  #
+  # type = "string" är nödvändigt: utan den tolkar Helm "false" som en
+  # boolean, och Kubernetes avvisar manifestet med "cannot unmarshal bool
+  # into Go struct field EnvVar...value of type string".
+  set {
+    name  = "env.HCLOUD_NETWORK_ROUTES_ENABLED.value"
+    value = "false"
+    type  = "string"
   }
 }
 
@@ -57,8 +84,12 @@ resource "helm_release" "hcloud_csi" {
   version    = "2.24.0"
   namespace  = "kube-system"
 
-  # CSI-drivern behöver CCM:s providerID på noderna för att fungera
-  # korrekt, inte bara secreten.
+  # CSI-drivern läser Hetzners server-ID från metadata-tjänsten på varje
+  # nod, INTE från nodens providerID — verifierat med ett smoketest där
+  # en volym provisionerades och kopplades med providerID satt till
+  # k3s://<namn>. Beroendet på CCM finns alltså för ordningens skull
+  # (secreten, nodlabels), inte för att volymhanteringen kräver det.
+  # Se docs/forsvar.md "Varför nätverksvolymer".
   depends_on = [helm_release.hcloud_ccm]
 }
 

@@ -12,6 +12,17 @@ resource "hcloud_ssh_key" "admin" {
 # den utan en beroendecykel i resursgrafen.
 locals {
   control_plane_private_ip = "10.0.1.10"
+
+  # Rensar bort \r och \n som kan smyga sig in vid kopiering från
+  # webbgränssnitt (t.ex. Tailscales admin console) — osynliga i
+  # terminalen och i verktyg som "wc -l" (som bara räknar \n), men
+  # bryter YAML-strukturen i cloud-init eftersom YAML-specen räknar
+  # både \r och \n som radbrytning i en block-literal. Se
+  # docs/forsvar.md "Varför saneras tailscale_node_authkey i Terraform?".
+  tailscale_node_authkey_clean = replace(
+    replace(trimspace(var.tailscale_node_authkey), "\r", ""),
+    "\n", ""
+  )
 }
 
 resource "hcloud_server" "control_plane" {
@@ -31,7 +42,7 @@ resource "hcloud_server" "control_plane" {
     k3s_token          = random_password.k3s_token.result
     k3s_version        = var.k3s_version
     private_ip         = local.control_plane_private_ip
-    tailscale_authkey  = var.tailscale_node_authkey
+    tailscale_authkey  = local.tailscale_node_authkey_clean
     tailscale_hostname = var.tailscale_hostname
   })
 

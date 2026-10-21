@@ -680,3 +680,169 @@ Konsekvensen är att *alla* som ska nå klustrets API — även
 utvecklarens egen maskin som kör `terraform apply` — måste vara
 ansluten till samma tailnet. SSH (port 22) är opåverkat och förblir
 den publika vägen in för Terraforms kubeconfig-hämtning.
+
+## Varför CPX22 i stället för CX22?
+
+Planerades ursprungligen för Hetzners cx-serie (Intel). Vid faktisk provisionering
+visade det sig att nya Hetzner-konton inte alltid har tillgång till cx-serien direkt —
+Hetzner begränsar ibland vilka servertyper ett nykontroverifierat konto kan skapa.
+cpx-serien (AMD) har identisk specifikation under ett annat namn (cpx22 = 2 vCPU, 4 GB,
+exakt som cx22 skulle ha varit), så bytet påverkar varken arkitektur eller
+resursbudgeten i planen — bara leverantörens interna namngivning och ett något högre
+timpris, som i praktiken inte märks eftersom klustret inte körs kontinuerligt.
+
+## Varför saneras `tailscale_node_authkey` i Terraform?
+
+En nyckel kopierad från ett webbgränssnitt (Tailscales admin console) kan få ett dolt
+carriage-return-tecken (`\r`) inbakat, osynligt i terminalen och osynligt för verktyg som
+`wc -l` (som bara räknar `\n`). YAML-specen räknar däremot både `\r` och `\n` som giltiga
+radbrytningar inuti en block-literal — ett sådant tecken mitt i värdet bryter alltså
+cloud-init-mallens YAML-struktur på ett sätt som är praktiskt taget omöjligt att upptäcka
+genom att titta på texten.
+
+Lösningen är att aldrig lita på att inklistrad text är ren: `trimspace()` plus `replace()`
+för både `\r` och `\n` körs på värdet innan det går in i `templatefile()`. Det gör hela
+klassen av kopieringsmissöden ofarlig, oavsett hur nyckeln råkade bli kopierad.
+
+## Varför skriver fetch-skriptet direkt till `.kube/config` i stället för via en Terraform-resurs?
+
+Ett tidigare försök läste den SSH-hämtade kubeconfig-filen in i Terraform via
+`file()`/`fileexists()`, för att kunna exponera den som en vanlig resurs (`local_sensitive_file`)
+med spårat innehåll. Det gav upprepat felet "function returned an inconsistent result" —
+inte en transient bugg, utan en strukturell konsekvens av att filen skapas som en sidoeffekt
+av en `local-exec`-provisioner (osynlig för Terraforms beroendegraf) inom SAMMA `apply` som
+sedan försöker läsa den via en ren funktion, vilka Terraform kräver ska ge samma resultat
+vid plan och apply.
+
+Lösningen är att sluta låtsas att filen är en spårad Terraform-resurs: skriptet äger hela
+filens livscykel (skapar katalogen, skriver filen, sätter rättigheter), och `helm`/`kubernetes`-
+providers pekar på samma statiska sökväg direkt. Ingen Terraform-funktion försöker någonsin
+läsa innehållet — bara providers egen interna config-inläsning, som redan var den enda delen
+som faktiskt behövde filen.
+
+## Varför konfigurerar cloud-init Hetzners privata nätverk själv?
+
+Hetzners cloud-init-datasource genererar nätverkskonfiguration **endast för det publika
+interfacet**. Ett privat nätverk som kopplas till servern vid skapandet syns som ett NIC i
+OS:et, och metadata-tjänsten rapporterar korrekt adress, MAC och gateway — men netplan-filen
+(`50-cloud-init.yaml`) nämner det inte, så interfacet lämnas `DOWN` och utan adress. Ingenting
+i Terraform-konfigurationen kan ändra det; konfigurationen måste göras på noden.
+
+Felet var obehagligt tyst. k3s kör control plane (etcd/apiserver/scheduler) och agenten
+(kubelet, containerd, flannel) i samma process. Pekar `node-ip` på en adress som inte finns på
+någon interface startar agenten aldrig, medan api-servern fortsätter svara: `kubectl get nodes`
+returnerar då **"No resources found"** i stället för ett anslutningsfel. Det ser ut som ett
+rättighets- eller nätverksproblem men är ett bootstrap-problem i noden.
+
+Båda cloud-init-mallarna sätter därför upp det privata nätverket själva, före k3s:
+
+1. MAC-adressen läses från metadata-tjänsten (`/hetzner/v1/metadata/private-networks`).
+2. Interfacenamnet slås upp via MAC:en i stället för att hårdkodas — `eth1`, `enp7s0` och
+   `ens10` förekommer alla beroende på servertyp och image, så varje hårdkodat namn är en
+   latent bugg.
+3. En egen netplan-fil (`60-hetzner-private.yaml`) skrivs med `dhcp4: true` och **`mtu: 1450`**,
+   vilket Hetzners privata nätverk kräver. Hetzners DHCP delar ut exakt den adress Terraform
+   konfigurerat för noden, så adressen ägs fortfarande av Terraform.
+4. Bootstrappen väntar in att adressen faktiskt finns och **avbryter med `exit 1`** om den inte
+   gör det, med alla interface utskrivna till `/var/log/cloud-init-output.log`.
+
+Punkt 4 är poängen: hellre en nod som misslyckas synligt vid boot än ett kluster som ser igång
+ut men är tomt. Den första versionen av den här mallen saknade felhanteringen, och det kostade
+en timmes felsökning av ett kluster vars api-server svarade utan att ha en enda nod.
+
+## Varför pekar kubeconfig på Tailscale-IP i stället för MagicDNS-namnet?
+
+Nodens Tailscale-nyckel är medvetet **icke-ephemeral** så noden stannar kvar i tailnet mellan
+omstarter. Priset är att en riven nod ligger kvar registrerad: nästa nod som vill heta
+`tickets-cp-1` får namnet `tickets-cp-1-1`, medan MagicDNS fortsätter peka det ursprungliga
+namnet på den **döda** noden. En kubeconfig med hostnamnet i serveradressen ser då helt korrekt
+ut men pekar på en server som inte finns — ett fel som inte syns förrän första `kubectl`-anropet
+timeout:ar.
+
+Hämtningsskriptet läser därför av nodens faktiska Tailscale-IP från noden själv
+(`tailscale ip -4`) vid varje hämtning och validerar att den ligger i `100.`-intervallet innan
+den skrivs in. IP:n finns redan som `--tls-san` i k3s-certifikatet, så TLS-verifieringen går
+igenom. Namnet används fortfarande för tailnet-enheten och som extra SAN, men ingenting beror
+på att det ska vara stabilt.
+
+## Varför skapas ClusterIssuers med kubectl i stället för `kubernetes_manifest`?
+
+`kubernetes_manifest` i Kubernetes-providern kräver en **levande API-anslutning och det
+färdiga CRD-schemat redan i planfasen**, inte bara vid exekvering. Den validerar manifestet
+mot klustrets OpenAPI-schema innan något körs. På ett nytt kluster finns cert-managers
+`ClusterIssuer`-CRD inte än när planen byggs, så resursen kan aldrig lyckas i samma körning
+som installerar cert-manager — och varken `depends_on` eller en `time_sleep` hjälper, eftersom
+de bara styr exekveringsordning, inte vad som är känt vid plan.
+
+Symptomet är ett förvirrande `Invalid configuration for API client` eller ett schemafel på en
+resurs som ser helt korrekt ut, i en körning där cert-manager installeras några steg tidigare.
+
+ClusterIssuers skapas därför med `kubectl apply` från en `null_resource`. Det kostar en
+Terraform-resurs som inte spårar manifestets innehåll i state, men `kubectl apply` är
+idempotent, så upprepade körningar konvergerar mot samma tillstånd. Väntan på CRD:n är
+dessutom **deterministisk** (`kubectl wait --for=condition=established`) i stället för en fast
+fördröjning som förr eller senare är för kort på en långsam dag.
+
+`control_plane_id` ingår i resursens `triggers`: ett nytt kluster har inga issuers, och utan
+den triggern anser Terraform att resursen redan är klar och kör aldrig om provisionern. Det är
+samma fälla som `fetch_kubeconfig` gick i — en provisioner körs bara när resursen *skapas*,
+aldrig för att dess skript ändrats.
+
+## Varför sätter cloud-init `providerID` själv?
+
+k3s sätter som standard `providerID: k3s://<nodnamn>` på varje nod. Hetzners CCM kan bara
+tolka `hcloud://<server-id>` och felar annars i evig loop:
+
+```
+failed to convert provider id to server id: Provider ID does not have one of the
+expected prefixes (hcloud://, hrobot://, hcloud://bm-): k3s://tickets-cp-1
+```
+
+Fältet är **oföränderligt efter nodregistrering**, så det går inte att laga i efterhand —
+varken CCM eller `kubectl patch` kan skriva över det. Värdet måste vara rätt redan när kubelet
+registrerar noden. Cloud-init hämtar därför serverns ID från metadata-tjänsten
+(`/hetzner/v1/metadata/instance-id`) och skickar med `provider-id=hcloud://<id>` som
+`kubelet-arg`.
+
+Dessutom krävs `networking.enabled = true` i CCM:ens Helm-värden, eftersom noderna rapporterar
+sin **privata** adress som `node-ip`. Med networking avstängt accepterar CCM bara publika
+adresser och felar med `failed to get node address from cloud provider that matches ip:
+10.0.1.x`. Samtidigt sätts `HCLOUD_NETWORK_ROUTES_ENABLED=false`: flannel äger routingen mellan
+noderna via `flannel-iface` på det privata interfacet, och två komponenter som skriver routes
+för samma pod-CIDR:er är en konflikt som inte märks förrän trafiken börjar bete sig underligt.
+
+### Vad det här avslöjade om CSI
+
+Den ursprungliga motiveringen i planen var att CCM:s `providerID` **krävs** av CSI-drivern för
+att veta vilken Hetzner-server en volym ska kopplas till. Det visade sig vara fel. Med
+`providerID` satt till `k3s://tickets-cp-1` — alltså obrukbart för CCM — provisionerades och
+kopplades en 10 GB-volym ändå utan problem:
+
+```
+SuccessfulAttachVolume   AttachVolume.Attach succeeded for volume "pvc-3c605b05-..."
+```
+
+CSI-drivarens **node-plugin** läser serverns ID från metadata-tjänsten på varje nod och
+rapporterar det som sitt CSI NodeID (`kubectl get csinodes` visade `171397094` respektive
+`171397231`, korrekta Hetzner-ID:n). Controllern använder det NodeID:t, inte Kubernetes'
+`providerID`. CCM ligger alltså inte på den kritiska vägen för volymhantering.
+
+CCM behålls ändå, av tre skäl som håller: nodlabels (region och instanstyp, som Grafana-
+dashboards i Fas 4 grupperar på), uppstädning av Node-objekt när en server tas bort, och
+LoadBalancer-stöd om det någon gång behövs. Men en komponent som felar i evig loop är en
+belastning i sig — Fas 4 larmar på felloggar, och en permanent felkälla gör larmen värdelösa.
+Därför lagades den i stället för att lämnas felande.
+
+## Varför är Cloudflares SSL-läge kopplat till `letsencrypt_use_staging`?
+
+Full (strict) validerar origin-certifikatet mot publika CA:er. Let's Encrypt staging-
+certifikat är **avsiktligt** inte betrodda av någon — det är hela poängen med en staging-
+miljö. Hade `ssl_mode` stått fast på `"strict"` samtidigt som planen säger "staging först"
+hade varje request fått `526 Invalid SSL certificate` så fort cert-manager utfärdade sitt
+första certifikat — ett självförvållat avbrott, inte ett verkligt fel.
+
+`ssl_mode` läser därför samma flagga som styr vilken `ClusterIssuer` som faktiskt är aktiv:
+`"full"` (TLS krävs, men certifikatets utfärdare kontrolleras inte) under staging, `"strict"`
+när `letsencrypt_use_staging` sätts till `false`. De två besluten — vilket cert som utfärdas
+och hur strikt Cloudflare validerar det — kan annars råka hamna i otakt, och den kombinationen
+är tyst tills man faktiskt provar att nå sajten.

@@ -10,8 +10,15 @@ data "cloudflare_zone" "this" {
 
 # En A-post per nod, alla proxade (orange cloud) — Cloudflare lastbalanserar
 # och döljer origin-IP:erna. ingress-nginx (DaemonSet) svarar på alla.
+#
+# for_each nycklas på IP:n, INTE på nodnamn. Nodnamnen är stabila medan IP:na
+# byts när en nod byggs om, och Hetzner återanvänder adresser: nycklas posten
+# på namnet försöker Terraform UPPDATERA innehållet, och om två noder bytt
+# adress med varandra kolliderar uppdateringen med den andra posten
+# ("81058: An identical record already exists"). Med IP:n som nyckel ändras
+# aldrig en posts innehåll — en ny adress blir en ny post och den gamla rivs.
 resource "cloudflare_dns_record" "api" {
-  for_each = local.node_ipv4_by_name
+  for_each = toset(values(local.node_ipv4_by_name))
 
   zone_id = data.cloudflare_zone.this.zone_id
   name    = "api"

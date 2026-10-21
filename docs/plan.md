@@ -46,7 +46,7 @@ autoscaling och zero-downtime visat under load.
 ## Domän och användarflöde
 
 Biljettbokning med **platsval på interaktiv arenakarta**. 5 000 platser släpps under ett
-15-minutersfönster, upp till 20 000 samtidiga besökare.
+15-minutersfönster, upp till 50 000 bokningsförsök (uppgiftens siffra — se "Lasttest").
 
 1. Välj evenemang → arenakarta med sektioner och enskilda stolar
 2. Stolsstatus: **grön** ledig · **gul** reserverad av annan · **grå** såld · **blå** egen markering
@@ -343,6 +343,22 @@ waitlist           id, event_id, contact, created_at
   tre växer obegränsat och snabbt under lasttest
 - `config` styr: insläppstakt, reservationstid, jitter-fönster, max stolar/bokning
 
+### Import av biljettnummer (CSV)
+
+Uppgiften bifogar en CSV med de 5 000 giltiga biljettnumren för eventet — de är sanningen
+för vad som får säljas, inte något vi genererar själva.
+
+- `seats` får en kolumn **`ticket_number`** (`UNIQUE (event_id, ticket_number)`), det
+  CSV-angivna numret. Arenakartans rad/plats/x/y är ett presentationslager ovanpå, inte
+  en ersättning för det.
+- **Ett engångsimportskript i `scheduler-worker`** (samma tjänst som redan äger
+  migrations-liknande engångsjobb), inte en del av request-vägen: läser CSV:n, validerar
+  **exakt 5 000 rader och inga dubbletter**, `INSERT ... ON CONFLICT DO NOTHING` per
+  `ticket_number`. Idempotent — körs en gång per event innan `sales_open_at`, ofarligt att
+  köra om.
+- Importen är ett **separat steg i pipelinen**, inte en del av `kubectl apply`: den hör till
+  ett specifikt event, inte till deploy av applikationen.
+
 ---
 
 ## Repo- och filstruktur
@@ -426,8 +442,11 @@ testa — och misslyckas då av fel skäl. Kör försöken genom en pool.
 ## Infrastruktur
 
 - **Hetzner Cloud + Terraform + k3s**
-- **Kostnadsstrategi:** 2× CX22 (~90 kr/mån) under utveckling. Skala upp till 3–4 noder
-  via Terraform-variabel endast under lasttest och demo (~1 kr för 6 timmar)
+- **Kostnadsstrategi:** 2× CPX22 (2 vCPU, 4 GB, AMD — cx-serien var inte tillgänglig på
+  kontot, se `docs/forsvar.md`), €0,078/h kombinerat ≈ 550 kr/mån vid kontinuerlig drift.
+  Eftersom klustret inte körs 24/7 (mesta utvecklingen lokalt, se nedan) blir faktisk
+  kostnad en bråkdel av det — Hetzner debiterar per timme. Skala upp till 3–4 noder via
+  Terraform-variabel endast under lasttest och demo (några kronor för en körning)
 - Mesta utvecklingen sker lokalt med docker-compose
 - **Load balancer:** ingress-nginx i klustret
 - **Gratis lager:** Cloudflare (DNS + CDN + TLS), Cloudflare R2 eller Backblaze B2
@@ -459,8 +478,8 @@ testa — och misslyckas då av fel skäl. Kör försöken genom en pool.
 
 | Läge | Noder | Totalt |
 |---|---|---|
-| Utveckling | 2× CX22 (2 vCPU, 4 GB) | 4 vCPU, 8 GB |
-| Lasttest och demo | + 2× CX32 (4 vCPU, 8 GB) | 12 vCPU, 24 GB |
+| Utveckling | 2× CPX22 (2 vCPU, 4 GB) | 4 vCPU, 8 GB |
+| Lasttest och demo | + 2× CPX32 (4 vCPU, 8 GB) | 12 vCPU, 24 GB |
 
 **Namespaces:** `ticketing` · `data` · `observability` · `ingress-nginx` · `keda` · `cert-manager`
 
@@ -730,13 +749,33 @@ filedeskriptorgränserna.
 | Scenario | Vad det gör |
 |---|---|
 | `smoke` | 10 VU — verifierar att hela flödet fungerar |
-| `queue-storm` | 20 000 VU ansluter inom 60 s; mäter väntrummet |
-| `booking-rush` | Insläppta användare reserverar och köper |
-| `deploy-under-load` | `booking-rush` medan en ny version rullas ut |
+| `queue-storm` | 50 000 VU ansluter inom 60 s; mäter väntrummet |
+| `normal-sale` | **Betygsgrundande normaltest.** 50 000 bokningsförsök utspridda jämnt över 15 min |
+| `spike-sale` | **Betygsgrundande spiketest.** 50 000 bokningsförsök över 6 min, medvetet ojämn — perioder med få VU och korta, tydliga toppar |
+| `deploy-under-load` | `normal-sale` medan en ny version rullas ut |
 | `shard-failure` | Shard-1 dödas mitt under lasten |
+
+`queue-storm`-siffran (50 000) matchar nu uppgiftens volym, inte vårt tidigare egna antagande
+på 20 000 — väntrummet ska klara samma skala som bokningsförsöken.
 
 **Mätpunkter:** p50/p95/p99, felfrekvens, **`oversell_prevented_total`**, poddantal över
 tid, ködjup, databasanslutningar per shard, **cache hit ratio vid kanten**.
+
+### Rapport och reset — `normal-sale` och `spike-sale`
+
+De två betygsgrundande körningarna ska vara granskningsbara i efterhand, enligt
+uppgiftstexten. Varje körning skriver en egen rapportfil (k6:s `--summary-export` +ett eget
+skript mot `oversell_prevented_total`/ordertabellen) med: testkonfiguration (VU-profil,
+scenario), starttid, faktiskt antal förfrågningar, svarstider (p50/p95/p99), genomströmning,
+felfrekvens, och antal slutförda köp — plus ett explicit bevis på att sålda biljetter ≤ 5 000
+och att inget `ticket_number` förekommer i mer än en order (samma fråga som
+kronjuveltestet, körd mot produktionsdatan efter testet, inte bara i CI).
+
+**Reset mellan körningarna:** ett `scheduler-worker`-skript återställer samtliga `seats` till
+`available` och tömmer `reservations`/`orders`/`tickets`/`payments` för eventet (samma
+engångsklass av jobb som CSV-importen), så `spike-sale` startar från samma 5 000 tillgängliga
+biljetter som `normal-sale` gjorde. Körs manuellt mellan de två körningarna, aldrig
+automatiskt — ett skript som tömmer ordrar ska inte kunna triggas av ett misstag i CI.
 
 **Tidta pipelinen.** Lint + typecheck + unit + integration (Testcontainers) + Playwright blir
 realistiskt 10–20 min. Demomanusets punkt 2 är "en merge genom pipelinen" — ha något att
@@ -793,7 +832,7 @@ rörs sist.
    rollout. *(Pipelinen tar 10–20 min — ha något att prata om, eller visa en tidigare körning.)*
 3. **Grafana:** RED-paneler, affärsmått, per-shard-vyer, `oversell_prevented_total`,
    **cache hit ratio vid kanten**
-4. **Starta lasttestet:** 20 000 VU
+4. **Starta lasttestet:** `normal-sale` — 50 000 bokningsförsök över 15 min
 5. **Under lasten:** booking-api skalar 2 → 10 i en gradvis kurva; KEDA skalar
    notification-worker på ködjup
 6. **Under lasten: deploya booking-api** → visa noll misslyckade requests
