@@ -37,8 +37,31 @@ export async function getReservationConfig(pool: Pool): Promise<ReservationConfi
   }
 
   return {
-    holdMinutes: Number(holdMinutes),
-    releaseJitterMaxSeconds: Number(releaseJitterMaxSeconds),
-    maxSeatsPerReservation: Number(maxSeatsPerReservation),
+    holdMinutes: parsePositiveInteger('reservation_hold_minutes', holdMinutes),
+    releaseJitterMaxSeconds: parsePositiveInteger(
+      'reservation_release_jitter_max_seconds',
+      releaseJitterMaxSeconds,
+    ),
+    maxSeatsPerReservation: parsePositiveInteger(
+      'max_seats_per_reservation',
+      maxSeatsPerReservation,
+    ),
   };
+}
+
+/**
+ * `config` is "ändringsbar live" (docs/plan.md) — a bad value can be
+ * written at any time, not just by a migration. `Number('bad')` is
+ * `NaN`, and `NaN` makes every comparison false, including
+ * `seatIds.length > maxSeatsPerReservation` — a malformed config value
+ * would silently DISABLE the max-seats-per-booking anti-scalping
+ * control instead of failing loudly. Validating on read turns that
+ * into an immediate, alertable `InternalError` instead.
+ */
+export function parsePositiveInteger(key: string, rawValue: string): number {
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new InternalError(`config.${key} is not a positive integer`, { key, rawValue });
+  }
+  return value;
 }

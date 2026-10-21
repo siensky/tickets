@@ -8,12 +8,19 @@
  * replicas MUST stay at exactly 1 (see src/services/heartbeat.ts) — both
  * jobs would double their effect with a second copy running.
  */
-import { closeShardPools, createShardPools } from '@tickets/db';
-import { createHttpMetrics, createLogger, createRegistry } from '@tickets/observability';
+import { closeShardPools, createShardPools, type ShardPools } from '@tickets/db';
+import {
+  createHttpMetrics,
+  createLogger,
+  createRegistry,
+  type HttpMetrics,
+  type Logger,
+} from '@tickets/observability';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Fastify, {
   type FastifyBaseLogger,
+  type FastifyInstance,
   type RawReplyDefaultExpression,
   type RawRequestDefaultExpression,
   type RawServerDefault,
@@ -21,14 +28,22 @@ import Fastify, {
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { startHeartbeat } from './services/heartbeat.js';
-import { startOutboxRelay } from './services/outbox-relay-service.js';
-import { startReservationReleaseJob } from './services/reservation-release-service.js';
+import { startOutboxRelay, type OutboxRelay } from './services/outbox-relay-service.js';
+import {
+  startReservationReleaseJob,
+  type ReservationReleaseJob,
+} from './services/reservation-release-service.js';
 
 const SERVICE_NAME = 'scheduler-worker';
 
-export async function start(): Promise<void> {
-  const logger = createLogger({ serviceName: SERVICE_NAME });
-  const registry = createRegistry(SERVICE_NAME);
+type FastifyApp = FastifyInstance<
+  RawServerDefault,
+  RawRequestDefaultExpression<RawServerDefault>,
+  RawReplyDefaultExpression<RawServerDefault>,
+  FastifyBaseLogger
+>;
+
+function registerRedMetricsHook(app: FastifyApp, httpMetrics: HttpMetrics): void {
   // RED-metriken (createHttpMetrics) registrerades i registret men
   // ingenting ökade dem — de hade stått still på noll för alltid, vilket
   // är SÄMRE än att sakna dem helt: i Fas 4 bygger Grafana-paneler på
@@ -36,6 +51,51 @@ export async function start(): Promise<void> {
   // instrumenterat". routeOptions.url (inte den råa, dynamiska URL:en)
   // håller kardinaliteten nere — en path med :id i hade annars gett en
   // egen tidsserie per unikt ID.
+  app.addHook('onResponse', async (request, reply) => {
+    const route = request.routeOptions.url ?? 'unmatched';
+    const status = String(reply.statusCode);
+    httpMetrics.requestsTotal.inc({ method: request.method, route, status });
+    httpMetrics.requestDuration.observe(
+      { method: request.method, route, status },
+      reply.elapsedTime / 1000,
+    );
+  });
+}
+
+function createShutdownHandler(
+  logger: Logger,
+  resources: {
+    app: FastifyApp;
+    heartbeat: NodeJS.Timeout;
+    reservationRelease: ReservationReleaseJob;
+    outboxRelay: OutboxRelay;
+    shardPools: ShardPools;
+  },
+): (signal: string) => void {
+  const shutdown = async (signal: string): Promise<void> => {
+    logger.info({ signal }, 'shutting down gracefully');
+    clearInterval(resources.heartbeat);
+    await resources.app.close();
+    await resources.reservationRelease.stop();
+    await resources.outboxRelay.stop();
+    await closeShardPools(resources.shardPools);
+    process.exit(0);
+  };
+  return (signal: string): void => {
+    shutdown(signal).catch((error: unknown) => {
+      // An unhandled rejection here would otherwise crash the process
+      // via Node's default behaviour — same end result, but with a
+      // raw stack trace instead of a log line, and no guarantee shards
+      // actually finished closing cleanly first.
+      logger.error({ signal, error }, 'error during graceful shutdown');
+      process.exit(1);
+    });
+  };
+}
+
+export async function start(): Promise<void> {
+  const logger = createLogger({ serviceName: SERVICE_NAME });
+  const registry = createRegistry(SERVICE_NAME);
   const httpMetrics = createHttpMetrics(registry);
 
   const app = Fastify<
@@ -46,23 +106,23 @@ export async function start(): Promise<void> {
   >({ loggerInstance: logger });
   registerHealthRoutes(app);
   registerMetricsRoutes(app, registry);
-
-  app.addHook('onResponse', async (request, reply) => {
-    const route = request.routeOptions.url ?? 'unmatched';
-    const status = String(reply.statusCode);
-    httpMetrics.requestsTotal.inc({ method: request.method, route, status });
-    httpMetrics.requestDuration.observe(
-      { method: request.method, route, status },
-      reply.elapsedTime / 1000,
-    );
-  });
+  registerRedMetricsHook(app, httpMetrics);
 
   const port = Number(process.env['SCHEDULER_WORKER_PORT'] ?? 3010);
   await app.listen({ port, host: '0.0.0.0' });
   logger.info({ port }, `${SERVICE_NAME} listening`);
 
   const heartbeat = startHeartbeat(logger);
-  const shardPools = createShardPools();
+  const shardPools = createShardPools({
+    // Without this, an idle client erroring out (e.g. its shard goes
+    // down) is an unhandled `error` event on the Pool itself, which
+    // crashes the whole process — see @tickets/db's own doc comment.
+    // docs/plan.md's "kill shard-1 live" demo relies on shard-0
+    // surviving that, not the pod dying with it.
+    onShardError: (shardIndex, error) => {
+      logger.warn({ shardIndex, error }, 'shard connection error');
+    },
+  });
   const reservationRelease = startReservationReleaseJob(shardPools, logger);
   const outboxRelay = startOutboxRelay(
     shardPools,
@@ -70,17 +130,15 @@ export async function start(): Promise<void> {
     logger,
   );
 
-  const shutdown = async (signal: string): Promise<void> => {
-    logger.info({ signal }, 'shutting down gracefully');
-    clearInterval(heartbeat);
-    clearInterval(reservationRelease);
-    await app.close();
-    await outboxRelay.stop();
-    await closeShardPools(shardPools);
-    process.exit(0);
-  };
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  const shutdownOrCrash = createShutdownHandler(logger, {
+    app,
+    heartbeat,
+    reservationRelease,
+    outboxRelay,
+    shardPools,
+  });
+  process.on('SIGTERM', () => shutdownOrCrash('SIGTERM'));
+  process.on('SIGINT', () => shutdownOrCrash('SIGINT'));
 }
 
 // process.argv[1] skrivs INTE symlänk-upplöst, medan import.meta.url

@@ -23,10 +23,10 @@ klustret) har olika scope av samma skäl som de två Tailscale-nycklarna nedan h
 inställningar — rätt mängd access för vad som faktiskt använder den, inte en gemensam,
 överdimensionerad token.
 
-| Token                          | Används av                      | Zon-rättigheter                                        | Miljövariabel                       |
-| ------------------------------- | -------------------------------- | ------------------------------------------------------- | ------------------------------------ |
-| `cloudflare_api_token`          | Terraform (denna maskin/CI apply) | DNS:Edit, Zone Settings:Edit, Cache Rules:Edit            | `TF_VAR_cloudflare_api_token`        |
-| `cloudflare_dns_token`          | cert-manager (en secret i klustret) | **Endast** DNS:Edit                                      | `TF_VAR_cloudflare_dns_token`        |
+| Token                  | Används av                          | Zon-rättigheter                                | Miljövariabel                 |
+| ---------------------- | ----------------------------------- | ---------------------------------------------- | ----------------------------- |
+| `cloudflare_api_token` | Terraform (denna maskin/CI apply)   | DNS:Edit, Zone Settings:Edit, Cache Rules:Edit | `TF_VAR_cloudflare_api_token` |
+| `cloudflare_dns_token` | cert-manager (en secret i klustret) | **Endast** DNS:Edit                            | `TF_VAR_cloudflare_dns_token` |
 
 Skapa båda i Cloudflare Dashboard → **My Profile → API Tokens → Create Token → Custom
 token**, scopade mot din specifika zon. Den bredare token i klustret vore annars ett sätt för

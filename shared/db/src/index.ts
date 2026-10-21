@@ -10,3 +10,4 @@
 export * from './shard-router.js';
 export * from './pools.js';
 export * from './transaction.js';
+export * from './pg-errors.js';

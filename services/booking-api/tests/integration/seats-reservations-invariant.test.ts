@@ -76,4 +76,37 @@ describe('seats ↔ reservations invariant', () => {
     expect(violations.heldSeatsWithoutActiveReservation).toEqual([]);
     expect(violations.activeReservationsWithoutHeldSeats).toEqual([]);
   }, 60_000);
+
+  it('holds after lazy expiry releases a seat from a single-seat stale reservation', async () => {
+    // The previous test never exercises the expiry/release path at all
+    // (every seat there is reserved fresh) — the only place drift
+    // between `seats` and `reservations` can actually happen is
+    // exactly there, so it needs its own dedicated case.
+    const pool = db.shardPools.pools[0];
+    const eventId = randomUUID();
+    const seatId = randomUUID();
+    await seedEventWithSeats(pool, { eventId, seatIds: [seatId] });
+
+    const stale = await reserveSeats(db.shardPools, {
+      eventId,
+      seatIds: [seatId],
+      queueTokenId: randomUUID(),
+      idempotencyKey: randomUUID(),
+    });
+    await pool.query(
+      "UPDATE reservations SET release_after = now() - interval '1 second' WHERE id = $1",
+      [stale.reservationId],
+    );
+
+    await reserveSeats(db.shardPools, {
+      eventId,
+      seatIds: [seatId],
+      queueTokenId: randomUUID(),
+      idempotencyKey: randomUUID(),
+    });
+
+    const violations = await findInvariantViolations(db);
+    expect(violations.heldSeatsWithoutActiveReservation).toEqual([]);
+    expect(violations.activeReservationsWithoutHeldSeats).toEqual([]);
+  }, 60_000);
 });

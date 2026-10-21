@@ -15,15 +15,25 @@ export async function withTransaction<T>(
   fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
+  let failed = false;
   try {
     await client.query('BEGIN');
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    failed = true;
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Rolling back failed too (e.g. the connection already dropped)
+      // — the ORIGINAL error below is what actually explains the
+      // failure, so it's rethrown either way. `failed` staying true is
+      // what tells `release()` below to destroy this connection rather
+      // than hand a possibly-poisoned one back to the pool.
+    }
     throw error;
   } finally {
-    client.release();
+    client.release(failed);
   }
 }

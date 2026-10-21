@@ -21,7 +21,7 @@ function createFakeClient(): {
 }
 
 describe('withTransaction', () => {
-  it('runs BEGIN, the callback, then COMMIT, and releases the client', async () => {
+  it('runs BEGIN, the callback, then COMMIT, and releases the client back to the pool', async () => {
     const { client, query, release } = createFakeClient();
     const pool = { connect: vi.fn().mockResolvedValue(client) };
 
@@ -34,9 +34,10 @@ describe('withTransaction', () => {
     expect(query).toHaveBeenNthCalledWith(1, 'BEGIN');
     expect(query).toHaveBeenNthCalledWith(2, 'COMMIT');
     expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledWith(false);
   });
 
-  it('rolls back and releases, then rethrows, when the callback fails', async () => {
+  it('rolls back, rethrows the original error, and destroys the connection, when the callback fails', async () => {
     const { client, query, release } = createFakeClient();
     const pool = { connect: vi.fn().mockResolvedValue(client) };
     const failure = new Error('boom');
@@ -49,6 +50,29 @@ describe('withTransaction', () => {
 
     expect(query).toHaveBeenNthCalledWith(1, 'BEGIN');
     expect(query).toHaveBeenNthCalledWith(2, 'ROLLBACK');
+    // true, not an Error object: tells node-postgres to destroy this
+    // connection instead of recycling a possibly-poisoned one.
     expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledWith(true);
+  });
+
+  it('still rethrows the ORIGINAL error, and still destroys the connection, when ROLLBACK itself fails', async () => {
+    const { client, query, release } = createFakeClient();
+    // 1st call is BEGIN (resolves), 2nd is the ROLLBACK withTransaction
+    // issues after the callback throws (rejects here).
+    query
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('connection already closed'));
+    const pool = { connect: vi.fn().mockResolvedValue(client) };
+    const failure = new Error('original failure');
+
+    await expect(
+      withTransaction(pool, () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+
+    expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledWith(true);
   });
 });

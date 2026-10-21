@@ -18,21 +18,32 @@ import type { Pool } from 'pg';
 import type { IdempotencyClaim, IdempotencyClaimParams } from '../types/idempotency.js';
 
 /**
- * Tries to become the one caller that executes the operation. The
- * INSERT either wins (nothing existed yet — `claimed`) or loses to
- * whichever concurrent caller got there first, in which case we read
- * that existing row to decide which of the three loser outcomes applies
- * (docs/plan.md "Idempotens": in-flight retries get 409, never an empty
- * body).
+ * Tries to become the one caller that executes the operation.
+ *
+ * `ON CONFLICT ... DO UPDATE ... WHERE expires_at < now()` folds the
+ * "is the existing key stale?" check into the same atomic statement as
+ * the claim attempt: a fresh (not-yet-expired) existing row makes the
+ * `WHERE` false, so the DO UPDATE is skipped and this returns 0 rows
+ * exactly like a plain DO NOTHING would. An EXPIRED existing row makes
+ * the `WHERE` true, so we overwrite it and reclaim the key — without
+ * this, a key could never be reused after `expires_at` passed, and
+ * (the actual bug) nothing ever checked `expires_at` at all, so a
+ * stale `completed` row would go on being replayed as a valid result
+ * forever.
  */
 export async function claimIdempotencyKey(
   pool: Pool,
   params: IdempotencyClaimParams,
 ): Promise<IdempotencyClaim> {
   const inserted = await pool.query(
-    `INSERT INTO idempotency_keys (event_id, scope, key, request_hash, expires_at)
-     VALUES ($1, $2, $3, $4, now() + ($5 * interval '1 millisecond'))
-     ON CONFLICT (event_id, scope, key) DO NOTHING
+    `INSERT INTO idempotency_keys (event_id, scope, key, request_hash, status, response_body, expires_at)
+     VALUES ($1, $2, $3, $4, 'in_flight', NULL, now() + ($5 * interval '1 millisecond'))
+     ON CONFLICT (event_id, scope, key) DO UPDATE
+       SET request_hash = EXCLUDED.request_hash,
+           status = EXCLUDED.status,
+           response_body = EXCLUDED.response_body,
+           expires_at = EXCLUDED.expires_at
+       WHERE idempotency_keys.expires_at < now()
      RETURNING event_id`,
     [params.eventId, params.scope, params.key, params.requestHash, params.ttlMs],
   );
@@ -52,10 +63,10 @@ export async function claimIdempotencyKey(
   );
   const row = existing.rows[0];
   if (row === undefined) {
-    // Lost the INSERT race, then the winner's row vanished (deleted
-    // after its own attempt failed, see deleteIdempotencyKey) before we
-    // could read it. Safe to treat as if we'd won: nothing else holds
-    // the key now.
+    // Lost the race, then the winner's row vanished (deleted after its
+    // own attempt failed, see deleteIdempotencyKey) before we could
+    // read it. Safe to treat as if we'd won: nothing else holds the
+    // key now.
     return claimIdempotencyKey(pool, params);
   }
   if (row.request_hash !== params.requestHash) {
@@ -83,7 +94,9 @@ export async function completeIdempotencyKey(
  * Undoes a claim after the real work failed, so the same key can be
  * retried fresh (seat availability changes over time — unlike a
  * payment charge, replaying a stale failure isn't the correct
- * idempotency behaviour here; only successes get memoized).
+ * idempotency behaviour here; only successes get memoized). Must never
+ * be called once the real work has actually committed — see
+ * reservation-service.ts for why.
  */
 export async function deleteIdempotencyKey(
   pool: Pool,

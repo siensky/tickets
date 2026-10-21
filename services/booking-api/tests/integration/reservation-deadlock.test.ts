@@ -1,9 +1,19 @@
 /**
  * Crown-jewel test #2 (docs/plan.md "Tester"): requesting seats [A, B]
- * and [B, A] at the same time must not deadlock. `ORDER BY id` before
- * `FOR UPDATE` in the seat lock query is what makes both transactions
- * always acquire the two rows in the same order regardless of the
- * order the caller listed them in.
+ * and [B, A] at the same time must not deadlock — "båda slutförs,
+ * ingen deadlock" (both COMPLETE, no deadlock), not "both succeed":
+ * they're contesting the identical pair, so exactly one can actually
+ * win the seats.
+ *
+ * Locking each seat individually in sorted order (reservation-repository.ts)
+ * means this never reaches Postgres's own deadlock detector in the
+ * first place — the loser's `NOWAIT` fails immediately on the first
+ * contended seat instead of blocking, so there's nothing to deadlock
+ * on. That's a feature, not a test gap: the system is built to avoid
+ * ever taking a blocking wait in this path. See
+ * reservation-cross-seat-expiry.test.ts for the ABBA scenario that
+ * *did* used to deadlock for real (two different seats of the same
+ * stale reservation, which blocking cross-table writes made possible).
  */
 import { randomUUID } from 'node:crypto';
 import { SeatUnavailableError } from '@tickets/domain';

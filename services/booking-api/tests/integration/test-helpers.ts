@@ -61,11 +61,13 @@ export async function stopTestDatabase(db: TestDatabase): Promise<void> {
 /**
  * Opens `count` connections and immediately releases them, so the pool
  * has that many already established before a test fires concurrent
- * requests. Without this, the first N requests pay for TCP+auth
- * handshakes that can take longer than the tiny reservation transaction
- * itself — which would let a "loser" see the winner's row as already
- * `completed` instead of `in_flight`, the opposite of what the
- * idempotency crown-jewel test needs to exercise.
+ * requests. The idempotency claim/complete split (idempotency-repository.ts)
+ * is what actually GUARANTEES losers observe `in_flight` — the claim
+ * commits on its own before the winner's (slower) seat-locking work
+ * even starts, so there's a real window regardless of connection
+ * timing. This just removes TCP+auth handshake variance from that
+ * window's size, for a faster and more deterministic test — not the
+ * thing making the race observable at all.
  */
 export async function warmPool(pool: Pool, count: number): Promise<void> {
   const clients = await Promise.all(Array.from({ length: count }, () => pool.connect()));

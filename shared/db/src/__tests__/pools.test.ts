@@ -48,6 +48,34 @@ describe('getPoolForEvent', () => {
   });
 });
 
+describe('createShardPools error handling', () => {
+  it('attaches an error listener so an idle-client error does not crash the process, and forwards it', () => {
+    process.env['DATABASE_URL_SHARD_0'] = 'postgresql://fake-0';
+    process.env['DATABASE_URL_SHARD_1'] = 'postgresql://fake-1';
+    const onShardError = vi.fn();
+    const shardPools = createShardPools({ onShardError });
+
+    const error = new Error('connection terminated unexpectedly');
+    // pg.Pool re-emits an idle client's error as an `error` event on
+    // the Pool itself; with no listener, that's an uncaught exception.
+    // Emitting it directly here is what proves a listener is attached
+    // — if it weren't, this `emit` call would throw synchronously.
+    expect(() => shardPools.pools[0].emit('error', error)).not.toThrow();
+    expect(onShardError).toHaveBeenCalledWith(0, error);
+
+    shardPools.pools[1].emit('error', error);
+    expect(onShardError).toHaveBeenCalledWith(1, error);
+  });
+
+  it('works with no onShardError callback at all — still must not crash', () => {
+    process.env['DATABASE_URL_SHARD_0'] = 'postgresql://fake-0';
+    process.env['DATABASE_URL_SHARD_1'] = 'postgresql://fake-1';
+    const shardPools = createShardPools();
+
+    expect(() => shardPools.pools[0].emit('error', new Error('boom'))).not.toThrow();
+  });
+});
+
 describe('closeShardPools', () => {
   it('ends both pools', async () => {
     const shard0 = new Pool({ connectionString: 'postgresql://fake-0' });

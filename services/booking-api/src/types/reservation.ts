@@ -17,6 +17,13 @@ export interface SeatLockRow {
   readonly reservationId: string | null;
 }
 
+export interface SeatLockOutcome {
+  /** Seats this call actually acquired a `FOR UPDATE` lock on. */
+  readonly locked: readonly SeatLockRow[];
+  /** Seats that exist but failed `NOWAIT` — someone else holds them right now. */
+  readonly lockFailedSeatIds: readonly string[];
+}
+
 export interface InsertedReservation {
   readonly id: string;
   readonly expiresAt: Date;
