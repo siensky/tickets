@@ -807,12 +807,39 @@ tillsammans fyra av de betygsgrundande kraven. Omfördelning ensamt räckte inte
 | ~~**0**~~ | ~~19/10~~ | ~~Repo, tooling, felhierarki, docker-compose~~ | **Klar** |
 | **1** | 20–22/10 | **Walking skeleton.** Terraform: 2 noder, brandvägg, privat nät, **Hetzner CSI**. k3s, ingress-nginx, **cert-manager med DNS-01 + LE staging**, CF **Full (strict)** + **Cache Rule** + **CF-Connecting-IP-konfiguration**. Actions: lint → typecheck → test → image → **migrations-Job** → `kubectl apply` → `rollout status`. **Mät cache hit ratio.** | **G: automatisk deploy** |
 | **2** | 23–26/10 | **Domänkärnan.** Schema + migrations mot båda shardarna. Shard-router. Reservationstransaktionen (`release_after`, `now()` från Postgres). Idempotensnycklar med `event_id` + principal-scope. Outbox + relay i `scheduler-worker`. **De fyra kronjuveltesterna** + invariantkontrollen. | Projektets hjärta |
-| **3** | 27–28/10 | Väntrum med **signerad stateless kötoken**. `realtime-gateway` + Redis Pub/Sub + **läsbart tillstånd bakom varje WS-meddelande**. `notification-worker` + dedupe + **delivery limit**. `payment-mock`. Stripe: **raw body, rate-limit-undantag, 200-snabbt**, **frysning + återbetalning**. Auth0. Rate limiting. | Flödet komplett |
-| **4** | 29–31/10 | kube-prometheus-stack, Loki + Alloy, OTel-instrumentering. **`retentionSize` + PVC-dimensionering.** Dashboards, `oversell_prevented_total`, larm → Slack. Nattlig `pg_dump` av båda shardarna → R2/B2 + **genomförd återställningsövning** med tidtagning. | **G: metrics, logging, backup** |
-| **5** | 1/11 | Minimal men komplett PWA: evenemang, väntrum, arenakarta (sektionsvy), reservation, checkout, mina biljetter. TanStack Query. Playwright e2e genom hela flödet. | **G: e2e i pipeline** |
-| **6** | 2–3/11 | HPA (**requests 250m**) + KEDA, `scaleDown` 60 s. Zero-downtime: probes, `maxUnavailable: 0`, preStop, graceful shutdown, **`Recreate` på scheduler-worker**. k6-scenarier, lastgeneratorer, fd-gränser. **Mät HPA-kurvan, sedan den stora körningen.** | **VG** |
+| **3** | 27–28/10 | Väntrum med **signerad stateless kötoken**. `realtime-gateway` + Redis Pub/Sub + **läsbart tillstånd bakom varje WS-meddelande**. `notification-worker` + dedupe + **delivery limit**. `payment-mock`. Stripe: **raw body, rate-limit-undantag, 200-snabbt**, **frysning + återbetalning**. Auth0. Rate limiting. | **Klar efter review** (se nedan) — Flödet komplett |
+| **4** | 29–31/10 | kube-prometheus-stack, Loki + Alloy, OTel-instrumentering. **`retentionSize` + PVC-dimensionering.** Dashboards, `oversell_prevented_total`, larm → Slack. Nattlig `pg_dump` av båda shardarna → R2/B2 + **genomförd återställningsövning** med tidtagning. **Notering från Fas 3-review:** `notification-worker`s egen `rabbitmq_queue_messages_ready`-gauge (queue-depth-metric.ts) krockar namnmässigt med RabbitMQ-pluginets likalydande mått som aktiveras här — döp om eller ta bort gaugen innan dashboards byggs på den, annars blandas två källor med olika semantik (plugin = faktiskt ködjup, egen gauge = en kopia per podd, ej summerbar). | **G: metrics, logging, backup** |
+| **5** | 1/11 | Minimal men komplett PWA: evenemang, väntrum, arenakarta (sektionsvy), reservation, checkout, mina biljetter. TanStack Query. Playwright e2e genom hela flödet. **Notering från Fas 3-review:** WS-klienten autentiserar genom att skicka `{"token": "..."}` som sitt FÖRSTA meddelande efter anslutning — token ligger INTE i `/ws?token=...` (loggas annars i klartext). Serversidan väntar 5 s på detta meddelande innan den stänger anslutningen. | **G: e2e i pipeline** |
+| **6** | 2–3/11 | HPA (**requests 250m**) + KEDA, `scaleDown` 60 s. Zero-downtime: probes, `maxUnavailable: 0`, preStop, graceful shutdown, **`Recreate` på scheduler-worker**. k6-scenarier, lastgeneratorer, fd-gränser. **Mät HPA-kurvan, sedan den stora körningen.** **Noteringar från Fas 3-review, innan `queue-storm`:** (1) `realtime-gateway` ger varje WS-klient sin egen duplicerade Redis-anslutning (`subscribeToChannel`) — vid 50 000 samtidiga klienter går det långt över Redis standardgräns på 10 000 anslutningar; bör bli EN subscriber per podd (`psubscribe ws:*` + en lokal kanal→socket-tabell) innan lasttestet körs. (2) `queue_session_total_minutes`/`queue_admission_rate_per_minute` måste tunas till queue-storms skala — kötokenets JWT-`exp` sätts vid JOIN, inte vid insläpp, så med låg insläppstakt och djup kö hinner token gå ut innan användaren släpps in; `admitNextBatch` (ZPOPMIN) märker heller inte redan utgångna token innan den "släpper in" dem, vilket slösar insläppskvoten på döda poster. | **VG** |
 | — | **4/11** | **MUNTLIGT FÖRSVAR** | |
 | **7** | 5–8/11 | `architecture.md`, ADR:er, `runbook.md` med **RPO/RTO**, README med adresser. Polering. | **Inlämning 8/11** |
+
+**Fas 3 — kända luckor kvar efter reviewn** (inom Fas 3:s eget scope, inte skjutna till
+en senare fas — flaggas hellre än göms):
+
+- **"Din stol togs"** (docs/plan.md "Realtid") är inte kopplad ihop. `shared/redis/src/
+  seat-marks.ts` (markSeat/unmarkSeat/getMarkedSeats) finns men anropas ingenstans —
+  ingen route markerar en stol, och inget broadcastar till andra kötoken när en markerad
+  stol faktiskt tas. Kräver en ny endpoint (markera/avmarkera stol) plus en hook i
+  reservationstransaktionen.
+- **Slutsålt-flödet** (broadcasta slutsålt, stoppa insläpp, konvertera kön till
+  väntelista) är inte byggt. `queue-admission-service.ts` hanterar bara "stängt
+  försäljningsfönster" (`sales_close_at` passerad), inte "alla stolar sålda".
+  `waitlist`-tabellen finns i schemat men skrivs aldrig till.
+- **Köplats-nedräkning och reservationsnedräkning som egna WS-push** är inte byggda —
+  bedömt som okritiskt eftersom `GET /queue/status`/`GET /reservations/:id` redan ger
+  klienten vad den behöver för att räkna ner själv (samma mönster som planen redan
+  beskriver för WS-desync), men värt att se över i Fas 5 när PWA:n faktiskt bygger UI:t.
+- **Route-level `inject()`-tester saknas** för de nya routerna (queue join/status,
+  reservations POST/GET, checkout, `/webhooks/stripe`) — docs/rules.md §8 kräver minst
+  ett lyckat och ett misslyckat fall per route. Service-lagret har gott om tester, men
+  inget bevisar Fastify-ledet (raw body på webhooken, rate-limit-undantaget, faktiska
+  HTTP-statuskoder).
+- **Redis/RabbitMQ-statefulsets saknar `readOnlyRootFilesystem`** (docs/plan.md
+  "Säkerhet" kräver det för applikationscontainrar). Inte tillagt blint här eftersom det
+  inte går att verifiera mot en riktig k3s-kluster i den här granskningen — vilka extra
+  skrivbara sökvägar (t.ex. `/tmp`) de två imagerna faktiskt behöver måste bekräftas vid
+  första deploy, annars riskerar man en crash-loop i stället för en säkerhetsvinst.
 
 **Flyttat till efter inlämningen:** scanner-appen (Expo) · proof of work + Turnstile ·
 PostHog + session replay · ArgoCD + Sealed Secrets · Tempo-backend · DLQ med adminvy ·

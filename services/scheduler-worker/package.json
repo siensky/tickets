@@ -17,19 +17,28 @@
     "@tickets/domain": "workspace:*",
     "@tickets/observability": "workspace:*",
     "@tickets/rabbit": "workspace:*",
+    "@tickets/redis": "workspace:*",
+    "amqplib": "2.2.0",
     "fastify": "5.12.7",
+    "ioredis": "6.0.0",
+    "pg": "8.23.1",
     "pino": "10.4.0",
     "prom-client": "15.1.3"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.2.1",
     "@testcontainers/rabbitmq": "12.2.1",
+    "@testcontainers/redis": "12.2.1",
     "@types/amqplib": "0.10.8",
     "@types/node": "22.19.0",
     "@types/pg": "8.23.1",
+<<<<<<< HEAD
     "amqplib": "2.2.0",
     "node-pg-migrate": "9.0.0",
     "pg": "8.23.1",
+=======
+    "node-pg-migrate": "9.0.0",
+>>>>>>> d140362 (fas 3)
     "testcontainers": "12.2.1",
     "tsup": "9.0.0",
     "tsx": "4.23.15",

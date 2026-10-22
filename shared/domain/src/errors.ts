@@ -163,6 +163,57 @@ export class ActiveReservationExistsError extends ConflictError {
   }
 }
 
+/** Thrown when a queue token has a valid signature but hasn't been admitted past the waiting room yet. */
+export class QueueTokenNotAdmittedError extends ForbiddenError {
+  constructor(queueTokenId: string) {
+    super(
+      `Queue token ${queueTokenId} has not been admitted past the waiting room yet`,
+      { queueTokenId },
+      'QUEUE_TOKEN_NOT_ADMITTED',
+    );
+  }
+}
+
+/** Thrown when joining the waiting room is attempted before an event's `sales_open_at`. */
+export class SalesNotOpenError extends ForbiddenError {
+  constructor(eventId: string, salesOpenAt: string) {
+    super(
+      `Sales for event ${eventId} open at ${salesOpenAt}`,
+      { eventId, salesOpenAt },
+      'SALES_NOT_OPEN',
+    );
+  }
+}
+
+/**
+ * Thrown once an event's `sales_close_at` has passed (docs/plan.md
+ * "Väntrum": "Stängt försäljningsfönster ... eget tillstånd, kön töms
+ * med besked") — distinct from `GoneError`'s generic 410 only in that
+ * callers use this to offer the waitlist instead of treating it as a
+ * plain "resource gone".
+ */
+export class SalesClosedError extends GoneError {
+  constructor(eventId: string) {
+    super(`Sales for event ${eventId} are closed`, { eventId }, 'SALES_CLOSED');
+  }
+}
+
+/**
+ * Thrown when a reservation is not in the status a requested transition
+ * expects (docs/plan.md "Betalning": only an `active` reservation may
+ * start a Checkout; a reservation already `pending_payment` must not
+ * start a second one — "en aktiv Checkout per kötoken").
+ */
+export class ReservationNotInExpectedStatusError extends ConflictError {
+  constructor(reservationId: string, expectedStatus: string, actualStatus: string) {
+    super(
+      `Reservation ${reservationId} is ${actualStatus}, expected ${expectedStatus}`,
+      { reservationId, expectedStatus, actualStatus },
+      'RESERVATION_NOT_IN_EXPECTED_STATUS',
+    );
+  }
+}
+
 // --- Helpers used by the outermost error handler (rules.md §5) -----------
 
 /** Narrows `unknown` (whatever a catch block caught) down to `BaseError`. */

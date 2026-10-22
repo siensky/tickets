@@ -2,8 +2,13 @@
  * Entrypoint for payment-mock — simulates the payment provider for load
  * testing (docs/plan.md "Betalning"): configurable latency, ~5% failures,
  * duplicate webhooks, and responses arriving after a reservation has
- * expired, all gated behind an HMAC signature like Stripe uses. That
- * chaos behaviour is implemented in Fas 3; this is the bare skeleton.
+ * expired, all gated behind an HMAC signature like Stripe uses. The
+ * `stripe` Node SDK itself is pointed at this service during a load test
+ * (booking-api's `STRIPE_HOST`/`STRIPE_PORT`, see services/stripe-
+ * client.ts) — so it POSTs `application/x-www-form-urlencoded`, Stripe's
+ * own wire format, not JSON. Fastify has no built-in parser for that
+ * content type, and @fastify/formbody is a new dependency not approved
+ * — this file registers a tiny one itself.
  */
 import { createHttpMetrics, createLogger, createRegistry } from '@tickets/observability';
 import { realpathSync } from 'node:fs';
@@ -16,19 +21,17 @@ import Fastify, {
 } from 'fastify';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
+import { registerCheckoutSessionsRoutes } from './routes/checkout-sessions.js';
+import { registerRefundsRoutes } from './routes/refunds.js';
+import { loadChaosConfig } from './services/chaos-config.js';
+import { createSessionStore } from './services/session-store.js';
 
 const SERVICE_NAME = 'payment-mock';
+const FORM_URLENCODED = 'application/x-www-form-urlencoded';
 
 export async function start(): Promise<void> {
   const logger = createLogger({ serviceName: SERVICE_NAME });
   const registry = createRegistry(SERVICE_NAME);
-  // RED-metriken (createHttpMetrics) registrerades i registret men
-  // ingenting ökade dem — de hade stått still på noll för alltid, vilket
-  // är SÄMRE än att sakna dem helt: i Fas 4 bygger Grafana-paneler på
-  // dem, och en platt nolla läser som "ingen trafik" i stället för "inte
-  // instrumenterat". routeOptions.url (inte den råa, dynamiska URL:en)
-  // håller kardinaliteten nere — en path med :id i hade annars gett en
-  // egen tidsserie per unikt ID.
   const httpMetrics = createHttpMetrics(registry);
 
   const app = Fastify<
@@ -37,8 +40,23 @@ export async function start(): Promise<void> {
     RawReplyDefaultExpression<RawServerDefault>,
     FastifyBaseLogger
   >({ loggerInstance: logger });
+  app.addContentTypeParser(FORM_URLENCODED, { parseAs: 'string' }, (_request, body, done) => {
+    done(null, body);
+  });
+
   registerHealthRoutes(app);
   registerMetricsRoutes(app, registry);
+  registerCheckoutSessionsRoutes(app, {
+    sessionStore: createSessionStore(),
+    chaosConfig: loadChaosConfig(),
+    webhookUrl:
+      process.env['BOOKING_API_WEBHOOK_URL'] ?? 'http://localhost:3000/webhooks/stripe',
+    webhookSecret: process.env['STRIPE_WEBHOOK_SECRET'] ?? '',
+    checkoutBaseUrl:
+      process.env['PAYMENT_MOCK_CHECKOUT_BASE_URL'] ?? 'http://localhost:3002/mock-checkout',
+    logger,
+  });
+  registerRefundsRoutes(app);
 
   app.addHook('onResponse', async (request, reply) => {
     const route = request.routeOptions.url ?? 'unmatched';

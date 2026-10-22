@@ -6,10 +6,12 @@
  * database to run the reservation transaction against.
  */
 import type { ShardPools } from '@tickets/db';
+import { createRedisClient, type RedisClient } from '@tickets/redis';
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
+import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import { runner } from 'node-pg-migrate';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +20,11 @@ import { Pool } from 'pg';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GLOBAL_MIGRATIONS_DIR = resolve(HERE, '../../../../shared/db/migrations/global');
 const SHARDED_MIGRATIONS_DIR = resolve(HERE, '../../../../shared/db/migrations/sharded');
-const SILENT_LOGGER = { info: () => undefined, warn: () => undefined, error: () => undefined };
+export const SILENT_LOGGER = {
+  info: (): undefined => undefined,
+  warn: (): undefined => undefined,
+  error: (): undefined => undefined,
+};
 
 export interface TestDatabase {
   readonly container: StartedPostgreSqlContainer;
@@ -93,6 +99,22 @@ export async function seedEventWithSeats(
       [seatId, params.eventId, index + 1, `TICKET-${params.eventId}-${index}`],
     );
   }
+}
+
+export interface TestRedis {
+  readonly container: StartedRedisContainer;
+  readonly client: RedisClient;
+}
+
+export async function startTestRedis(): Promise<TestRedis> {
+  const container = await new RedisContainer('redis:8-alpine').start();
+  const client = createRedisClient(container.getConnectionUrl());
+  return { container, client };
+}
+
+export async function stopTestRedis(redis: TestRedis): Promise<void> {
+  await redis.client.quit();
+  await redis.container.stop();
 }
 
 export async function getSeatStatuses(

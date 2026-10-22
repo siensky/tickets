@@ -1,0 +1,95 @@
+# docs/plan.md "Tjänster": notification-worker, 1–10 repliker (KEDA på
+# RabbitMQ-ködjup, fas 6 — statisk replik = 1 här tills dess).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-worker
+  namespace: ticketing
+  labels:
+    app: notification-worker
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: notification-worker
+  template:
+    metadata:
+      labels:
+        app: notification-worker
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: notification-worker
+          image: ghcr.io/siensky/tickets/notification-worker:latest
+          ports:
+            - containerPort: 3011
+              name: http
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: NOTIFICATION_WORKER_PORT
+              value: '3011'
+            - name: PGPASSWORD_SHARD_0
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-shard-0-credentials
+                  key: password
+            - name: PGPASSWORD_SHARD_1
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-shard-1-credentials
+                  key: password
+            - name: DATABASE_URL_SHARD_0
+              value: 'postgresql://postgres:$(PGPASSWORD_SHARD_0)@postgres-shard-0.data.svc.cluster.local:5432/tickets'
+            - name: DATABASE_URL_SHARD_1
+              value: 'postgresql://postgres:$(PGPASSWORD_SHARD_1)@postgres-shard-1.data.svc.cluster.local:5432/tickets'
+            - name: REDIS_URL
+              value: 'redis://redis.data.svc.cluster.local:6379'
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: password
+            - name: RABBITMQ_URL
+              value: 'amqp://app:$(RABBITMQ_PASSWORD)@rabbitmq.data.svc.cluster.local:5672'
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

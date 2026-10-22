@@ -19,6 +19,10 @@ const SENSITIVE_FIELD_NAMES = [
   'apiKey',
   'cardNumber',
   'cvc',
+  // GDPR (docs/plan.md "Säkerhet"): e-post är personuppgift, inte bara
+  // en hemlighet — notification-worker loggar den som ett strukturerat
+  // fält på varje skickat mejl (docs/rules.md §7).
+  'email',
 ];
 
 // fast-redact (pinos redaction-motor) stödjer inget rekursivt jokertecken

@@ -16,6 +16,7 @@ import {
   type HttpMetrics,
   type Logger,
 } from '@tickets/observability';
+import { closeRedisClient, createRedisClient, type RedisClient } from '@tickets/redis';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Fastify, {
@@ -29,6 +30,10 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { startHeartbeat } from './services/heartbeat.js';
 import { startOutboxRelay, type OutboxRelay } from './services/outbox-relay-service.js';
+import {
+  startQueueAdmissionJob,
+  type QueueAdmissionJob,
+} from './services/queue-admission-service.js';
 import {
   startReservationReleaseJob,
   type ReservationReleaseJob,
@@ -69,7 +74,9 @@ function createShutdownHandler(
     heartbeat: NodeJS.Timeout;
     reservationRelease: ReservationReleaseJob;
     outboxRelay: OutboxRelay;
+    queueAdmission: QueueAdmissionJob;
     shardPools: ShardPools;
+    redis: RedisClient;
   },
 ): (signal: string) => void {
   const shutdown = async (signal: string): Promise<void> => {
@@ -78,7 +85,9 @@ function createShutdownHandler(
     await resources.app.close();
     await resources.reservationRelease.stop();
     await resources.outboxRelay.stop();
+    await resources.queueAdmission.stop();
     await closeShardPools(resources.shardPools);
+    await closeRedisClient(resources.redis);
     process.exit(0);
   };
   return (signal: string): void => {
@@ -129,13 +138,17 @@ export async function start(): Promise<void> {
     process.env['RABBITMQ_URL'] ?? 'amqp://localhost',
     logger,
   );
+  const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
+  const queueAdmission = startQueueAdmissionJob(shardPools, redis, logger);
 
   const shutdownOrCrash = createShutdownHandler(logger, {
     app,
     heartbeat,
     reservationRelease,
     outboxRelay,
+    queueAdmission,
     shardPools,
+    redis,
   });
   process.on('SIGTERM', () => shutdownOrCrash('SIGTERM'));
   process.on('SIGINT', () => shutdownOrCrash('SIGINT'));

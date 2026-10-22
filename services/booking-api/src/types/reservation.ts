@@ -45,3 +45,25 @@ export interface ReservationResult {
   readonly status: 'active';
   readonly expiresAt: string;
 }
+
+export type ReservationStatus =
+  'active' | 'pending_payment' | 'converted' | 'expired' | 'cancelled';
+
+/** The read shape for `GET /reservations/:id` — unlike `ReservationResult`, status can be anything the row currently holds. */
+export interface ReservationView {
+  readonly reservationId: string;
+  readonly eventId: string;
+  readonly queueTokenId: string;
+  readonly status: ReservationStatus;
+  readonly expiresAt: string;
+  readonly seatIds: readonly string[];
+}
+
+export interface ReservationWithSeatsRow {
+  readonly id: string;
+  readonly eventId: string;
+  readonly queueTokenId: string;
+  readonly status: ReservationStatus;
+  readonly expiresAt: Date;
+  readonly seatIds: readonly string[];
+}

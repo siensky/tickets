@@ -4,7 +4,9 @@
  * "Varför är WebSocket-gatewayen en egen tjänst?").
  */
 import websocketPlugin from '@fastify/websocket';
+import { createQueueTokenSecret } from '@tickets/auth';
 import { createHttpMetrics, createLogger, createRegistry } from '@tickets/observability';
+import { closeRedisClient, createRedisClient } from '@tickets/redis';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Fastify, {
@@ -18,6 +20,14 @@ import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerWsRoute } from './routes/ws.js';
 
 const SERVICE_NAME = 'realtime-gateway';
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value === '') {
+    throw new Error(`${name} must be set`);
+  }
+  return value;
+}
 
 export async function start(): Promise<void> {
   const logger = createLogger({ serviceName: SERVICE_NAME });
@@ -39,6 +49,9 @@ export async function start(): Promise<void> {
   >({ loggerInstance: logger });
   await app.register(websocketPlugin);
 
+  const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
+  const queueTokenSecret = createQueueTokenSecret(requireEnv('QUEUE_TOKEN_SECRET'));
+
   registerHealthRoutes(app);
   registerMetricsRoutes(app, registry);
 
@@ -51,7 +64,7 @@ export async function start(): Promise<void> {
       reply.elapsedTime / 1000,
     );
   });
-  registerWsRoute(app);
+  registerWsRoute(app, { redis, queueTokenSecret });
 
   const port = Number(process.env['REALTIME_GATEWAY_PORT'] ?? 3001);
   await app.listen({ port, host: '0.0.0.0' });
@@ -60,6 +73,7 @@ export async function start(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down gracefully');
     await app.close();
+    await closeRedisClient(redis);
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

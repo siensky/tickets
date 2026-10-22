@@ -34,6 +34,32 @@ export async function expireDueReservationsBatch(client: PoolClient): Promise<st
   return rows.map((row) => row.id);
 }
 
+/**
+ * Frysningens eget tak (docs/plan.md "Betalning": "Eget tak via
+ * `payment_frozen_until` ... annars blir frysningen ett sätt att hålla
+ * stolar gratis"). En betalning som ändå landar EFTER att det här hunnit
+ * köra är precis skyddsnät-fallet payment-consumer-service.ts hanterar
+ * (automatisk återbetalning) — denna frågan vet ingenting om det, den
+ * bara friger stolarna.
+ */
+export async function expireDueFrozenReservationsBatch(client: PoolClient): Promise<string[]> {
+  const { rows } = await client.query<{ id: string }>(
+    `WITH due AS (
+       SELECT id FROM reservations
+       WHERE status = 'pending_payment' AND payment_frozen_until < now()
+       ORDER BY id
+       FOR UPDATE SKIP LOCKED
+       LIMIT $1
+     )
+     UPDATE reservations
+     SET status = 'expired'
+     WHERE id IN (SELECT id FROM due)
+     RETURNING id`,
+    [BATCH_SIZE],
+  );
+  return rows.map((row) => row.id);
+}
+
 export async function releaseSeatsForReservations(
   client: PoolClient,
   reservationIds: readonly string[],

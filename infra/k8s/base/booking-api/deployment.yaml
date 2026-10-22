@@ -52,6 +52,77 @@ spec:
               value: production
             - name: BOOKING_API_PORT
               value: '3000'
+            - name: PGPASSWORD_SHARD_0
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-shard-0-credentials
+                  key: password
+            - name: PGPASSWORD_SHARD_1
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-shard-1-credentials
+                  key: password
+            - name: DATABASE_URL_SHARD_0
+              value: 'postgresql://postgres:$(PGPASSWORD_SHARD_0)@postgres-shard-0.data.svc.cluster.local:5432/tickets'
+            - name: DATABASE_URL_SHARD_1
+              value: 'postgresql://postgres:$(PGPASSWORD_SHARD_1)@postgres-shard-1.data.svc.cluster.local:5432/tickets'
+            - name: REDIS_URL
+              value: 'redis://redis.data.svc.cluster.local:6379'
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: password
+            - name: RABBITMQ_URL
+              value: 'amqp://app:$(RABBITMQ_PASSWORD)@rabbitmq.data.svc.cluster.local:5672'
+            - name: RATE_LIMIT_PER_SECOND
+              value: '50'
+            - name: PAYMENT_FROZEN_MINUTES
+              value: '10'
+            # Inte hemliga — rena URL:er. Byts till apps/webs riktiga
+            # domän den dagen fas 5 bygger PWA:n.
+            - name: CHECKOUT_SUCCESS_URL
+              value: 'https://tikknet.se/checkout/success'
+            - name: CHECKOUT_CANCEL_URL
+              value: 'https://tikknet.se/checkout/cancel'
+            # docs/plan.md "Secrets": GitHub Actions secrets → Kubernetes
+            # Secret vid deploy. `tickets-app-secrets` kommer från RIKTIGA
+            # externa konton (Auth0/Stripe) — skrivs över vid VARJE deploy
+            # (samma mönster som ghcr-pull-secret), så en roterad nyckel i
+            # GitHub alltid speglas. `tickets-generated-secrets` är
+            # egengenererade (samma mönster som postgres-credentials) —
+            # skapas EN gång, rörs aldrig igen (annars ogiltigförklaras
+            # redan utfärdade kötoken/QR-koder). Se .github/workflows/deploy.yml.
+            - name: AUTH0_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-app-secrets
+                  key: auth0-domain
+            - name: AUTH0_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-app-secrets
+                  key: auth0-audience
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-app-secrets
+                  key: stripe-secret-key
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-app-secrets
+                  key: stripe-webhook-secret
+            - name: QUEUE_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-generated-secrets
+                  key: queue-token-secret
+            - name: QR_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-generated-secrets
+                  key: qr-token-secret
           resources:
             requests:
               cpu: 250m

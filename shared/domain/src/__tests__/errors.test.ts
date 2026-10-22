@@ -9,7 +9,11 @@ import {
   InternalError,
   NotFoundError,
   QueueTokenInvalidError,
+  QueueTokenNotAdmittedError,
   ReservationExpiredError,
+  ReservationNotInExpectedStatusError,
+  SalesClosedError,
+  SalesNotOpenError,
   SeatUnavailableError,
   ShardUnavailableError,
   TooManyRequestsError,
@@ -80,6 +84,48 @@ describe('BaseError hierarchy', () => {
     expect(toErrorResponseBody(error)).toEqual({
       error: { code: 'VALIDATION_ERROR', message: 'bad input' },
     });
+  });
+
+  it('QueueTokenNotAdmittedError maps to 403 and carries the queue token', () => {
+    const error = new QueueTokenNotAdmittedError('queue-token-1');
+    expect(error.httpStatus).toBe(403);
+    expect(error.code).toBe('QUEUE_TOKEN_NOT_ADMITTED');
+    expect(error.context).toEqual({ queueTokenId: 'queue-token-1' });
+    expect(error instanceof ForbiddenError).toBe(true);
+  });
+
+  it('SalesNotOpenError maps to 403 and carries the event id and open time', () => {
+    const error = new SalesNotOpenError('event-1', '2026-11-01T00:00:00.000Z');
+    expect(error.httpStatus).toBe(403);
+    expect(error.code).toBe('SALES_NOT_OPEN');
+    expect(error.context).toEqual({
+      eventId: 'event-1',
+      salesOpenAt: '2026-11-01T00:00:00.000Z',
+    });
+  });
+
+  it('SalesClosedError maps to 410 and carries the event id', () => {
+    const error = new SalesClosedError('event-1');
+    expect(error.httpStatus).toBe(410);
+    expect(error.code).toBe('SALES_CLOSED');
+    expect(error.context).toEqual({ eventId: 'event-1' });
+    expect(error instanceof GoneError).toBe(true);
+  });
+
+  it('ReservationNotInExpectedStatusError maps to 409 and carries both statuses', () => {
+    const error = new ReservationNotInExpectedStatusError(
+      'res-1',
+      'active',
+      'pending_payment',
+    );
+    expect(error.httpStatus).toBe(409);
+    expect(error.code).toBe('RESERVATION_NOT_IN_EXPECTED_STATUS');
+    expect(error.context).toEqual({
+      reservationId: 'res-1',
+      expectedStatus: 'active',
+      actualStatus: 'pending_payment',
+    });
+    expect(error instanceof ConflictError).toBe(true);
   });
 
   it.each([

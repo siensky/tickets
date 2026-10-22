@@ -1,14 +1,17 @@
 /**
- * Periodically releases expired reservations on both shards
- * (docs/plan.md "Concurrency-kärnan"). This is the backstop for lazy
- * expiry: booking-api frees a seat the moment someone tries to reserve
- * it again, but a seat nobody asks for again still needs to come back
- * on sale — that's this job.
+ * Periodically releases reservations whose hold has run out
+ * (docs/plan.md "Concurrency-kärnan") — AND reservations whose payment
+ * freeze has run out (docs/plan.md "Betalning": "Eget tak via
+ * `payment_frozen_until`"). Both are the backstop for lazy expiry:
+ * booking-api frees a seat the moment someone tries to reserve it
+ * again, but a seat nobody asks for again still needs to come back on
+ * sale — that's this job, for either reason a reservation went stale.
  */
 import { withTransaction, type ShardPools } from '@tickets/db';
 import type { Logger } from '@tickets/observability';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import {
+  expireDueFrozenReservationsBatch,
   expireDueReservationsBatch,
   releaseSeatsForReservations,
 } from '../repositories/reservation-release-repository.js';
@@ -20,17 +23,19 @@ import {
 // loop if reservations kept becoming due faster than they're drained.
 const MAX_BATCHES_PER_TICK = 20;
 
-async function releaseOneBatch(pool: Pool): Promise<number> {
+type ExpireBatchFn = (client: PoolClient) => Promise<string[]>;
+
+async function releaseOneBatch(pool: Pool, expireBatch: ExpireBatchFn): Promise<number> {
   return withTransaction(pool, async (client) => {
-    const expiredIds = await expireDueReservationsBatch(client);
+    const expiredIds = await expireBatch(client);
     await releaseSeatsForReservations(client, expiredIds);
     return expiredIds.length;
   });
 }
 
-async function drainExpiredReservationsForPool(pool: Pool): Promise<void> {
+async function drainForPool(pool: Pool, expireBatch: ExpireBatchFn): Promise<void> {
   for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
-    const released = await releaseOneBatch(pool);
+    const released = await releaseOneBatch(pool, expireBatch);
     if (released === 0) {
       return;
     }
@@ -52,7 +57,8 @@ export function startReservationReleaseJob(
   const runTick = async (): Promise<void> => {
     for (const pool of shardPools.pools) {
       try {
-        await drainExpiredReservationsForPool(pool);
+        await drainForPool(pool, expireDueReservationsBatch);
+        await drainForPool(pool, expireDueFrozenReservationsBatch);
       } catch (error) {
         logger.warn({ error }, 'reservation release job failed, will retry next tick');
       }

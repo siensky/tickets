@@ -39,6 +39,17 @@ spec:
                 name: metrics-blackhole
                 port:
                   number: 80
+          # WebSocket-trafik delar samma host (docs/plan.md "Trafikväg"
+          # visar ingen egen WS-subdomän) — en mer specifik regel före
+          # catch-all:en nedan räcker, ingress-nginx proxar WS-uppgraderingar
+          # transparent, ingen särskild annotation krävs.
+          - path: /ws
+            pathType: Exact
+            backend:
+              service:
+                name: realtime-gateway
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:

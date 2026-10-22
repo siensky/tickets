@@ -6,12 +6,19 @@
  */
 import { InternalError } from '@tickets/domain';
 import type { Pool } from 'pg';
+import type { QueueConfig } from '../types/queue.js';
 import type { ReservationConfig } from '../types/reservation.js';
 
 const CONFIG_KEYS = [
   'reservation_hold_minutes',
   'reservation_release_jitter_max_seconds',
   'max_seats_per_reservation',
+] as const;
+
+const QUEUE_CONFIG_KEYS = [
+  'queue_admission_rate_per_minute',
+  'queue_session_total_minutes',
+  'queue_session_inactivity_minutes',
 ] as const;
 
 export async function getReservationConfig(pool: Pool): Promise<ReservationConfig> {
@@ -58,6 +65,42 @@ export async function getReservationConfig(pool: Pool): Promise<ReservationConfi
  * control instead of failing loudly. Validating on read turns that
  * into an immediate, alertable `InternalError` instead.
  */
+export async function getQueueConfig(pool: Pool): Promise<QueueConfig> {
+  const { rows } = await pool.query<{ key: string; value: string }>(
+    'SELECT key, value FROM config WHERE key = ANY($1)',
+    [QUEUE_CONFIG_KEYS],
+  );
+  const values = new Map(rows.map((row) => [row.key, row.value]));
+
+  const admissionRatePerMinute = values.get('queue_admission_rate_per_minute');
+  const sessionTotalMinutes = values.get('queue_session_total_minutes');
+  const sessionInactivityMinutes = values.get('queue_session_inactivity_minutes');
+  if (
+    admissionRatePerMinute === undefined ||
+    sessionTotalMinutes === undefined ||
+    sessionInactivityMinutes === undefined
+  ) {
+    throw new InternalError('Queue config keys are missing from the config table', {
+      foundKeys: [...values.keys()],
+    });
+  }
+
+  return {
+    admissionRatePerMinute: parsePositiveInteger(
+      'queue_admission_rate_per_minute',
+      admissionRatePerMinute,
+    ),
+    sessionTotalMinutes: parsePositiveInteger(
+      'queue_session_total_minutes',
+      sessionTotalMinutes,
+    ),
+    sessionInactivityMinutes: parsePositiveInteger(
+      'queue_session_inactivity_minutes',
+      sessionInactivityMinutes,
+    ),
+  };
+}
+
 export function parsePositiveInteger(key: string, rawValue: string): number {
   const value = Number(rawValue);
   if (!Number.isInteger(value) || value <= 0) {

@@ -1,12 +1,17 @@
-# Fas 1-scope (docs/plan.md "Fasplan"): booking-api + Postgres (båda
-# shards, tomt schema). Redis och RabbitMQ läggs till i Fas 3 när
-# realtime-gateway respektive notification-worker byggs.
+# Fas 1 byggde booking-api + Postgres (båda shards, tomt schema). Fas 3
+# lägger till Redis + RabbitMQ (väntrum/queue, outbox-relay) och de fyra
+# nya tjänsterna (docs/plan.md "Fasplan").
 #
 # migrations/job.yaml ingår MEDVETET inte här — Jobs är immutabla i
 # Kubernetes, så att låta Kustomize hantera det skulle krascha vid varje
 # omdeploy (samma Job-namn, nytt image-tag, ingen patch tillåten på ett
 # redan skapat Job). Jobbet appliceras separat av deploy-workflowen,
 # med "kubectl delete --ignore-not-found" före varje ny körning.
+#
+# Dockerfiles + deploy.yml bygger/pushar/rullar nu ut samtliga fem
+# tjänster. Fyra nya GitHub-secrets krävs för att "Create/update app
+# secrets"-steget ska lyckas — se docs/runbook.md "Nödvändiga GitHub
+# Actions-secrets".
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -16,6 +21,16 @@ resources:
   - postgres-shard-0/service.yaml
   - postgres-shard-1/statefulset.yaml
   - postgres-shard-1/service.yaml
+  - redis/statefulset.yaml
+  - redis/service.yaml
+  - rabbitmq/statefulset.yaml
+  - rabbitmq/service.yaml
   - booking-api/deployment.yaml
   - booking-api/service.yaml
   - booking-api/ingress.yaml
+  - realtime-gateway/deployment.yaml
+  - realtime-gateway/service.yaml
+  - scheduler-worker/deployment.yaml
+  - notification-worker/deployment.yaml
+  - payment-mock/deployment.yaml
+  - payment-mock/service.yaml

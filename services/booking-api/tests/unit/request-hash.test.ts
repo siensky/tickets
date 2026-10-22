@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { computeRequestHash } from '../../src/services/request-hash.js';
+import {
+  computeCheckoutRequestHash,
+  computeRequestHash,
+} from '../../src/services/request-hash.js';
+import type { CreateCheckoutInput } from '../../src/types/payment.js';
 import type { ReserveSeatsInput } from '../../src/types/reservation.js';
 
 function input(overrides: Partial<ReserveSeatsInput> = {}): ReserveSeatsInput {
@@ -47,5 +51,44 @@ describe('computeRequestHash', () => {
     expect(computeRequestHash(input({ idempotencyKey: 'different-key' }))).toBe(
       computeRequestHash(input()),
     );
+  });
+});
+
+function checkoutInput(overrides: Partial<CreateCheckoutInput> = {}): CreateCheckoutInput {
+  return {
+    eventId: 'event-1',
+    reservationId: 'res-1',
+    queueTokenId: 'queue-1',
+    idempotencyKey: 'key-1',
+    auth0Sub: 'auth0|user-1',
+    email: 'user@example.test',
+    name: undefined,
+    ...overrides,
+  };
+}
+
+describe('computeCheckoutRequestHash', () => {
+  it('is deterministic for the same input', () => {
+    expect(computeCheckoutRequestHash(checkoutInput())).toBe(
+      computeCheckoutRequestHash(checkoutInput()),
+    );
+  });
+
+  it('differs when the reservation differs', () => {
+    expect(computeCheckoutRequestHash(checkoutInput({ reservationId: 'res-2' }))).not.toBe(
+      computeCheckoutRequestHash(checkoutInput()),
+    );
+  });
+
+  it('differs when the paying user differs', () => {
+    expect(computeCheckoutRequestHash(checkoutInput({ auth0Sub: 'auth0|user-2' }))).not.toBe(
+      computeCheckoutRequestHash(checkoutInput()),
+    );
+  });
+
+  it('does NOT depend on the idempotency key itself', () => {
+    expect(
+      computeCheckoutRequestHash(checkoutInput({ idempotencyKey: 'different-key' })),
+    ).toBe(computeCheckoutRequestHash(checkoutInput()));
   });
 });

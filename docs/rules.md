@@ -171,6 +171,17 @@ fallgrop. Inga kommentarer som upprepar vad koden redan säger.
 - **Ändra inte fler filer än uppgiften kräver**
 - Måste en regel brytas: skriv varför, i koden och i PR:en
 
+## 11a. Fasstatus mellan sessioner
+
+- **Efter varje avslutad fas**, när code review är genomförd och alla findings är
+  åtgärdade: `docs/phase-status.md` ska skapas (om den inte finns) eller uppdateras.
+  Filen dokumenterar kortfattat viktiga arkitekturbeslut, implementationer, beroenden
+  och annan kontext nästa session behöver — kort, relevant, utan onödig upprepning.
+- **Vid start av en ny fas** ska huvudagenten läsa både hela `docs/plan.md` och
+  `docs/phase-status.md`.
+- **Review-subagenten** ska på samma sätt läsa hela `docs/plan.md` och
+  `docs/phase-status.md` innan granskningen påbörjas.
+
 ## 12. Säkerhetsspärrar — hårda förbud
 
 - **Aldrig `git add`, `git commit`, `git push` eller `git merge`.**

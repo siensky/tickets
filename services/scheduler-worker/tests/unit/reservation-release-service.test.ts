@@ -38,12 +38,15 @@ describe('startReservationReleaseJob', () => {
     vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
     // Three non-empty batches, then empty — the loop must stop there,
     // not after a single batch and not for the full MAX_BATCHES_PER_TICK cap.
-    const batches = [['r-1'], ['r-2'], ['r-3'], []];
-    let call = 0;
+    // Tracked separately from the frozen-reservation drain (same tick,
+    // a different query/WHERE clause) so this test isn't coupled to how
+    // many calls THAT loop happens to make.
+    const activeBatches = [['r-1'], ['r-2'], ['r-3'], []];
+    let activeCall = 0;
     const query = vi.fn().mockImplementation((sql: string) => {
-      if (sql.includes('WITH due AS')) {
-        const ids = batches[call] ?? [];
-        call++;
+      if (sql.includes("status = 'active'")) {
+        const ids = activeBatches[activeCall] ?? [];
+        activeCall++;
         return Promise.resolve({ rows: ids.map((id) => ({ id })) });
       }
       return Promise.resolve({ rows: [] });
@@ -60,7 +63,36 @@ describe('startReservationReleaseJob', () => {
     await job.stop();
 
     // 3 non-empty batches, then 1 empty batch that stops the loop.
-    expect(call).toBe(4);
+    expect(activeCall).toBe(4);
+  });
+
+  it('also releases reservations whose payment freeze ran out, in the same tick', async () => {
+    vi.useFakeTimers();
+    const logger = createLogger({ serviceName: 'test' });
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const releasedSeatCalls: unknown[] = [];
+    let frozenCall = 0;
+    const query = vi.fn().mockImplementation((sql: string, params: unknown[]) => {
+      if (sql.includes("status = 'pending_payment'")) {
+        frozenCall++;
+        return Promise.resolve({ rows: frozenCall === 1 ? [{ id: 'frozen-res-1' }] : [] });
+      }
+      if (sql.includes('UPDATE seats')) {
+        releasedSeatCalls.push(params);
+        return Promise.resolve({ rows: [] });
+      }
+      // The 'active' query — nothing due this tick.
+      return Promise.resolve({ rows: [] });
+    });
+    const client = { query, release: vi.fn() };
+    const pool = { connect: vi.fn().mockResolvedValue(client) };
+    const shardPools = { pools: [pool] } as unknown as ShardPools;
+
+    const job = startReservationReleaseJob(shardPools, logger, 1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    await job.stop();
+
+    expect(releasedSeatCalls).toContainEqual([['frozen-res-1']]);
   });
 
   it('stop() waits for an in-flight tick to finish before resolving', async () => {

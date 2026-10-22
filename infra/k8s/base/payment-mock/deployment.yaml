@@ -1,0 +1,89 @@
+# docs/plan.md "Betalning": payment-mock för lasttest, konfigurerbart
+# kaos. Körs alltid i klustret (1 replik i vila), men används bara när
+# booking-api pekas om mot den (STRIPE_HOST/STRIPE_PORT) under ett
+# lasttest — se services/booking-api/src/services/stripe-client.ts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-mock
+  namespace: ticketing
+  labels:
+    app: payment-mock
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: payment-mock
+  template:
+    metadata:
+      labels:
+        app: payment-mock
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: payment-mock
+          image: ghcr.io/siensky/tickets/payment-mock:latest
+          ports:
+            - containerPort: 3002
+              name: http
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PAYMENT_MOCK_PORT
+              value: '3002'
+            - name: BOOKING_API_WEBHOOK_URL
+              value: 'http://booking-api.ticketing.svc.cluster.local/webhooks/stripe'
+            - name: PAYMENT_MOCK_CHECKOUT_BASE_URL
+              value: 'http://payment-mock.ticketing.svc.cluster.local/mock-checkout'
+            # Egen, genererad hemlighet (tickets-generated-secrets) — INTE
+            # booking-apis riktiga Stripe-secret. Under ett lasttest, när
+            # booking-apis STRIPE_HOST/STRIPE_PORT pekas om mot den här
+            # tjänsten, måste booking-apis STRIPE_WEBHOOK_SECRET TILLFÄLLIGT
+            # sättas till SAMMA värde (kubectl set env), annars misslyckas
+            # signaturverifieringen — se .env.example.
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-generated-secrets
+                  key: payment-mock-webhook-secret
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
