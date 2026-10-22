@@ -51,6 +51,10 @@ export async function startTestInfra(): Promise<TestInfra> {
   });
 
   const pool = new Pool({ connectionString: postgres.getConnectionUri() });
+  // Se booking-api/tests/integration/test-helpers.ts: samma motivering —
+  // pg:s Pool kräver en 'error'-lyssnare, annars blir en containers
+  // fast-shutdown-frånkoppling av en vilande klient ett ohanterat fel.
+  pool.on('error', () => undefined);
   return { postgres, rabbitmq, shardPools: { pools: [pool, pool] } };
 }
 

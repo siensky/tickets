@@ -53,6 +53,13 @@ export async function startTestDatabase(): Promise<TestDatabase> {
   await runMigrations(connectionUri, SHARDED_MIGRATIONS_DIR, 'pgmigrations_sharded');
 
   const pool = new Pool({ connectionString: connectionUri, max: 20 });
+  // pg's Pool emits 'error' when an IDLE client is forcibly disconnected
+  // (e.g. the container's fast-shutdown on `container.stop()` below, or
+  // any transient network blip) — without a listener this is an
+  // unhandled Node error that fails the whole test run, even though
+  // `stopTestDatabase` already calls `pool.end()` first (same pattern
+  // as the real pools in shared/db/src/pools.ts).
+  pool.on('error', () => undefined);
   return { container, shardPools: { pools: [pool, pool] } };
 }
 
