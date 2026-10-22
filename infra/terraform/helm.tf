@@ -1,13 +1,35 @@
 # Terraform äger klusterkomponenter som sällan ändras (ingress-nginx,
-# cert-manager) — se docs/plan.md "Terraform". KEDA och
-# kube-prometheus-stack installeras här senare (Fas 3 respektive Fas 4),
-# inte nu.
+# cert-manager, KEDA) — se docs/plan.md "Terraform".
+# kube-prometheus-stack installeras här senare (Fas 4), inte nu.
 
 resource "kubernetes_namespace" "ingress_nginx" {
   depends_on = [null_resource.fetch_kubeconfig]
   metadata {
     name = "ingress-nginx"
   }
+}
+
+resource "kubernetes_namespace" "keda" {
+  depends_on = [null_resource.fetch_kubeconfig]
+  metadata {
+    name = "keda"
+  }
+}
+
+# docs/plan.md "Tjänster": notification-worker (1–10 repliker) skalar på
+# RabbitMQ-ködjup. Operatören installeras nu, i Fas 3, tillsammans med
+# resten av notification-worker — den faktiska `ScaledObject`-resursen
+# som pekar på den här operatören (min/max-repliker, tröskeln 100
+# meddelanden/podd) läggs till i Fas 6 (docs/plan.md "Fasplan"), när HPA
+# och lastgeneratorerna byggs och mäts tillsammans.
+resource "helm_release" "keda" {
+  name       = "keda"
+  repository = "https://kedacore.github.io/charts"
+  chart      = "keda"
+  version    = "2.20.2"
+  namespace  = kubernetes_namespace.keda.metadata[0].name
+
+  depends_on = [kubernetes_namespace.keda]
 }
 
 resource "kubernetes_namespace" "cert_manager" {

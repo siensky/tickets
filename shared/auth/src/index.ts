@@ -1,10 +1,13 @@
 /**
- * JWT verification (Auth0 JWKS), queue-token signing/validation, and M2M
- * scope checks — used by every service that needs to know who's calling.
+ * JWT-verifiering (Auth0 JWKS) och signering/validering av kötoken
+ * (docs/plan.md "Auth" / "Väntrum") — används av varje tjänst som
+ * behöver veta vem som anropar. Implementerat i Fas 3.
  *
- * Implemented in Fas 3 (docs/plan.md fasplan). Until then this package
- * exists only so the workspace layout and import paths are final from
- * day one (rules.md §10: "Inga nya mappar utanför den beslutade
- * strukturen" — the structure is decided now, the implementation follows).
+ * M2M-scope-kontroller (client credentials) är INTE med här — den
+ * mekanismen hör uteslutande till scanner-appen (docs/plan.md "Auth":
+ * "OAuth2 client credentials för scanner-appen"), och scanner-appen är
+ * flyttad till efter inlämningen ("Flyttat till efter inlämningen:
+ * scanner-appen"). Läggs till den dagen den fasen byggs.
  */
-export const AUTH_PACKAGE_NAME = '@tickets/auth';
+export * from './auth0-verifier.js';
+export * from './queue-token.js';

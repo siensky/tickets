@@ -1,0 +1,70 @@
+# docs/plan.md "Redis — användningsområden": AOF-persistens (appendonly
+# yes) på PVC:n — väntrummets ZSET och kötoken-revokering är det enda
+# som faktiskt behöver överleva en omstart (resten av Redis-användningen
+# tål en, docs/plan.md). storageClassName skrivs ut explicit av samma
+# skäl som postgres-shard-0/statefulset.yaml: k3s default local-path
+# binder volymen till noden.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: data
+  labels:
+    app: redis
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      # Utan fsGroup ägs en färsk Hetzner CSI-volym av root:root — containerns
+      # runAsUser: 999 skulle då inte kunna skriva AOF-filen till /data.
+      # fsGroup chownar volymens gruppägare (och sätter setgid) vid mount,
+      # INTE hela filsystemet ägarskap som en runAsUser-ändring hade gjort.
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          args: ['redis-server', '--appendonly', 'yes']
+          ports:
+            - containerPort: 6379
+              name: redis
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command: ['redis-cli', 'ping']
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ['redis-cli', 'ping']
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']
+        storageClassName: hcloud-volumes
+        resources:
+          requests:
+            storage: 5Gi

@@ -3,7 +3,11 @@
  * shape the service hands back (docs/rules.md §1: mappers do the
  * database-row ↔ API-object conversion, nothing else).
  */
-import type { ReservationResult } from '../types/reservation.js';
+import type {
+  ReservationResult,
+  ReservationView,
+  ReservationWithSeatsRow,
+} from '../types/reservation.js';
 
 export function toReservationResult(params: {
   reservationId: string;
@@ -32,4 +36,15 @@ export function toReservationResult(params: {
  */
 export function parseReplayedReservationResult(responseBody: unknown): ReservationResult {
   return responseBody as ReservationResult;
+}
+
+export function toReservationView(row: ReservationWithSeatsRow): ReservationView {
+  return {
+    reservationId: row.id,
+    eventId: row.eventId,
+    queueTokenId: row.queueTokenId,
+    status: row.status,
+    expiresAt: row.expiresAt.toISOString(),
+    seatIds: row.seatIds,
+  };
 }

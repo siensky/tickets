@@ -1,0 +1,96 @@
+# docs/plan.md "Tjänster": egen tjänst så en booking-api-deploy aldrig
+# tappar WebSocket-anslutningar. HPA (vila 2, topp 4) läggs till i Fas 6
+# — repliker är statiska här, samma mönster som booking-api.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realtime-gateway
+  namespace: ticketing
+  labels:
+    app: realtime-gateway
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: realtime-gateway
+  template:
+    metadata:
+      labels:
+        app: realtime-gateway
+    spec:
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: realtime-gateway
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: realtime-gateway
+          image: ghcr.io/siensky/tickets/realtime-gateway:latest
+          ports:
+            - containerPort: 3001
+              name: http
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: REALTIME_GATEWAY_PORT
+              value: '3001'
+            - name: REDIS_URL
+              value: 'redis://redis.data.svc.cluster.local:6379'
+            # Se infra/k8s/base/booking-api/deployment.yaml för varför det
+            # är `tickets-generated-secrets`, inte `tickets-app-secrets`.
+            - name: QUEUE_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-generated-secrets
+                  key: queue-token-secret
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              # Extra god tid jämfört med booking-api: WS-klienter som
+              # återansluter med backoff (docs/plan.md "Realtid") ska
+              # hinna märka att podden går ur rotation.
+              exec:
+                command: ['sh', '-c', 'sleep 5']
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

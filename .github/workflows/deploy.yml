@@ -61,6 +61,59 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # docs/plan.md "Fasplan" Fas 3 — samma mönster som booking-api ovan,
+      # ett steg per tjänst (docker/build-push-action cachar per `file:`,
+      # inte per anrop, så fyra separata steg ger fyra separata
+      # cache-nycklar i stället för att en gemensam cache-träff döljer en
+      # trasig tjänst bakom en annans lyckade build).
+      - name: Build and push realtime-gateway
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/realtime-gateway/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/realtime-gateway:${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE_BASE }}/realtime-gateway:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push scheduler-worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/scheduler-worker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/scheduler-worker:${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE_BASE }}/scheduler-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push notification-worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/notification-worker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/notification-worker:${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE_BASE }}/notification-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push payment-mock
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/payment-mock/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/payment-mock:${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE_BASE }}/payment-mock:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Build and push migrations
         uses: docker/build-push-action@v6
         with:
@@ -141,19 +194,71 @@ jobs:
             fi
           done
 
-      # Postgres (StatefulSets) måste finnas innan migrations-Jobbet kan
-      # ansluta. Appliceras direkt (inte via Kustomize-overlayn) så att
-      # booking-api inte av misstag rullas ut två gånger — en gång här
-      # med :latest, en gång i "Deploy"-steget med rätt :sha. Helt
-      # idempotent: körs steget igen senare via overlayn ändras inget.
-      - name: Deploy data layer (Postgres)
+      # Samma skäl som Postgres-lösenorden ovan — och framför allt INTE
+      # standardkontot `guest`: RabbitMQ begränsar `guest` till anslutningar
+      # från localhost som default (`loopback_users`), vilket hade stoppat
+      # varje poddtill-podd-anslutning över klusternätet. Ett eget konto
+      # (`app`) kringgår den begränsningen helt, i stället för att slå av
+      # ett säkerhetsnät i rabbitmq.conf.
+      - name: Ensure RabbitMQ credentials exist
+        run: |
+          if ! kubectl get secret rabbitmq-credentials -n data >/dev/null 2>&1; then
+            kubectl create secret generic rabbitmq-credentials -n data \
+              --from-literal=password="$(openssl rand -hex 32)"
+          fi
+
+      # docs/plan.md "Fasplan" Fas 3 / "Secrets": GitHub Actions secrets →
+      # Kubernetes Secret vid deploy. Fyra REPO-SECRETS måste finnas i
+      # GitHub (Settings → Secrets and variables → Actions) innan detta
+      # steg kan lyckas: AUTH0_DOMAIN, AUTH0_AUDIENCE, STRIPE_SECRET_KEY,
+      # STRIPE_WEBHOOK_SECRET — docs/runbook.md. Skrivs över vid VARJE
+      # körning (samma mönster som ghcr-pull-secret ovan), till skillnad
+      # från Postgres-lösenorden: en roterad Stripe-nyckel i GitHub SKA
+      # spegla sig i klustret nästa deploy, en Postgres-lösenordsändring
+      # skulle göra en redan körande databas onåbar.
+      - name: Create/update app secrets (Auth0 + Stripe)
+        run: |
+          kubectl create secret generic tickets-app-secrets -n ticketing \
+            --from-literal=auth0-domain="${{ secrets.AUTH0_DOMAIN }}" \
+            --from-literal=auth0-audience="${{ secrets.AUTH0_AUDIENCE }}" \
+            --from-literal=stripe-secret-key="${{ secrets.STRIPE_SECRET_KEY }}" \
+            --from-literal=stripe-webhook-secret="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # Egna, slumpgenererade hemligheter (docs/plan.md "Väntrum"s
+      # kötoken, "Databas"s qr_token) — ingen GitHub-secret för dem,
+      # samma "skapa bara om den saknas"-princip som Postgres-lösenorden:
+      # en ändring här ogiltigförklarar varje redan utfärdat kötoken och
+      # QR-biljett.
+      - name: Ensure generated app secrets exist
+        run: |
+          if ! kubectl get secret tickets-generated-secrets -n ticketing >/dev/null 2>&1; then
+            kubectl create secret generic tickets-generated-secrets -n ticketing \
+              --from-literal=queue-token-secret="$(openssl rand -hex 32)" \
+              --from-literal=qr-token-secret="$(openssl rand -hex 32)" \
+              --from-literal=payment-mock-webhook-secret="$(openssl rand -hex 32)"
+          fi
+
+      # Postgres, Redis och RabbitMQ (StatefulSets) måste finnas innan
+      # migrations-Jobbet eller någon app-podd kan ansluta. Appliceras
+      # direkt (inte via Kustomize-overlayn) så att applikationstjänsterna
+      # inte av misstag rullas ut två gånger — en gång här med :latest,
+      # en gång i "Deploy"-steget med rätt :sha. Helt idempotent: körs
+      # steget igen senare via overlayn ändras inget.
+      - name: Deploy data layer (Postgres, Redis, RabbitMQ)
         run: |
           kubectl apply -f infra/k8s/base/postgres-shard-0/statefulset.yaml \
                          -f infra/k8s/base/postgres-shard-0/service.yaml \
                          -f infra/k8s/base/postgres-shard-1/statefulset.yaml \
-                         -f infra/k8s/base/postgres-shard-1/service.yaml
+                         -f infra/k8s/base/postgres-shard-1/service.yaml \
+                         -f infra/k8s/base/redis/statefulset.yaml \
+                         -f infra/k8s/base/redis/service.yaml \
+                         -f infra/k8s/base/rabbitmq/statefulset.yaml \
+                         -f infra/k8s/base/rabbitmq/service.yaml
           kubectl rollout status statefulset/postgres-shard-0 -n data --timeout=180s
           kubectl rollout status statefulset/postgres-shard-1 -n data --timeout=180s
+          kubectl rollout status statefulset/redis -n data --timeout=180s
+          kubectl rollout status statefulset/rabbitmq -n data --timeout=180s
 
       # migrations/job.yaml ingår MEDVETET inte i Kustomize-basen (se
       # infra/k8s/base/kustomization.yaml) — Jobs är immutabla, så det
@@ -195,18 +300,33 @@ jobs:
             exit 1
           fi
 
-      - name: Set booking-api image tag
+      - name: Set image tags
         working-directory: infra/k8s/overlays/production
         run: |
-          kubectl kustomize . | sed "s|/booking-api:latest|/booking-api:${SHA}|" > /tmp/manifests.yaml
-          # Samma verifiering som migrations-Jobbet — se kommentaren där.
-          grep -q "booking-api:${SHA}" /tmp/manifests.yaml || {
-            echo "Image-taggen byttes inte för booking-api (väntade booking-api:${SHA})" >&2
-            exit 1
-          }
+          services="booking-api realtime-gateway scheduler-worker notification-worker payment-mock"
+          sed_args=()
+          for svc in $services; do
+            sed_args+=(-e "s|/${svc}:latest|/${svc}:${SHA}|")
+          done
+          kubectl kustomize . | sed "${sed_args[@]}" > /tmp/manifests.yaml
+          # Samma verifiering som migrations-Jobbet — se kommentaren där,
+          # en gång per tjänst: en bild som "kustomize" skriver om eller en
+          # sed som inte träffar ska stoppa deployen, inte tyst rulla ut
+          # ":latest".
+          for svc in $services; do
+            grep -q "${svc}:${SHA}" /tmp/manifests.yaml || {
+              echo "Image-taggen byttes inte för ${svc} (väntade ${svc}:${SHA})" >&2
+              exit 1
+            }
+          done
 
       - name: Deploy
         run: kubectl apply -f /tmp/manifests.yaml
 
       - name: Wait for rollout
-        run: kubectl rollout status deployment/booking-api -n ticketing --timeout=180s
+        run: |
+          kubectl rollout status deployment/booking-api -n ticketing --timeout=180s
+          kubectl rollout status deployment/realtime-gateway -n ticketing --timeout=180s
+          kubectl rollout status deployment/scheduler-worker -n ticketing --timeout=180s
+          kubectl rollout status deployment/notification-worker -n ticketing --timeout=180s
+          kubectl rollout status deployment/payment-mock -n ticketing --timeout=180s

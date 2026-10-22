@@ -37,6 +37,7 @@ import {
 import { insertOutboxEvent } from '../repositories/outbox-repository.js';
 import {
   attachSeatsToReservation,
+  getReservationWithSeats,
   insertReservation,
   lockSeats,
   releaseExpiredSeatsAmong,
@@ -44,12 +45,14 @@ import {
 import {
   parseReplayedReservationResult,
   toReservationResult,
+  toReservationView,
 } from '../mappers/reservation-mapper.js';
 import { computeRequestHash } from './request-hash.js';
 import { findUnavailableSeatIds, validateSeatCount } from './seat-availability.js';
 import type {
   ReservationConfig,
   ReservationResult,
+  ReservationView,
   ReserveSeatsInput,
 } from '../types/reservation.js';
 
@@ -115,6 +118,29 @@ export async function reserveSeats(
   // retries on a transient blip is safe and fixes the common case.
   await completeIdempotencyKeyWithRetries(pool, idempotencyScope, result);
   return result;
+}
+
+/**
+ * `GET /reservations/:id` (docs/plan.md "Realtid": läsbart tillstånd
+ * klienten kan läsa om vid återanslutning). Scopas på den ANROPANDE
+ * kötokenen, aldrig bara på `reservationId` (docs/rules.md §6: IDOR) —
+ * annars kunde vem som helst som gissar ett UUID se en annan sessions
+ * stolsval. `NotFoundError`, inte `ForbiddenError`, på en mismatch: att
+ * avslöja att ID:t EXISTERAR men "är inte ditt" läcker mer än att bara
+ * säga "finns inte".
+ */
+export async function getReservationForQueueToken(
+  shardPools: ShardPools,
+  eventId: string,
+  reservationId: string,
+  callerQueueTokenId: string,
+): Promise<ReservationView> {
+  const pool = getPoolForEvent(shardPools, eventId);
+  const row = await getReservationWithSeats(pool, eventId, reservationId);
+  if (row === undefined || row.queueTokenId !== callerQueueTokenId) {
+    throw new NotFoundError(`Reservation ${reservationId} not found`, { reservationId });
+  }
+  return toReservationView(row);
 }
 
 async function completeIdempotencyKeyWithRetries(

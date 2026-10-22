@@ -1,0 +1,92 @@
+# docs/plan.md "Idempotens": quorum-köer med x-delivery-limit
+# (konfigureras av konsumenterna själva, inte här) kräver RabbitMQs
+# Mnesia-data att överleva en omstart — samma resonemang som Postgres/
+# Redis, storageClassName skrivs ut explicit.
+#
+# RABBITMQ_DEFAULT_USER/_PASS skapar ett EGET konto vid första start —
+# aldrig standardkontot `guest`, som RabbitMQ begränsar till anslutningar
+# från localhost (`loopback_users`) som default. Appens poddar ansluter
+# över klusternätet, inte localhost, så `guest:guest` hade avvisats av
+# mäklaren självt. Lösenordet kommer från `rabbitmq-credentials`
+# (data-namnrymden, genererat en gång av .github/workflows/deploy.yml,
+# samma princip som Postgres-lösenorden).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: data
+  labels:
+    app: rabbitmq
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      # Samma skäl som redis/statefulset.yaml: en färsk Hetzner CSI-volym
+      # ägs av root:root, och utan fsGroup skulle runAsUser: 999 inte kunna
+      # skriva Mnesia-data (eller .erlang.cookie) till /var/lib/rabbitmq.
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:4-management-alpine
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              value: app
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: password
+          ports:
+            - containerPort: 5672
+              name: amqp
+            - containerPort: 15672
+              name: management
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # B15-liknande resonemang som postgres-shard-0: Mnesia-återuppspelning
+          # efter en hård nedstängning kan ta längre än en vanlig
+          # liveness-cykel tillåter.
+          startupProbe:
+            exec:
+              command: ['rabbitmq-diagnostics', 'check_running']
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ['rabbitmq-diagnostics', 'check_running']
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ['rabbitmq-diagnostics', 'check_running']
+            periodSeconds: 20
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']
+        storageClassName: hcloud-volumes
+        resources:
+          requests:
+            storage: 5Gi

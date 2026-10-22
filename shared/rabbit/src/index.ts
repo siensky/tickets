@@ -1,7 +1,7 @@
 /**
- * RabbitMQ connection and the outbox relay publisher (docs/plan.md
- * "Idempotens" — transactional outbox, at-least-once delivery). The
- * shared consumer base for workers lands in Fas 3 alongside the first
- * real consumers (notification-worker).
+ * RabbitMQ connection, the outbox relay publisher, and the shared
+ * consumer base (docs/plan.md "Idempotens" — transactional outbox,
+ * at-least-once delivery, delivery-limit).
  */
 export * from './publisher.js';
+export * from './consumer.js';

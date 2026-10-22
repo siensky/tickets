@@ -13,15 +13,27 @@
     "test:integration": "vitest run --dir tests/integration --no-file-parallelism"
   },
   "dependencies": {
+    "@tickets/auth": "workspace:*",
     "@tickets/db": "workspace:*",
     "@tickets/domain": "workspace:*",
     "@tickets/observability": "workspace:*",
+    "@tickets/redis": "workspace:*",
+    "@tickets/rabbit": "workspace:*",
+    "@tickets/schemas": "workspace:*",
+    "amqplib": "2.2.0",
     "fastify": "5.12.7",
+    "ioredis": "6.0.0",
+    "jose": "6.2.10",
+    "pg": "8.23.1",
     "pino": "10.4.0",
-    "prom-client": "15.1.3"
+    "prom-client": "15.1.3",
+    "stripe": "22.6.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.2.1",
+    "@testcontainers/rabbitmq": "12.2.1",
+    "@testcontainers/redis": "12.2.1",
     "@types/node": "22.19.0",
     "@types/pg": "8.23.1",
     "node-pg-migrate": "9.0.0",
