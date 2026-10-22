@@ -32,13 +32,7 @@
     "@types/amqplib": "0.10.8",
     "@types/node": "22.19.0",
     "@types/pg": "8.23.1",
-<<<<<<< HEAD
-    "amqplib": "2.2.0",
     "node-pg-migrate": "9.0.0",
-    "pg": "8.23.1",
-=======
-    "node-pg-migrate": "9.0.0",
->>>>>>> d140362 (fas 3)
     "testcontainers": "12.2.1",
     "tsup": "9.0.0",
     "tsx": "4.23.15",

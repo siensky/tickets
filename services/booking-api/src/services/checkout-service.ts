@@ -179,6 +179,23 @@ async function runCheckout(
   );
 }
 
+async function assertFrozen(
+  client: PoolClient,
+  eventId: string,
+  reservationId: string,
+  frozen: boolean,
+): Promise<void> {
+  if (frozen) {
+    return;
+  }
+  const actualStatus = await getReservationStatus(client, eventId, reservationId);
+  throw new ReservationNotInExpectedStatusError(
+    reservationId,
+    'active',
+    actualStatus ?? 'not_found',
+  );
+}
+
 async function persistCheckout(
   client: PoolClient,
   deps: CheckoutServiceDeps,
@@ -213,18 +230,7 @@ async function persistCheckout(
     input.reservationId,
     deps.paymentFrozenMinutes,
   );
-  if (!frozen) {
-    const actualStatus = await getReservationStatus(
-      client,
-      input.eventId,
-      input.reservationId,
-    );
-    throw new ReservationNotInExpectedStatusError(
-      input.reservationId,
-      'active',
-      actualStatus ?? 'not_found',
-    );
-  }
+  await assertFrozen(client, input.eventId, input.reservationId, frozen);
   if (params.checkoutUrl === null) {
     throw new Error('Stripe did not return a Checkout URL for a session we just created');
   }

@@ -90,12 +90,11 @@ function createShutdownHandler(
   };
 }
 
-export async function start(): Promise<void> {
-  const logger = createLogger({ serviceName: SERVICE_NAME });
-  const registry = createRegistry(SERVICE_NAME);
-  const httpMetrics = createHttpMetrics(registry);
-  const queueDepthGauge = createQueueDepthGauge(registry);
-
+async function createAndStartHttpServer(
+  logger: Logger,
+  registry: ReturnType<typeof createRegistry>,
+  httpMetrics: HttpMetrics,
+): Promise<FastifyApp> {
   const app = Fastify<
     RawServerDefault,
     RawRequestDefaultExpression<RawServerDefault>,
@@ -109,16 +108,16 @@ export async function start(): Promise<void> {
   const port = Number(process.env['NOTIFICATION_WORKER_PORT'] ?? 3011);
   await app.listen({ port, host: '0.0.0.0' });
   logger.info({ port }, `${SERVICE_NAME} listening`);
+  return app;
+}
 
-  const heartbeat = startHeartbeat(logger);
-  const shardPools = createShardPools({
-    onShardError: (shardIndex, error) => {
-      logger.warn({ shardIndex, error }, 'shard connection error');
-    },
-  });
-  const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
-  const rabbitUrl = process.env['RABBITMQ_URL'] ?? 'amqp://localhost';
-
+async function startNotificationConsumer(
+  rabbitUrl: string,
+  shardPools: ShardPools,
+  redis: RedisClient,
+  queueDepthGauge: ReturnType<typeof createQueueDepthGauge>,
+  logger: Logger,
+): Promise<{ consumer: RabbitConsumer; queueDepthPoll: QueueDepthPoll }> {
   const consumer = await connectConsumer(
     rabbitUrl,
     {
@@ -136,6 +135,33 @@ export async function start(): Promise<void> {
   const queueDepthPoll = await startQueueDepthPoll(
     rabbitUrl,
     ORDER_EVENTS_QUEUE,
+    queueDepthGauge,
+    logger,
+  );
+  return { consumer, queueDepthPoll };
+}
+
+export async function start(): Promise<void> {
+  const logger = createLogger({ serviceName: SERVICE_NAME });
+  const registry = createRegistry(SERVICE_NAME);
+  const httpMetrics = createHttpMetrics(registry);
+  const queueDepthGauge = createQueueDepthGauge(registry);
+
+  const app = await createAndStartHttpServer(logger, registry, httpMetrics);
+
+  const heartbeat = startHeartbeat(logger);
+  const shardPools = createShardPools({
+    onShardError: (shardIndex, error) => {
+      logger.warn({ shardIndex, error }, 'shard connection error');
+    },
+  });
+  const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
+  const rabbitUrl = process.env['RABBITMQ_URL'] ?? 'amqp://localhost';
+
+  const { consumer, queueDepthPoll } = await startNotificationConsumer(
+    rabbitUrl,
+    shardPools,
+    redis,
     queueDepthGauge,
     logger,
   );

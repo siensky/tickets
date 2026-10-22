@@ -168,6 +168,31 @@ async function convertReservationOrFlagRefund(
   return { kind: 'converted' };
 }
 
+async function mintTicketsForSeats(
+  client: PoolClient,
+  deps: PaymentConsumerDeps,
+  payload: PaymentSucceededPayload,
+): Promise<string[]> {
+  const seats = await getSeatPricesForReservation(
+    client,
+    payload.eventId,
+    payload.reservationId,
+  );
+  await markSeatsSold(client, payload.eventId, payload.reservationId);
+  const ticketIds: string[] = [];
+  for (const seat of seats) {
+    const qrToken = createQrToken(deps.qrTokenSecret, payload.orderId, seat.seatId);
+    const ticket = await insertTicket(client, {
+      eventId: payload.eventId,
+      orderId: payload.orderId,
+      seatId: seat.seatId,
+      qrToken,
+    });
+    ticketIds.push(ticket.id);
+  }
+  return ticketIds;
+}
+
 async function convertOrderAndMintTickets(
   client: PoolClient,
   deps: PaymentConsumerDeps,
@@ -192,23 +217,7 @@ async function convertOrderAndMintTickets(
     });
   }
 
-  const seats = await getSeatPricesForReservation(
-    client,
-    payload.eventId,
-    payload.reservationId,
-  );
-  await markSeatsSold(client, payload.eventId, payload.reservationId);
-  const ticketIds: string[] = [];
-  for (const seat of seats) {
-    const qrToken = createQrToken(deps.qrTokenSecret, payload.orderId, seat.seatId);
-    const ticket = await insertTicket(client, {
-      eventId: payload.eventId,
-      orderId: payload.orderId,
-      seatId: seat.seatId,
-      qrToken,
-    });
-    ticketIds.push(ticket.id);
-  }
+  const ticketIds = await mintTicketsForSeats(client, deps, payload);
 
   const confirmedPayload: OrderConfirmedPayload = {
     orderId: payload.orderId,
