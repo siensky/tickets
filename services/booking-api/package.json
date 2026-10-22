@@ -24,6 +24,7 @@
     "@testcontainers/postgresql": "12.2.1",
     "@types/node": "22.19.0",
     "@types/pg": "8.23.1",
+    "node-pg-migrate": "9.0.0",
     "pg": "8.23.1",
     "testcontainers": "12.2.1",
     "tsup": "9.0.0",

@@ -282,6 +282,9 @@ importers:
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
+      node-pg-migrate:
+        specifier: 9.0.0
+        version: 9.0.0(@types/pg@8.23.1)(pg@8.23.1)
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -454,6 +457,9 @@ importers:
       amqplib:
         specifier: 2.2.0
         version: 2.2.0
+      node-pg-migrate:
+        specifier: 9.0.0
+        version: 9.0.0(@types/pg@8.23.1)(pg@8.23.1)
       pg:
         specifier: 8.23.1
         version: 8.23.1
