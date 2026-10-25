@@ -81,19 +81,26 @@ spec:
           # B15-liknande resonemang som postgres-shard-0: Mnesia-återuppspelning
           # efter en hård nedstängning kan ta längre än en vanlig
           # liveness-cykel tillåter.
+          # rabbitmq-diagnostics startar en egen Erlang-nod för att ansluta till
+          # mäklaren via distribuerad Erlang — defaultens timeoutSeconds: 1 räcker
+          # inte, probe:n timar då ut även när mäklaren är frisk (sågs som ett
+          # evigt BackOff-krasch i produktion: "command timed out ... after 1s").
           startupProbe:
             exec:
               command: ['rabbitmq-diagnostics', 'check_running']
             failureThreshold: 30
             periodSeconds: 10
+            timeoutSeconds: 5
           readinessProbe:
             exec:
               command: ['rabbitmq-diagnostics', 'check_running']
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             exec:
               command: ['rabbitmq-diagnostics', 'check_running']
             periodSeconds: 20
+            timeoutSeconds: 5
           securityContext:
             runAsNonRoot: true
             runAsUser: 999
