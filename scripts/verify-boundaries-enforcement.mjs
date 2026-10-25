@@ -6,11 +6,17 @@
  * tillfällig fil i en riktig service, lintar den med riktiga ESLint-API:et,
  * och FELAR skriptet om "boundaries/dependencies" inte flaggar den.
  *
- * Finns eftersom konfigurationen tidigare INTE bevakade någonting alls —
- * noll lint-fel såg ut som "inga brott" när det egentligen var "ingenting
- * bevakas" (fel API-form för v7 + en TypeScript-resolver som saknades, så
- * varje ".js"-import av en ".ts"-fil var osynlig för pluginet). Se
- * docs/forsvar.md "Varför ett regressionstest för lagergränserna?".
+ * Testar med TVÅ olika `cwd`: repo-roten OCH tjänstens egen katalog.
+ * CI:s faktiska "pnpm lint" (`turbo run lint`) kör varje paket-"eslint ."
+ * FRÅN paketets egen katalog, inte från roten — ett tidigare fix som bara
+ * testade cwd=REPO_ROOT missade därför att "boundaries/root-path" (utan en
+ * ABSOLUT sökväg i eslint.config.js) gjorde reglerna verkningslösa just i
+ * det faktiska CI-anropet, trots att de fungerade perfekt i det här
+ * skriptet (hittat under Fas 5-reviewn). Samma klass bugg som den
+ * ursprungliga: noll lint-fel ser likadant ut oavsett om det beror på
+ * korrekt kod eller på att ingenting bevakas.
+ *
+ * Se docs/forsvar.md "Varför ett regressionstest för lagergränserna?".
  */
 import { ESLint } from 'eslint';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -18,14 +24,25 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const CONTROLLERS_DIR = join(REPO_ROOT, 'services/booking-api/src/controllers');
-const REPOSITORIES_DIR = join(REPO_ROOT, 'services/booking-api/src/repositories');
+const SERVICE_DIR = join(REPO_ROOT, 'services/booking-api');
+const CONTROLLERS_DIR = join(SERVICE_DIR, 'src/controllers');
+const REPOSITORIES_DIR = join(SERVICE_DIR, 'src/repositories');
 const violationFile = join(CONTROLLERS_DIR, '__boundaries_regression_test__.controller.ts');
 const repositoryFile = join(REPOSITORIES_DIR, '__boundaries_regression_test__.repository.ts');
 
 function cleanup() {
   rmSync(violationFile, { force: true });
   rmSync(repositoryFile, { force: true });
+}
+
+async function catchesTheViolation(cwd) {
+  const eslint = new ESLint({ cwd });
+  const results = await eslint.lintFiles([violationFile]);
+  const messages = results.flatMap((result) => result.messages);
+  return {
+    caught: messages.some((message) => message.ruleId === 'boundaries/dependencies'),
+    messages,
+  };
 }
 
 async function main() {
@@ -45,25 +62,26 @@ async function main() {
     ].join('\n'),
   );
 
-  const eslint = new ESLint({ cwd: REPO_ROOT });
-  const results = await eslint.lintFiles([violationFile]);
-  const messages = results.flatMap((result) => result.messages);
-  const caught = messages.some((message) => message.ruleId === 'boundaries/dependencies');
-
-  if (!caught) {
-    console.error(
-      'REGRESSION: "boundaries/dependencies" fångade INTE en avsiktlig lagerbrott-import.',
-    );
-    console.error(
-      'Lagergränserna i docs/rules.md §1 bevakas just nu av ingenting. Meddelanden:',
-    );
-    console.error(JSON.stringify(messages, null, 2));
-    process.exitCode = 1;
-    return;
+  for (const [label, cwd] of [
+    ['repo-roten', REPO_ROOT],
+    ['tjänstens egen katalog (= CI:s faktiska "eslint .")', SERVICE_DIR],
+  ]) {
+    const { caught, messages } = await catchesTheViolation(cwd);
+    if (!caught) {
+      console.error(
+        `REGRESSION: "boundaries/dependencies" fångade INTE en avsiktlig lagerbrott-import när eslint körs med cwd=${label}.`,
+      );
+      console.error(
+        'Lagergränserna i docs/rules.md §1 bevakas just nu av ingenting i det fallet. Meddelanden:',
+      );
+      console.error(JSON.stringify(messages, null, 2));
+      process.exitCode = 1;
+      return;
+    }
   }
 
   console.log(
-    'OK: "boundaries/dependencies" fångade det avsiktliga lagerbrottet som förväntat.',
+    'OK: "boundaries/dependencies" fångade det avsiktliga lagerbrottet oavsett cwd (repo-rot och paketkatalog).',
   );
 }
 

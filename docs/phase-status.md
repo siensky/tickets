@@ -3,6 +3,53 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Läget efter Fas 5
+
+**CORS saknades helt i booking-api** fram till Fas 5-reviewn — appen och API:et är
+alltid olika origin (`<domän>` vs `api.<domän>`), så webbläsaren hade blockerat varje
+svar. `routes/cors.ts` registrerar `@fastify/cors` med en explicit allowlist från
+`CORS_ALLOWED_ORIGINS` (kommaseparerad, aldrig wildcard — systemet använder aldrig
+cookies, se docs/rules.md §6). Satt till `https://tikknet.se` i
+`infra/k8s/base/booking-api/deployment.yaml` och `http://localhost:5173` som default
+annars (lokal dev/e2e).
+
+**`eslint-plugin-boundaries`-gapet är löst.** Upptäckt under Fas 5-reviewn (orsakad
+inte av den — fanns sedan `boundaries/root-path` infördes): utan en ABSOLUT sökväg
+defaultar den till `process.cwd()` vid lint-tillfället, och `turbo run lint` kör varje
+paket-`eslint .` i sin EGEN katalog, så `services/*/src/controllers/**` m.fl. matchade
+aldrig. Fixat med `'boundaries/root-path': import.meta.dirname` i `eslint.config.js`.
+`scripts/verify-boundaries-enforcement.mjs` testar nu BÅDA cwd-fallen (repo-rot och
+paketkatalog) så regressionen inte kan smyga tillbaka obemärkt.
+
+**Nytt etablerat mönster: `Promise.allSettled` för scatter-gather-läsningar över båda
+shardarna** (`events-service.ts`s `listAllEvents`, `my-tickets-service.ts`s
+`listMyTickets`) — en nedgången shard ger ett partiellt resultat + en loggad varning,
+aldrig ett 500 för allt. Följ samma mönster om fler scatter-gather-endpoints byggs.
+
+**Seatmap-statuscachen (`seatmap-service.ts`) failar ÖPPET mot Redis** (läs OCH skriv),
+samma princip som `queue-auth-service.ts`s revokeringskoll — en Redis-hicka faller
+tillbaka till Postgres istället för att 500:a hela 2-sekunderspollningen.
+
+**"Din stol togs" är nu kopplat ände-till-ände** (det kvarvarande Fas 3-gapet): markera/
+avmarkera (`POST`/`DELETE /events/:eventId/seats/:seatId/mark`, bakom insläppt kötoken,
+max 5 markeringar), ett omvänt Redis-index (`seatmark-holders:<event>:<seat>`,
+`shared/redis/src/seat-marks.ts`) så `notifySeatsTaken` (anropas från
+`reservations-controller.ts` efter en lyckad reservation) vet vilka kötoken som ska
+notifieras, och frontend lyssnar via WS (`hooks/use-seat-marking.ts`) och avmarkerar +
+visar ett meddelande. Best-effort hela vägen — kan aldrig fälla reservationssvaret.
+
+**PWA-deploy och full e2e är nu byggda också** (efter en uppföljande runda samma
+dag): `deploy-frontend`-jobbet laddar upp `apps/web`s build till R2 (delar medvetet
+bucket med backuperna — se docs/plan.md "kända luckor"), och
+`tests/e2e/specs/booking-flow.spec.ts` går hela vägen genom en RIKTIG Auth0-inloggning
+(nytt testkonto, se docs/runbook.md) och en betalning mot payment-mock till en synlig
+biljett. **Overifierat mot en riktig Auth0-tenant** — automatiseringen av Auth0:s
+hostade inloggningssida är skriven mot deras dokumenterade standardfält men har
+aldrig körts mot en riktig tenant. Första riktiga CI-körningen är det verkliga testet;
+felar den, börja med `tests/e2e/specs/booking-flow.spec.ts`s `loginWithTestUser`.
+Ny lucka hittad i samma arbete: `realtime-gateway` saknar fortfarande ingress — se
+docs/plan.md "kända luckor".
+
 ## Läget efter Fas 4
 
 **Oversold-stol-beslutet är löst:** en stol som förlorar `tickets_valid_seat_unique`-

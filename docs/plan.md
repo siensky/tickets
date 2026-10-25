@@ -809,7 +809,7 @@ tillsammans fyra av de betygsgrundande kraven. Omfördelning ensamt räckte inte
 | **2** | 23–26/10 | **Domänkärnan.** Schema + migrations mot båda shardarna. Shard-router. Reservationstransaktionen (`release_after`, `now()` från Postgres). Idempotensnycklar med `event_id` + principal-scope. Outbox + relay i `scheduler-worker`. **De fyra kronjuveltesterna** + invariantkontrollen. | Projektets hjärta |
 | **3** | 27–28/10 | Väntrum med **signerad stateless kötoken**. `realtime-gateway` + Redis Pub/Sub + **läsbart tillstånd bakom varje WS-meddelande**. `notification-worker` + dedupe + **delivery limit**. `payment-mock`. Stripe: **raw body, rate-limit-undantag, 200-snabbt**, **frysning + återbetalning**. Auth0. Rate limiting. | **Klar efter review** (se nedan) — Flödet komplett |
 | **4** | 29–31/10 | kube-prometheus-stack, Loki + Alloy, OTel-instrumentering. **`retentionSize` + PVC-dimensionering.** Dashboards, `oversell_prevented_total`, larm → Slack. Nattlig `pg_dump` av båda shardarna → R2 (se `docs/adr/0005-backup-storage-r2.md`) + runbook-skript för återställningsövningen (ej ännu körd mot riktigt kluster — kräver Tailscale-åtkomst). **Fas 3-review-noten löst:** den egna `rabbitmq_queue_messages_ready`-gaugen (queue-depth-metric.ts) är borttagen; RabbitMQs eget `rabbitmq_prometheus`-plugin är källan nu. | **Klar efter review** (se nedan) — G: metrics, logging, backup |
-| **5** | 1/11 | Minimal men komplett PWA: evenemang, väntrum, arenakarta (sektionsvy), reservation, checkout, mina biljetter. TanStack Query. Playwright e2e genom hela flödet. **Notering från Fas 3-review:** WS-klienten autentiserar genom att skicka `{"token": "..."}` som sitt FÖRSTA meddelande efter anslutning — token ligger INTE i `/ws?token=...` (loggas annars i klartext). Serversidan väntar 5 s på detta meddelande innan den stänger anslutningen. | **G: e2e i pipeline** |
+| **5** | 1/11 | Minimal men komplett PWA: evenemang, väntrum, arenakarta (sektionsvy), reservation, checkout, mina biljetter. TanStack Query. Playwright e2e. **Notering från Fas 3-review:** WS-klienten autentiserar genom att skicka `{"token": "..."}` som sitt FÖRSTA meddelande efter anslutning — token ligger INTE i `/ws?token=...` (loggas annars i klartext). Serversidan väntar 5 s på detta meddelande innan den stänger anslutningen. **Byggdes också i denna fas, eftersom planen förutsatte dem utan att de fanns:** `GET /events`, `GET /events/:id`, venue-sektioner + stolgeometri, per-event stolsstatus, `GET /me/tickets` — fullt lagerindelade (controller/service/repository/mapper). Samt det kvarvarande Fas 3-gapet **"din stol togs"**, kopplat ände-till-ände (markering, omvänt Redis-index, WS-notis, frontend-lyssnare). CORS lades till i booking-api (saknades helt — se Fas 5-review). | **Klar efter review** (se nedan) — G: e2e i pipeline |
 | **6** | 2–3/11 | HPA (**requests 250m**) + KEDA, `scaleDown` 60 s. Zero-downtime: probes, `maxUnavailable: 0`, preStop, graceful shutdown, **`Recreate` på scheduler-worker**. k6-scenarier, lastgeneratorer, fd-gränser. **Mät HPA-kurvan, sedan den stora körningen.** **Notering från Fas 4-review:** `RabbitMQQueueDepthHigh`-larmets tröskel (900, `infra/k8s/base/monitoring/prometheusrule.yaml`) antar redan KEDAs planerade tak (100 meddelanden/podd × 10 poddar) — dubbelkolla att siffran fortfarande stämmer när `ScaledObject`:en faktiskt byggs här. **Noteringar från Fas 3-review, innan `queue-storm`:** (1) `realtime-gateway` ger varje WS-klient sin egen duplicerade Redis-anslutning (`subscribeToChannel`) — vid 50 000 samtidiga klienter går det långt över Redis standardgräns på 10 000 anslutningar; bör bli EN subscriber per podd (`psubscribe ws:*` + en lokal kanal→socket-tabell) innan lasttestet körs. (2) `queue_session_total_minutes`/`queue_admission_rate_per_minute` måste tunas till queue-storms skala — kötokenets JWT-`exp` sätts vid JOIN, inte vid insläpp, så med låg insläppstakt och djup kö hinner token gå ut innan användaren släpps in; `admitNextBatch` (ZPOPMIN) märker heller inte redan utgångna token innan den "släpper in" dem, vilket slösar insläppskvoten på döda poster. | **VG** |
 | — | **4/11** | **MUNTLIGT FÖRSVAR** | |
 | **7** | 5–8/11 | `architecture.md`, ADR:er, `runbook.md` med **RPO/RTO**, README med adresser. Polering. | **Inlämning 8/11** |
@@ -850,6 +850,39 @@ som en utgången reservation). En redelivery efter en krasch MELLAN Stripe-anrop
 outbox-skrivningen räknar om vilka stolar som saknar biljett direkt från
 `tickets`-tabellen (ingen egen "pending"-markör) — se kommentarerna i
 `payment-consumer-service.ts`/`payment-refund-service.ts`.
+
+**Fas 5 — kända luckor kvar efter reviewn** (flaggas hellre än göms, samma princip som
+Fas 3):
+
+- ~~PWA:n byggs och deployas inte~~ — **löst**: `deploy-frontend`-jobbet i `deploy.yml`
+  bygger `apps/web` och laddar upp `dist/` till R2 med `rclone` (samma verktyg som
+  backuperna). **Medvetet, inte optimalt val:** delar bucket med databas-backuperna
+  (prefix `frontend/`) i stället för en egen bucket — en egen bucket vore renare,
+  men är inte prioriterat. Nämn som en förbättringspunkt i muntligt försvar.
+  **Ny lucka hittad i samma arbete:** `realtime-gateway` har fortfarande ingen
+  ingress (`infra/k8s/base/realtime-gateway/` saknar `ingress.yaml`) — `wss://
+  api.tikknet.se` i `deploy-frontend` är den TILLTÄNKTA adressen, men routningen
+  dit finns inte än. Ofarligt eftersom WS bara är en optimering (REST-pollning
+  täcker allt), men bör in i Fas 6.
+- ~~Playwright-sviten stannar vid reservationen~~ — **löst**: sviten loggar nu in
+  med ett RIKTIGT Auth0-testkonto (automatiserar den riktiga, hostade
+  Universal-Login-sidan) och betalar mot payment-mock, ända fram till att
+  biljetten med QR-kod syns under "Mina biljetter". **Overifierat:** jag har inte
+  kunnat köra detta steget mot en riktig Auth0-tenant under utvecklingen — CI:s
+  första riktiga körning är det faktiska testet av inloggnings-automatiseringen
+  (se `tests/e2e/specs/booking-flow.spec.ts`s header-kommentar). Kräver de nya
+  secrets `AUTH0_WEB_CLIENT_ID`, `AUTH0_TEST_USER_EMAIL`, `AUTH0_TEST_USER_PASSWORD`
+  (docs/runbook.md). `createRequireAuth0User` saknar fortfarande ett separat
+  HTTP-lagerenhetstest (docs/plan.md Fas 3 "kända luckor") — e2e-sviten täcker nu
+  vägen, men inte den isolerade kontraktstesten.
+- ~~`eslint-plugin-boundaries` körs inte som CI faktiskt startar den~~ — **löst**:
+  `boundaries/root-path` i `eslint.config.js` saknade en ABSOLUT sökväg och
+  defaultade därför till `process.cwd()` vid lint-tillfället — `services/*/src/
+  controllers/**` m.fl. matchade aldrig när varje paket körde sitt eget
+  `eslint .` (det CI faktiskt gör via `turbo run lint`). Satt till
+  `import.meta.dirname`. `scripts/verify-boundaries-enforcement.mjs` testar nu
+  BÅDA fallen (cwd=repo-rot och cwd=paketkatalog) så regressionen inte kan
+  smyga tillbaka obemärkt.
 
 **Flyttat till efter inlämningen:** scanner-appen (Expo) · proof of work + Turnstile ·
 PostHog + session replay · ArgoCD + Sealed Secrets · Tempo-backend · DLQ med adminvy ·

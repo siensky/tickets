@@ -25,6 +25,16 @@ export function seatMarksKey(queueTokenId: string): string {
   return `seatmarks:${queueTokenId}`;
 }
 
+/** Reverse index of seatMarksKey — which queue tokens currently have THIS seat marked, so "din stol togs" (docs/plan.md "Realtid") can notify every one of them, not just the reservation's own owner. */
+export function seatMarkHoldersKey(eventId: string, seatId: string): string {
+  return `seatmark-holders:${eventId}:${seatId}`;
+}
+
+/** Stolsstatuscache per sektion (docs/plan.md "Redis — användningsområden": "seatmap:<event>:<sektion> → JSON"). */
+export function seatmapStatusKey(eventId: string, sectionId: string): string {
+  return `seatmap:${eventId}:${sectionId}`;
+}
+
 export function rateLimitKey(ip: string): string {
   return `ratelimit:${ip}`;
 }

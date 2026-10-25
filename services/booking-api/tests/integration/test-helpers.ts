@@ -124,6 +124,120 @@ export async function stopTestRedis(redis: TestRedis): Promise<void> {
   await redis.container.stop();
 }
 
+export async function seedVenueWithSection(
+  pool: Pool,
+  params: { venueId: string; venueName: string; sectionId: string; sectionName: string },
+): Promise<void> {
+  await pool.query(`INSERT INTO venues (id, name, city) VALUES ($1, $2, 'Test City')`, [
+    params.venueId,
+    params.venueName,
+  ]);
+  await pool.query(
+    `INSERT INTO venue_sections (id, venue_id, name, display_order) VALUES ($1, $2, $3, 1)`,
+    [params.sectionId, params.venueId, params.sectionName],
+  );
+}
+
+export async function seedVenueSeat(
+  pool: Pool,
+  params: {
+    venueSeatId: string;
+    venueId: string;
+    sectionId: string;
+    row: string;
+    number: number;
+    x: number;
+    y: number;
+  },
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO venue_seats (id, venue_id, section_id, row, number, x, y)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      params.venueSeatId,
+      params.venueId,
+      params.sectionId,
+      params.row,
+      params.number,
+      params.x,
+      params.y,
+    ],
+  );
+}
+
+export async function seedEventForVenue(
+  pool: Pool,
+  params: { eventId: string; venueId: string; title?: string },
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO events (id, venue_id, title, artist, starts_at, sales_open_at, sales_close_at)
+     VALUES ($1, $2, $3, 'Test Artist', now() + interval '7 days', now() - interval '1 day', now() + interval '6 days')`,
+    [params.eventId, params.venueId, params.title ?? 'Test Event'],
+  );
+}
+
+export async function seedSeatForSection(
+  pool: Pool,
+  params: {
+    seatId: string;
+    eventId: string;
+    venueSeatId: string;
+    sectionId: string;
+    row: string;
+    number: number;
+    ticketNumber: string;
+    status?: string;
+  },
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO seats (id, event_id, venue_seat_id, section_id, row, number, ticket_number, price_cents, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 1000, $8)`,
+    [
+      params.seatId,
+      params.eventId,
+      params.venueSeatId,
+      params.sectionId,
+      params.row,
+      params.number,
+      params.ticketNumber,
+      params.status ?? 'available',
+    ],
+  );
+}
+
+export async function seedUser(
+  pool: Pool,
+  params: { userId: string; auth0Sub: string; email: string },
+): Promise<void> {
+  await pool.query(`INSERT INTO users (id, auth0_sub, email, name) VALUES ($1, $2, $3, $2)`, [
+    params.userId,
+    params.auth0Sub,
+    params.email,
+  ]);
+}
+
+export async function seedOrderWithTicket(
+  pool: Pool,
+  params: {
+    orderId: string;
+    eventId: string;
+    userId: string;
+    seatId: string;
+    ticketId: string;
+    qrToken: string;
+  },
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO orders (id, event_id, user_id, total_cents, status) VALUES ($1, $2, $3, 1000, 'paid')`,
+    [params.orderId, params.eventId, params.userId],
+  );
+  await pool.query(
+    `INSERT INTO tickets (id, event_id, order_id, seat_id, qr_token, status)
+     VALUES ($1, $2, $3, $4, $5, 'valid')`,
+    [params.ticketId, params.eventId, params.orderId, params.seatId, params.qrToken],
+  );
+}
+
 export async function getSeatStatuses(
   pool: Pool,
   seatIds: readonly string[],

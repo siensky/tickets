@@ -2,6 +2,7 @@ packages:
   - 'shared/*'
   - 'services/*'
   - 'apps/*'
+  - 'tests/e2e'
 allowBuilds:
   esbuild: true
   # Kör bara napi-postinstall (välja rätt förkompilerad binär för
@@ -18,6 +19,11 @@ allowBuilds:
   ssh2: true
   cpu-features: true
   protobufjs: true
+  # Transitivt via @auth0/auth0-spa-js (apps/web, Fas 5: inloggning vid
+  # checkout). Dess postinstall-skript gör bara console.log av ett
+  # projekt-reklammeddelande — verifierat i scripts/postinstall.js,
+  # ingen kompilering eller nätverksanrop.
+  browser-tabs-lock: true
 minimumReleaseAgeExclude:
   - '@tanstack/query-core@5.104.5'
   - '@tanstack/react-query@5.104.5'

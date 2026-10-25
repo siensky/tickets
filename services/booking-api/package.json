@@ -19,6 +19,7 @@
     "@opentelemetry/resources": "3.0.0",
     "@opentelemetry/sdk-node": "0.300.0",
     "@opentelemetry/semantic-conventions": "1.43.0",
+    "@fastify/cors": "11.3.1",
     "@tickets/auth": "workspace:*",
     "@tickets/db": "workspace:*",
     "@tickets/domain": "workspace:*",

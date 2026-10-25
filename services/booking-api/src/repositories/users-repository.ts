@@ -7,6 +7,24 @@
  */
 import type { Pool } from 'pg';
 
+/**
+ * Read-only lookup for "mina biljetter" (docs/plan.md): a user who has
+ * never reached checkout has no `users` row yet, and that is a normal,
+ * empty-tickets-list outcome — not an error, so this returns
+ * `undefined` instead of upserting one (unlike `ensureUser`, which is
+ * only for the checkout write path).
+ */
+export async function getUserByAuth0Sub(
+  pool: Pool,
+  auth0Sub: string,
+): Promise<{ id: string } | undefined> {
+  const { rows } = await pool.query<{ id: string }>(
+    'SELECT id FROM users WHERE auth0_sub = $1',
+    [auth0Sub],
+  );
+  return rows[0];
+}
+
 export async function ensureUser(
   pool: Pool,
   params: { auth0Sub: string; email: string; name: string | undefined },

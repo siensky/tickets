@@ -14,8 +14,9 @@
  * back (docs/plan.md "Betalning": "verifiera signatur → dedupe →
  * skriv till outbox").
  */
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type { InsertedOrder, OrderForPayment } from '../types/payment.js';
+import type { OrderRow } from '../types/my-tickets.js';
 
 export async function insertPendingOrder(
   client: PoolClient,
@@ -66,6 +67,33 @@ export async function getOrderForPayment(
     reservationId: row.reservation_id,
     totalCents: row.total_cents,
   };
+}
+
+/**
+ * All of this shard's orders for a user (docs/plan.md "Databas": "Mina
+ * ordrar via scatter-gather" — `user_id` has no FK, so there is no
+ * single `event_id` to filter on here; the caller queries both shards
+ * and merges, which is the documented exception to docs/rules.md §4's
+ * shard-key rule).
+ */
+export async function getOrdersForUser(pool: Pool, userId: string): Promise<OrderRow[]> {
+  const { rows } = await pool.query<{
+    id: string;
+    event_id: string;
+    status: string;
+    total_cents: number;
+    created_at: Date;
+  }>(
+    'SELECT id, event_id, status, total_cents, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC',
+    [userId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    eventId: row.event_id,
+    status: row.status,
+    totalCents: row.total_cents,
+    createdAt: row.created_at,
+  }));
 }
 
 export async function markOrderStatus(
