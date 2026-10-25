@@ -15,16 +15,22 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
 
-export const E2E_VENUE_ID = '00000000-0000-0000-0000-000000000001';
-export const E2E_SECTION_ID = '00000000-0000-0000-0000-000000000002';
-export const E2E_EVENT_ID = '00000000-0000-0000-0000-000000000003';
+// Fasta men GILTIGA v4-formade UUID:er (version-nibble "4", variant-
+// nibble "8") — Zod's .uuid() (shared/schemas) kräver RFC 4122-formen
+// och godtar bara nil-UUID:n som specialfall, inte en godtycklig
+// all-nollor-plus-suffix-sträng. Hittat live i CI: GET /events/:id
+// m.fl. avvisade de gamla "00000000-...-00000000000X"-id:na med 400,
+// innan testet ens hann navigera dit.
+export const E2E_VENUE_ID = '00000000-0000-4000-8000-000000000001';
+export const E2E_SECTION_ID = '00000000-0000-4000-8000-000000000002';
+export const E2E_EVENT_ID = '00000000-0000-4000-8000-000000000003';
 export const E2E_VENUE_SEAT_IDS = [
-  '00000000-0000-0000-0000-000000000011',
-  '00000000-0000-0000-0000-000000000012',
+  '00000000-0000-4000-8000-000000000011',
+  '00000000-0000-4000-8000-000000000012',
 ] as const;
 const E2E_SEAT_IDS = [
-  '00000000-0000-0000-0000-000000000021',
-  '00000000-0000-0000-0000-000000000022',
+  '00000000-0000-4000-8000-000000000021',
+  '00000000-0000-4000-8000-000000000022',
 ] as const;
 
 async function resetGlobalFixture(pool: Pool): Promise<void> {
