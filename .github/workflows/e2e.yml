@@ -152,7 +152,12 @@ jobs:
         run: pnpm --filter @tickets/web run build
 
       - name: Start the web app in the background
-        run: pnpm --filter @tickets/web run preview -- --port 5173 --strictPort > web.log 2>&1 &
+        # Porten sätts i package.json:s "preview"-skript, inte här: pnpm
+        # forwardar inte "-- --port 5173" rent till Vite (ekar det som
+        # "vite preview -- --port 5173", och Vite ignorerar allt efter
+        # det extra "--" tyst och faller tillbaka på sin egen default
+        # 4173) — verifierat orsaken till att detta jobb failade live.
+        run: pnpm --filter @tickets/web run preview > web.log 2>&1 &
 
       - name: Wait for the web app to respond
         run: |
