@@ -169,6 +169,25 @@ async function getUnticketedReservedSeats(
   return seats.filter((seat) => !ticketedSeatIds.has(seat.seatId));
 }
 
+// Varaktigt skrivet i SAMMA transaktion som dedupe-claimen — en krasch
+// mellan denna commit och det faktiska Stripe-återbetalningsanropet lämnar
+// betalningen synligt fast i "refund_needed", inte tyst förlorad. En
+// periodisk sweeper för fastnade rader här är ett rimligt uppföljningssteg,
+// inte byggt i den här omgången.
+async function flagPaymentForRefund(
+  client: PoolClient,
+  payload: PaymentSucceededPayload,
+): Promise<ProcessOutcome> {
+  await markPaymentStatus(
+    client,
+    payload.eventId,
+    payload.paymentId,
+    'succeeded',
+    'refund_needed',
+  );
+  return { kind: 'refund_needed' };
+}
+
 async function convertReservationOrFlagRefund(
   client: PoolClient,
   deps: PaymentConsumerDeps,
@@ -205,19 +224,7 @@ async function convertReservationOrFlagRefund(
     payload.reservationId,
   );
   if (!converted) {
-    // Varaktigt skrivet i SAMMA transaktion som dedupe-claimen — en
-    // krasch mellan denna commit och det faktiska Stripe-återbetalnings-
-    // anropet lämnar betalningen synligt fast i "refund_needed", inte
-    // tyst förlorad. En periodisk sweeper för fastnade rader här är ett
-    // rimligt uppföljningssteg, inte byggt i den här omgången.
-    await markPaymentStatus(
-      client,
-      payload.eventId,
-      payload.paymentId,
-      'succeeded',
-      'refund_needed',
-    );
-    return { kind: 'refund_needed' };
+    return flagPaymentForRefund(client, payload);
   }
 
   const { ticketIds, refundedSeats } = await convertOrderAndMintTickets(client, deps, payload);
@@ -228,14 +235,7 @@ async function convertReservationOrFlagRefund(
     // nothing to confirm, full refund. convertOrderAndMintTickets did NOT
     // flip the order to "paid" in this case (see its own comment), so it's
     // still "pending" here, exactly what refundAndNotify's cancel expects.
-    await markPaymentStatus(
-      client,
-      payload.eventId,
-      payload.paymentId,
-      'succeeded',
-      'refund_needed',
-    );
-    return { kind: 'refund_needed' };
+    return flagPaymentForRefund(client, payload);
   }
   return { kind: 'converted', refundedSeats };
 }
