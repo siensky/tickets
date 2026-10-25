@@ -13,14 +13,19 @@
  * biljetter utan att någonsin skriva händelsen som får
  * notification-worker att skicka bekräftelsemejlet.
  */
-import { getPoolForEvent, withTransaction, type ShardPools } from '@tickets/db';
+import {
+  getPoolForEvent,
+  isUniqueViolation,
+  withTransaction,
+  type ShardPools,
+} from '@tickets/db';
 import {
   InternalError,
   OUTBOX_EVENT_TYPES,
   type OrderConfirmedPayload,
-  type OrderRefundedPayload,
   type PaymentSucceededPayload,
 } from '@tickets/domain';
+import type { Logger, OversellMetrics } from '@tickets/observability';
 import type { Pool, PoolClient } from 'pg';
 import type Stripe from 'stripe';
 import { insertOutboxEvent } from '../repositories/outbox-repository.js';
@@ -35,16 +40,28 @@ import {
   getSeatPricesForReservation,
   markReservationConverted,
   markSeatsSold,
+  releaseConflictedSeat,
 } from '../repositories/reservation-repository.js';
-import { insertTicket } from '../repositories/tickets-repository.js';
+import { getTicketedSeatIds, insertTicket } from '../repositories/tickets-repository.js';
 import { createQrToken } from './qr-token.js';
+import {
+  refundAndNotify,
+  refundSeatsAndNotify,
+  type RefundedSeat,
+} from './payment-refund-service.js';
 
 const CONSUMER_NAME = 'booking-api.payment-succeeded';
+
+// shared/db/migrations/sharded/1700000008000_create-tickets.ts — partial unique index
+// name, scoped to status = 'valid'.
+const TICKETS_VALID_SEAT_CONSTRAINT = 'tickets_valid_seat_unique';
 
 export interface PaymentConsumerDeps {
   readonly shardPools: ShardPools;
   readonly stripe: Stripe;
   readonly qrTokenSecret: string;
+  readonly logger: Logger;
+  readonly oversellMetrics: OversellMetrics;
 }
 
 /**
@@ -77,7 +94,10 @@ export function parsePaymentSucceededPayload(payload: unknown): PaymentSucceeded
   return { paymentId, orderId, reservationId, eventId, providerRef, providerChargeRef };
 }
 
-type ProcessOutcome = { readonly kind: 'duplicate' | 'converted' | 'refund_needed' };
+type ProcessOutcome =
+  | { readonly kind: 'duplicate' }
+  | { readonly kind: 'refund_needed' }
+  | { readonly kind: 'converted'; readonly refundedSeats: readonly RefundedSeat[] };
 
 export async function processPaymentSucceeded(
   deps: PaymentConsumerDeps,
@@ -93,24 +113,60 @@ export async function processPaymentSucceeded(
     convertReservationOrFlagRefund(client, deps, payload, messageId),
   );
   if (outcome.kind === 'refund_needed') {
-    await refundAndNotify(deps, pool, payload);
+    await refundAndNotify(deps.stripe, pool, payload);
     return;
   }
-  if (outcome.kind === 'duplicate') {
-    // Redelivery (requeue efter krasch, eller x-delivery-limit-retry):
-    // dedupe-claimen i den FÖRSTA transaktionen är redan tagen, så vi
-    // hamnar aldrig i grenen ovan igen för det här försöket. Om
-    // betalningen fortfarande står i "refund_needed" är återbetalningen
-    // från förra försöket inte klar — annars skulle pengarna vara
-    // dragna för gott utan motprestation (docs/plan.md "Betalning som
-    // landar efter utgången reservation"). `refundAndNotify` är säker
-    // att köra flera gånger (Stripes idempotencyKey + det villkorade
-    // UPDATE:et nedan).
-    const currentStatus = await getPaymentStatusById(pool, payload.eventId, payload.paymentId);
-    if (currentStatus === 'refund_needed') {
-      await refundAndNotify(deps, pool, payload);
+  if (outcome.kind === 'converted') {
+    if (outcome.refundedSeats.length > 0) {
+      await refundSeatsAndNotify(deps.stripe, pool, payload, outcome.refundedSeats);
+    }
+    return;
+  }
+  // kind === 'duplicate': redelivery (requeue efter krasch, eller
+  // x-delivery-limit-retry) — dedupe-claimen i den FÖRSTA transaktionen är
+  // redan tagen, så vi hamnar aldrig i grenarna ovan igen för det här
+  // försöket. Två saker kan fortfarande vara ogjorda från förra försöket,
+  // utan att ha lämnat en egen "pending"-markör — båda härleds ur redan
+  // skrivet tillstånd i stället:
+  const currentStatus = await getPaymentStatusById(pool, payload.eventId, payload.paymentId);
+  if (currentStatus === 'refund_needed') {
+    // Hela ordern skulle återbetalas (expired reservation) men hann
+    // krascha innan Stripe-anropet (docs/plan.md "Betalning som landar
+    // efter utgången reservation"). `refundAndNotify` är säker att köra
+    // flera gånger (Stripes idempotencyKey + det villkorade UPDATE:et
+    // nedan).
+    await refundAndNotify(deps.stripe, pool, payload);
+    return;
+  }
+  if (currentStatus === 'succeeded') {
+    // Ordern konverterades, men en delvis återbetalning (oversold stol)
+    // hann krascha innan Stripe-anropet. Ingen egen "pending"-markör för
+    // det heller — vilka stolar som saknar en giltig biljett för den här
+    // ordern räknas om från tickets-tabellen, samma härledning som
+    // refundSeatsAndNotify redan bygger på.
+    const pendingRefund = await getUnticketedReservedSeats(pool, payload);
+    if (pendingRefund.length > 0) {
+      await refundSeatsAndNotify(deps.stripe, pool, payload, pendingRefund);
     }
   }
+}
+
+async function getUnticketedReservedSeats(
+  pool: Pool,
+  payload: PaymentSucceededPayload,
+): Promise<readonly RefundedSeat[]> {
+  const seats = await getSeatPricesForReservation(
+    pool,
+    payload.eventId,
+    payload.reservationId,
+  );
+  if (seats.length === 0) {
+    return [];
+  }
+  const ticketedSeatIds = new Set(
+    await getTicketedSeatIds(pool, payload.eventId, payload.orderId),
+  );
+  return seats.filter((seat) => !ticketedSeatIds.has(seat.seatId));
 }
 
 async function convertReservationOrFlagRefund(
@@ -164,15 +220,31 @@ async function convertReservationOrFlagRefund(
     return { kind: 'refund_needed' };
   }
 
-  await convertOrderAndMintTickets(client, deps, payload);
-  return { kind: 'converted' };
+  const { ticketIds, refundedSeats } = await convertOrderAndMintTickets(client, deps, payload);
+  if (ticketIds.length === 0) {
+    // Every reserved seat lost the tickets_valid_seat_unique race —
+    // pathological (a held/pending_payment reservation should make this
+    // near-impossible) but handled the same as an expired reservation:
+    // nothing to confirm, full refund. convertOrderAndMintTickets did NOT
+    // flip the order to "paid" in this case (see its own comment), so it's
+    // still "pending" here, exactly what refundAndNotify's cancel expects.
+    await markPaymentStatus(
+      client,
+      payload.eventId,
+      payload.paymentId,
+      'succeeded',
+      'refund_needed',
+    );
+    return { kind: 'refund_needed' };
+  }
+  return { kind: 'converted', refundedSeats };
 }
 
 async function mintTicketsForSeats(
   client: PoolClient,
   deps: PaymentConsumerDeps,
   payload: PaymentSucceededPayload,
-): Promise<string[]> {
+): Promise<{ ticketIds: string[]; refundedSeats: RefundedSeat[] }> {
   const seats = await getSeatPricesForReservation(
     client,
     payload.eventId,
@@ -180,30 +252,65 @@ async function mintTicketsForSeats(
   );
   await markSeatsSold(client, payload.eventId, payload.reservationId);
   const ticketIds: string[] = [];
+  const refundedSeats: RefundedSeat[] = [];
   for (const seat of seats) {
     const qrToken = createQrToken(deps.qrTokenSecret, payload.orderId, seat.seatId);
-    const ticket = await insertTicket(client, {
-      eventId: payload.eventId,
-      orderId: payload.orderId,
-      seatId: seat.seatId,
-      qrToken,
-    });
-    ticketIds.push(ticket.id);
+    // SAVEPOINT: a unique-violation poisons the whole transaction the same
+    // way NOWAIT does in reservation-repository.ts's lockSeats — without
+    // it, one oversold seat would also undo tickets already minted for
+    // this order's OTHER seats, not just skip the one that lost the race.
+    await client.query('SAVEPOINT mint_ticket');
+    try {
+      const ticket = await insertTicket(client, {
+        eventId: payload.eventId,
+        orderId: payload.orderId,
+        seatId: seat.seatId,
+        qrToken,
+      });
+      await client.query('RELEASE SAVEPOINT mint_ticket');
+      ticketIds.push(ticket.id);
+    } catch (error) {
+      await client.query('ROLLBACK TO SAVEPOINT mint_ticket');
+      if (!isUniqueViolation(error, TICKETS_VALID_SEAT_CONSTRAINT)) {
+        throw error;
+      }
+      // markSeatsSold above already flipped this seat to "sold" under OUR
+      // reservation — but we're not minting it a ticket, so leaving it
+      // "sold" would strand it, unsellable, under a reservation with
+      // nothing to show for it. releaseConflictedSeat no-ops if the seat's
+      // already been reassigned to whoever actually holds the valid
+      // ticket by the time we get here.
+      await releaseConflictedSeat(client, payload.eventId, seat.seatId, payload.reservationId);
+      deps.oversellMetrics.oversellPreventedTotal.inc();
+      deps.logger.warn(
+        { eventId: payload.eventId, orderId: payload.orderId, seatId: seat.seatId },
+        'tickets_valid_seat_unique prevented an oversold seat — releasing it and refunding its price',
+      );
+      refundedSeats.push(seat);
+    }
   }
-  return ticketIds;
+  return { ticketIds, refundedSeats };
 }
 
 async function convertOrderAndMintTickets(
   client: PoolClient,
   deps: PaymentConsumerDeps,
   payload: PaymentSucceededPayload,
-): Promise<void> {
+): Promise<{ ticketIds: string[]; refundedSeats: RefundedSeat[] }> {
   const order = await getOrderForPayment(client, payload.eventId, payload.orderId);
   if (order === undefined) {
     throw new InternalError('Order not found while converting a paid reservation', {
       orderId: payload.orderId,
     });
   }
+
+  const { ticketIds, refundedSeats } = await mintTicketsForSeats(client, deps, payload);
+  if (ticketIds.length === 0) {
+    // Caller treats this as a full refund — order stays "pending" so its
+    // own cancel transition still applies cleanly.
+    return { ticketIds, refundedSeats };
+  }
+
   const orderMarked = await markOrderStatus(
     client,
     payload.eventId,
@@ -217,8 +324,6 @@ async function convertOrderAndMintTickets(
     });
   }
 
-  const ticketIds = await mintTicketsForSeats(client, deps, payload);
-
   const confirmedPayload: OrderConfirmedPayload = {
     orderId: payload.orderId,
     eventId: payload.eventId,
@@ -230,57 +335,6 @@ async function convertOrderAndMintTickets(
     type: OUTBOX_EVENT_TYPES.ORDER_CONFIRMED,
     payload: confirmedPayload,
   });
-}
 
-/**
- * Skyddsnätet (docs/plan.md "Betalning som landar efter utgången
- * reservation"): frysningen löste det normala fallet, men hann den gå
- * ut INNAN betalningen bekräftades är pengarna redan dragna och
- * stolarna redan sålda till någon annan — återbetala, berätta för
- * kunden, aldrig behåll pengarna utan motprestation.
- *
- * Stripe-anropet ligger medvetet UTANFÖR transaktionen nedan, av samma
- * skäl som i checkout-service.ts — men ordern/betalningen flaggas redan
- * `refund_needed`-läge av den FÖRRA transaktionen (reservationen är
- * redan konstaterat förlorad där), så ett krasch MELLAN detta anrop och
- * nästa transaktion lämnar bara en försenad återbetalning, aldrig en
- * dubbel eller en utebliven.
- */
-async function refundAndNotify(
-  deps: PaymentConsumerDeps,
-  pool: Pool,
-  payload: PaymentSucceededPayload,
-): Promise<void> {
-  await deps.stripe.refunds.create(
-    { payment_intent: payload.providerChargeRef },
-    { idempotencyKey: `refund:${payload.paymentId}` },
-  );
-  await withTransaction(pool, async (client) => {
-    // Villkorat UPDATE: gör hela funktionen säker att köra flera
-    // gånger (se anropsplatsen i processPaymentSucceeded). Har ett
-    // tidigare försök redan hunnit flippa statusen till "refunded"
-    // ska vi inte avbryta ordern eller skriva outbox-händelsen igen.
-    const statusFlipped = await markPaymentStatus(
-      client,
-      payload.eventId,
-      payload.paymentId,
-      'refund_needed',
-      'refunded',
-    );
-    if (!statusFlipped) {
-      return;
-    }
-    await markOrderStatus(client, payload.eventId, payload.orderId, 'pending', 'cancelled');
-    const refundedPayload: OrderRefundedPayload = {
-      paymentId: payload.paymentId,
-      orderId: payload.orderId,
-      eventId: payload.eventId,
-      reservationId: payload.reservationId,
-    };
-    await insertOutboxEvent(client, {
-      eventId: payload.eventId,
-      type: OUTBOX_EVENT_TYPES.ORDER_REFUNDED,
-      payload: refundedPayload,
-    });
-  });
+  return { ticketIds, refundedSeats };
 }

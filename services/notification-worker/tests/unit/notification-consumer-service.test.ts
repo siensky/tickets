@@ -100,6 +100,37 @@ describe('processNotificationEvent', () => {
     );
   });
 
+  it('sends a seat-refund explanation for an order.seat_refunded-shaped payload, not the full-refund one', async () => {
+    const shardPools = fakeShardPools({
+      userEmail: 'user@example.test',
+      orderUserId: 'user-1',
+    });
+    const redis = fakeRedis(true);
+    const logger = createLogger({ serviceName: 'test' });
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
+
+    await processNotificationEvent(
+      { shardPools, redis, logger },
+      {
+        orderId: 'order-1',
+        eventId: 'event-1',
+        paymentId: 'payment-1',
+        seatIds: ['seat-2'],
+        amountCents: 1000,
+      },
+      'msg-1',
+    );
+
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'user@example.test',
+        orderId: 'order-1',
+        seatCount: 1,
+      }),
+      expect.stringContaining('partial seat refund'),
+    );
+  });
+
   it('warns instead of throwing for an unrecognized payload shape', async () => {
     const shardPools = fakeShardPools({});
     const redis = fakeRedis(true);

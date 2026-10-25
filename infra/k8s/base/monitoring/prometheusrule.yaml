@@ -1,0 +1,50 @@
+# docs/plan.md "Observability": "Ett larm triggas medvetet under demon."
+# HighErrorRate och PostgresDown är de två enklast att utlösa på kommando
+# (döda en postgres-podd, eller skala booking-api till 0 ett ögonblick) —
+# se docs/runbook.md "Vanliga larm och vad de betyder".
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tickets-alerts
+  namespace: ticketing
+spec:
+  groups:
+    - name: tickets.rules
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (service)
+              / sum(rate(http_requests_total[5m])) by (service) > 0.05
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: '{{ $labels.service }} har >5% felfrekvens'
+            description: '{{ $labels.service }}: {{ $value | humanizePercentage }} av requests svarar 5xx över 5 minuter.'
+
+        - alert: PostgresDown
+          expr: pg_up == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'Postgres-shard nere'
+            description: 'pg_up == 0 för {{ $labels.instance }} — postgres-exporter når inte databasen.'
+
+        - alert: RabbitMQQueueDepthHigh
+          expr: rabbitmq_queue_messages_ready > 900
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Ködjup nära KEDAs skalningstak'
+            description: '{{ $labels.queue }} har {{ $value }} väntande meddelanden — KEDA skalar notification-worker på just detta mått, taket är 100/podd * 10 poddar (docs/plan.md "Autoscaling").'
+
+        - alert: PodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total{namespace=~"ticketing|data"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $labels.namespace }}/{{ $labels.pod }} startar om upprepat'
+            description: '{{ $value }} omstarter av {{ $labels.container }} på 15 minuter.'

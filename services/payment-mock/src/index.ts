@@ -23,6 +23,7 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerCheckoutSessionsRoutes } from './routes/checkout-sessions.js';
 import { registerRefundsRoutes } from './routes/refunds.js';
+import { shutdownTracing } from './instrumentation.js';
 import { loadChaosConfig } from './services/chaos-config.js';
 import { createSessionStore } from './services/session-store.js';
 
@@ -75,6 +76,7 @@ export async function start(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down gracefully');
     await app.close();
+    await shutdownTracing();
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

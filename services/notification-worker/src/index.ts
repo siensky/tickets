@@ -1,8 +1,16 @@
 /**
  * Entrypoint for notification-worker. Runs a minimal HTTP server (health +
- * metrics — including the RabbitMQ queue-depth metric KEDA scales on,
- * added in Fas 3) alongside the RabbitMQ consumer loop for
+ * metrics) alongside the RabbitMQ consumer loop for
  * `order.confirmed`/`order.refunded` (docs/plan.md "Tjänster").
+ *
+ * Fas 3 built its own `rabbitmq_queue_messages_ready` gauge here as the KEDA
+ * scaling signal (queue-depth-metric.ts, removed in Fas 4). Fas 4 enables
+ * RabbitMQ's own `rabbitmq_prometheus` plugin (infra/k8s/base/rabbitmq) —
+ * once that's scraped, a hand-rolled gauge of the same name is redundant and
+ * actively misleading: the plugin reports the queue's real depth, the
+ * hand-rolled one was one copy per pod and not summable across replicas.
+ * The Fas 6 KEDA `ScaledObject` scales against the plugin's metric (or
+ * RabbitMQ's management API directly) instead.
  */
 import { closeShardPools, createShardPools, type ShardPools } from '@tickets/db';
 import { OUTBOX_EXCHANGE } from '@tickets/domain';
@@ -26,13 +34,9 @@ import Fastify, {
 } from 'fastify';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
+import { shutdownTracing } from './instrumentation.js';
 import { startHeartbeat } from './services/heartbeat.js';
 import { processNotificationEvent } from './services/notification-consumer-service.js';
-import {
-  createQueueDepthGauge,
-  startQueueDepthPoll,
-  type QueueDepthPoll,
-} from './services/queue-depth-metric.js';
 
 const SERVICE_NAME = 'notification-worker';
 const ORDER_EVENTS_QUEUE = 'notification-worker.order-events';
@@ -69,7 +73,6 @@ function createShutdownHandler(
     shardPools: ShardPools;
     redis: RedisClient;
     consumer: RabbitConsumer;
-    queueDepthPoll: QueueDepthPoll;
   },
 ): (signal: string) => void {
   const shutdown = async (signal: string): Promise<void> => {
@@ -77,9 +80,9 @@ function createShutdownHandler(
     clearInterval(resources.heartbeat);
     await resources.app.close();
     await resources.consumer.close();
-    await resources.queueDepthPoll.stop();
     await closeShardPools(resources.shardPools);
     await closeRedisClient(resources.redis);
+    await shutdownTracing();
     process.exit(0);
   };
   return (signal: string): void => {
@@ -115,10 +118,9 @@ async function startNotificationConsumer(
   rabbitUrl: string,
   shardPools: ShardPools,
   redis: RedisClient,
-  queueDepthGauge: ReturnType<typeof createQueueDepthGauge>,
   logger: Logger,
-): Promise<{ consumer: RabbitConsumer; queueDepthPoll: QueueDepthPoll }> {
-  const consumer = await connectConsumer(
+): Promise<RabbitConsumer> {
+  return connectConsumer(
     rabbitUrl,
     {
       exchange: OUTBOX_EXCHANGE,
@@ -132,20 +134,12 @@ async function startNotificationConsumer(
       logger.warn({ error, messageId }, 'notification consumer failed to process a message');
     },
   );
-  const queueDepthPoll = await startQueueDepthPoll(
-    rabbitUrl,
-    ORDER_EVENTS_QUEUE,
-    queueDepthGauge,
-    logger,
-  );
-  return { consumer, queueDepthPoll };
 }
 
 export async function start(): Promise<void> {
   const logger = createLogger({ serviceName: SERVICE_NAME });
   const registry = createRegistry(SERVICE_NAME);
   const httpMetrics = createHttpMetrics(registry);
-  const queueDepthGauge = createQueueDepthGauge(registry);
 
   const app = await createAndStartHttpServer(logger, registry, httpMetrics);
 
@@ -158,13 +152,7 @@ export async function start(): Promise<void> {
   const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
   const rabbitUrl = process.env['RABBITMQ_URL'] ?? 'amqp://localhost';
 
-  const { consumer, queueDepthPoll } = await startNotificationConsumer(
-    rabbitUrl,
-    shardPools,
-    redis,
-    queueDepthGauge,
-    logger,
-  );
+  const consumer = await startNotificationConsumer(rabbitUrl, shardPools, redis, logger);
 
   const shutdownOrCrash = createShutdownHandler(logger, {
     app,
@@ -172,7 +160,6 @@ export async function start(): Promise<void> {
     shardPools,
     redis,
     consumer,
-    queueDepthPoll,
   });
   process.on('SIGTERM', () => shutdownOrCrash('SIGTERM'));
   process.on('SIGINT', () => shutdownOrCrash('SIGINT'));

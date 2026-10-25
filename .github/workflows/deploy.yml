@@ -225,6 +225,19 @@ jobs:
             --from-literal=stripe-webhook-secret="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      # Fas 4 (docs/plan.md "Backups"): R2-bucketen/kontot är inget klustret
+      # äger (docs/runbook.md "R2 — backup-lagring"), så samma mönster som
+      # Auth0/Stripe ovan — fyra REPO-SECRETS: R2_ACCESS_KEY_ID,
+      # R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET.
+      - name: Create/update backup secrets (R2)
+        run: |
+          kubectl create secret generic backup-r2-credentials -n data \
+            --from-literal=access-key-id="${{ secrets.R2_ACCESS_KEY_ID }}" \
+            --from-literal=secret-access-key="${{ secrets.R2_SECRET_ACCESS_KEY }}" \
+            --from-literal=endpoint="${{ secrets.R2_ENDPOINT }}" \
+            --from-literal=bucket="${{ secrets.R2_BUCKET }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       # Egna, slumpgenererade hemligheter (docs/plan.md "Väntrum"s
       # kötoken, "Databas"s qr_token) — ingen GitHub-secret för dem,
       # samma "skapa bara om den saknas"-princip som Postgres-lösenorden:

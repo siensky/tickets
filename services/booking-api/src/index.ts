@@ -20,9 +20,11 @@ import { closeShardPools, createShardPools, type ShardPools } from '@tickets/db'
 import {
   createHttpMetrics,
   createLogger,
+  createOversellMetrics,
   createRegistry,
   type HttpMetrics,
   type Logger,
+  type OversellMetrics,
 } from '@tickets/observability';
 import { closeRedisClient, createRedisClient, type RedisClient } from '@tickets/redis';
 import { connectConsumer, type RabbitConsumer } from '@tickets/rabbit';
@@ -44,6 +46,7 @@ import { registerQueueRoutes } from './routes/queue.js';
 import { registerRateLimitHook } from './routes/rate-limit.js';
 import { registerReservationRoutes } from './routes/reservations.js';
 import { registerWebhookRoutes } from './routes/webhooks.js';
+import { shutdownTracing } from './instrumentation.js';
 import { createStripeClient } from './services/stripe-client.js';
 import {
   parsePaymentSucceededPayload,
@@ -185,6 +188,7 @@ async function startPaymentConsumer(
   deps: Dependencies,
   stripe: ReturnType<typeof createStripeClient>,
   logger: Logger,
+  oversellMetrics: OversellMetrics,
 ): Promise<RabbitConsumer> {
   return connectConsumer(
     process.env['RABBITMQ_URL'] ?? 'amqp://localhost',
@@ -196,7 +200,13 @@ async function startPaymentConsumer(
     },
     (payload, messageId) =>
       processPaymentSucceeded(
-        { shardPools: deps.shardPools, stripe, qrTokenSecret: deps.qrTokenSecret },
+        {
+          shardPools: deps.shardPools,
+          stripe,
+          qrTokenSecret: deps.qrTokenSecret,
+          logger,
+          oversellMetrics,
+        },
         parsePaymentSucceededPayload(payload),
         messageId,
       ),
@@ -224,12 +234,13 @@ async function startPaymentConsumerWithRetry(
   deps: Dependencies,
   stripe: ReturnType<typeof createStripeClient>,
   logger: Logger,
+  oversellMetrics: OversellMetrics,
   state: { consumer: RabbitConsumer | undefined; stopped: boolean },
 ): Promise<void> {
   let delayMs = 1000;
   while (!state.stopped) {
     try {
-      state.consumer = await startPaymentConsumer(deps, stripe, logger);
+      state.consumer = await startPaymentConsumer(deps, stripe, logger, oversellMetrics);
       return;
     } catch (error) {
       logger.warn({ error }, 'payment-succeeded consumer failed to start, retrying');
@@ -254,6 +265,7 @@ function createShutdownHandler(
     await resources.paymentConsumerState.consumer?.close();
     await closeShardPools(resources.deps.shardPools);
     await closeRedisClient(resources.deps.redis);
+    await shutdownTracing();
     process.exit(0);
   };
   return (signal: string): void => {
@@ -268,6 +280,7 @@ export async function start(): Promise<void> {
   const logger = createLogger({ serviceName: SERVICE_NAME });
   const registry = createRegistry(SERVICE_NAME);
   const httpMetrics = createHttpMetrics(registry);
+  const oversellMetrics = createOversellMetrics(registry);
   const app = createApp(logger);
   const deps = loadDependencies(logger);
   const stripe = createStripeClientFromEnv(deps.stripeSecretKey);
@@ -279,7 +292,13 @@ export async function start(): Promise<void> {
     consumer: undefined,
     stopped: false,
   };
-  void startPaymentConsumerWithRetry(deps, stripe, logger, paymentConsumerState);
+  void startPaymentConsumerWithRetry(
+    deps,
+    stripe,
+    logger,
+    oversellMetrics,
+    paymentConsumerState,
+  );
 
   const port = Number(process.env['BOOKING_API_PORT'] ?? 3000);
   await app.listen({ port, host: '0.0.0.0' });

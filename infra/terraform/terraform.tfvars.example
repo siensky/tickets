@@ -8,6 +8,9 @@
 #   export TF_VAR_cloudflare_api_token="..."       # Terraform: DNS + Zone Settings + Cache Rules
 #   export TF_VAR_cloudflare_dns_token="..."       # cert-manager i klustret: ENDAST DNS
 #   export TF_VAR_tailscale_node_authkey="..."
+#   export TF_VAR_slack_webhook_url="..."          # Alertmanager -> Slack
+#   export TF_VAR_grafana_auth0_client_id="..."
+#   export TF_VAR_grafana_auth0_client_secret="..."
 
 domain_name       = "example.se"
 letsencrypt_email = "din@epost.se"
@@ -18,3 +21,5 @@ admin_ipv4_cidr = "203.0.113.42/32" # din egen publika IP, som /32
 # node_count          = 2      # 2 under utveckling, 3-4 under lasttest/demo
 # letsencrypt_use_staging = true  # byt till false när kedjan är stabil
 # tailscale_hostname  = "tickets-cp-1"
+
+grafana_auth0_domain = "din-tenant.eu.auth0.com"

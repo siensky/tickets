@@ -28,6 +28,21 @@ resource "cloudflare_dns_record" "api" {
   ttl     = 1 # "Auto" när proxied = true
 }
 
+# Fas 4: Grafana måste vara nåbar för README:ts "adress till dashboard"
+# (docs/plan.md "Context" "Inlämning"), skyddad av Auth0-OAuth-inloggningen
+# i observability.tf — inte Tailscale-only, till skillnad från
+# Kubernetes-API:et.
+resource "cloudflare_dns_record" "grafana" {
+  for_each = toset(values(local.node_ipv4_by_name))
+
+  zone_id = data.cloudflare_zone.this.zone_id
+  name    = "grafana"
+  type    = "A"
+  content = each.value
+  proxied = true
+  ttl     = 1
+}
+
 locals {
   node_ipv4_by_name = merge(
     { (hcloud_server.control_plane.name) = hcloud_server.control_plane.ipv4_address },
