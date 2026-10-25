@@ -192,6 +192,16 @@ jobs:
               kubectl create secret generic "$name" -n data \
                 --from-literal=password="$(openssl rand -hex 32)"
             fi
+            # booking-api/notification-worker/scheduler-worker (namnrymden
+            # "ticketing") läser samma lösenord via secretKeyRef för att
+            # bygga sin DATABASE_URL — Secrets är namnrymdsscopade i
+            # Kubernetes, så en kopia av SAMMA värde (inte en nyslumpad
+            # egen) måste finnas i "ticketing" också, annars är det fel
+            # lösenord mot en redan körande Postgres.
+            password=$(kubectl get secret "$name" -n data -o jsonpath='{.data.password}' | base64 -d)
+            kubectl create secret generic "$name" -n ticketing \
+              --from-literal=password="$password" \
+              --dry-run=client -o yaml | kubectl apply -f -
           done
 
       # Samma skäl som Postgres-lösenorden ovan — och framför allt INTE
@@ -206,6 +216,13 @@ jobs:
             kubectl create secret generic rabbitmq-credentials -n data \
               --from-literal=password="$(openssl rand -hex 32)"
           fi
+          # booking-api/notification-worker/scheduler-worker (namnrymden
+          # "ticketing") läser samma lösenord via secretKeyRef för att
+          # bygga RABBITMQ_URL — samma skäl som Postgres-lösenorden ovan.
+          password=$(kubectl get secret rabbitmq-credentials -n data -o jsonpath='{.data.password}' | base64 -d)
+          kubectl create secret generic rabbitmq-credentials -n ticketing \
+            --from-literal=password="$password" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       # docs/plan.md "Fasplan" Fas 3 / "Secrets": GitHub Actions secrets →
       # Kubernetes Secret vid deploy. Fyra REPO-SECRETS måste finnas i

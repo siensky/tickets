@@ -34,6 +34,16 @@ jobs:
       - name: Verify layer-boundary enforcement
         run: node scripts/verify-boundaries-enforcement.mjs
 
+      # docs/phase-status.md: secretKeyRef mot en secret som bara finns i
+      # en ANNAN namnrymd syns aldrig i "kubectl apply" — bara som
+      # CreateContainerConfigError när kubelet faktiskt schemalägger
+      # podden. Den klassen bugg smet igenom till produktion två gånger
+      # under Fas 4 (postgres-shard-*-credentials, rabbitmq-credentials)
+      # innan den hittades. Detta steg är en statisk kontroll, kräver
+      # ingen klusteråtkomst.
+      - name: Verify secret namespaces match their consumers
+        run: node scripts/verify-secret-namespaces.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

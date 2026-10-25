@@ -23,6 +23,38 @@ jobs:
   test:
     uses: ./.github/workflows/test.yml
 
+  # Server-side dry-run mot det RIKTIGA klustret (ingenting skrivs —
+  # "--dry-run=server" ber API-servern validera och svara utan att
+  # spara). docs/phase-status.md: ett fel som "spec.ports[0].name:
+  # Required value" existerar bara i hur den riktiga API-servern
+  # validerar ett schema — "kubectl kustomize" (ren rendering, ingen
+  # validering) ser det aldrig, och det nådde produktion två gånger under
+  # Fas 4 innan detta jobb fanns. Fångar INTE CreateContainerConfigError
+  # (secret/image-user-fel) — de kräver att kubelet faktiskt schemalägger
+  # podden, vilket "verify-secret-namespaces.mjs" (test.yml) och manuell
+  # granskning täcker istället.
+  k8s-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          tags: tag:ci
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > "$HOME/.kube/config"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Dry-run the full production manifest set against the live API server
+        run: kubectl kustomize infra/k8s/overlays/production | kubectl apply --dry-run=server -f -
+
   # Bygger (men pushar ALDRIG) samtliga Dockerfiles. Fyra nya
   # build-stegskedjor (pnpm deploy --prod, tsup-bundling, non-root-steg)
   # testades tidigare första gången på push: main — alltså EFTER merge,
