@@ -11,6 +11,8 @@
  * duplicating a few harmless rows onto the shard that ends up unused is
  * simpler and more robust than computing the hash here to pick one.
  */
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
 
 export const E2E_VENUE_ID = '00000000-0000-0000-0000-000000000001';
@@ -101,7 +103,20 @@ async function seed(): Promise<void> {
   process.stdout.write('Seeded e2e fixture data.\n');
 }
 
-seed().catch((error: unknown) => {
-  process.stderr.write(`${String(error)}\n`);
-  process.exitCode = 1;
-});
+// Bara om filen körs direkt som skript (`tsx seed.ts`) — INTE när den
+// importeras för sina exporterade id-konstanter (specs/*.spec.ts gör
+// det för E2E_EVENT_ID). Utan den här vakten körde seed() om sig själv
+// en gång per import, vilket i praktiken betydde en gång per Playwright-
+// testfilsladdning OCH en gång per CI-retry — en konkurrerande
+// DELETE+INSERT av exakt den rad testet precis navigerade till, mitt i
+// körningen. Samma symlänk-fallgrop och samma lösning som
+// services/booking-api/src/index.ts:s egen `isMain`-kommentar beskriver.
+const isMain =
+  process.argv[1] !== undefined &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+if (isMain) {
+  seed().catch((error: unknown) => {
+    process.stderr.write(`${String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
