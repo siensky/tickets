@@ -44,6 +44,23 @@ med RPO/RTO).
 **Cache-hit-ratio vid kanten** (docs/plan.md "Realtid") är fortfarande inte uppmätt/
 inskriven — ett kvarstående Fas 1-gap, inte löst av Fas 4.
 
+**Rättat: `reservation-idempotency.test.ts`s skenbara flakighet** (sågs i CI
+2026-10-25, två separata körningar, med `fulfilled.length` 2 respektive 4 istället
+för det hårdkodade 1). Grundorsaken var INTE en race i
+`idempotency-repository.ts` — den koden är korrekt — utan ett för strikt
+test-antagande: `Promise.allSettled` garanterar inte att alla 10 parallella
+anropen hinner köra sin första DB-fråga innan den snabbaste av dem redan hunnit
+slutföra HELA operationen (claim → lås säte → skapa reservation → markera
+`completed`). Under en belastad CI-runner hinner fler av de 10 anropen se
+`status: completed` (en korrekt idempotent repris) istället för `in_flight`,
+vilket ger fler än ett `fulfilled`-utfall utan att den faktiska garantin
+(ingen dubbelbokning) bryts. Testet kontrollerar nu detta direkt — att alla
+`fulfilled`-utfall pekar på SAMMA `reservationId` och att exakt en
+reservations-rad skapas — istället för en exakt 1-lyckad/9-409-uppdelning.
+`docs/phase-status.md` på `feature/fas5` har en äldre, numera inaktuell
+anteckning som beskriver detta som "odiagnostiserad flaky" — bör tas bort när
+den branchen uppdateras.
+
 **Affärsmått saknas fortfarande:** bara RED (http_requests_total/duration),
 `oversell_prevented_total` och `rabbitmq_queue_messages_ready` (riktiga pluginet, inte
 den borttagna egna gaugen) existerar som Prometheus-mått. "Aktiva reservationer",
