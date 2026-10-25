@@ -119,6 +119,12 @@ spec:
               memory: 64Mi
           securityContext:
             runAsNonRoot: true
+            # Imagens USER är det icke-numeriska "nobody" — kubelet kan inte
+            # verifiera icke-root utan ett explicit numeriskt runAsUser (sågs
+            # som CreateContainerConfigError: "cannot verify user is
+            # non-root"). 65534 är "nobody" i denna image (samma UID som
+            # officiella postgres-exporter-Helm-chartet sätter).
+            runAsUser: 65534
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
