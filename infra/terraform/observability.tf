@@ -210,6 +210,21 @@ resource "helm_release" "loki" {
         retention_enabled    = true
         delete_request_store = "filesystem"
       }
+      # Chartet sätter inget schema åt dig (det är klusterspecifikt) — TSDB
+      # + schema v13 är den rekommenderade kombinationen för lokal
+      # filesystem-lagring på nyare Loki-versioner.
+      schemaConfig = {
+        configs = [{
+          from         = "2024-01-01"
+          store        = "tsdb"
+          object_store = "filesystem"
+          schema       = "v13"
+          index = {
+            prefix = "loki_index_"
+            period = "24h"
+          }
+        }]
+      }
     }
     singleBinary = {
       replicas = 1
@@ -218,9 +233,22 @@ resource "helm_release" "loki" {
         size         = "10Gi"
       }
     }
+    # Chartets validate.yaml kräver dessa satta till 0 i Monolithic-läge —
+    # annars tolkas chartets egna default-replikantal för write/read/backend
+    # (den "simple scalable"-varianten) som att BÅDA lägena är aktiva samtidigt.
+    write   = { replicas = 0 }
+    read    = { replicas = 0 }
+    backend = { replicas = 0 }
     # Internt kluster-till-kluster-trafik bara (Grafana, Alloy) — ingen
     # extra nginx-gateway framför Loki behövs.
     gateway = { enabled = false }
+    # Chartets defaultstorlek för dessa (chunksCache: ~9.6GB, resultsCache:
+    # ~1.2GB minne) är dimensionerad för en stor produktionsinstallation —
+    # klustrets noder (cpx22, 4GB RAM) rymmer inte det (chunksCache fastnade
+    # i Pending: "Insufficient memory"). Query-volymen här motiverar inte
+    # cachelagren överhuvudtaget.
+    chunksCache  = { enabled = false }
+    resultsCache = { enabled = false }
     # Ingen extern lagring att säkerhetskopiera separat — loggarna är
     # debug-hjälp, inte bokföring (docs/plan.md "Backups" gäller bara
     # Postgres).
