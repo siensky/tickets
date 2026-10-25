@@ -28,6 +28,7 @@ import Fastify, {
 } from 'fastify';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
+import { shutdownTracing } from './instrumentation.js';
 import { startHeartbeat } from './services/heartbeat.js';
 import { startOutboxRelay, type OutboxRelay } from './services/outbox-relay-service.js';
 import {
@@ -88,6 +89,7 @@ function createShutdownHandler(
     await resources.queueAdmission.stop();
     await closeShardPools(resources.shardPools);
     await closeRedisClient(resources.redis);
+    await shutdownTracing();
     process.exit(0);
   };
   return (signal: string): void => {

@@ -27,3 +27,19 @@ export function sendRefundEmail(
     'simulated: refund explanation email sent',
   );
 }
+
+/** One or more (but not all) seats of an otherwise-confirmed order were refunded (docs/plan.md "Oversell"). */
+export function sendSeatRefundEmail(
+  logger: Logger,
+  params: { email: string; orderId: string; seatIds: readonly string[]; amountCents: number },
+): void {
+  logger.info(
+    {
+      email: params.email,
+      orderId: params.orderId,
+      seatCount: params.seatIds.length,
+      amountCents: params.amountCents,
+    },
+    'simulated: partial seat refund explanation email sent',
+  );
+}

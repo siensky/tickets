@@ -43,3 +43,22 @@ export function createHttpMetrics(registry: Registry): HttpMetrics {
 
   return { requestsTotal, requestDuration };
 }
+
+export interface OversellMetrics {
+  readonly oversellPreventedTotal: Counter<never>;
+}
+
+/**
+ * docs/plan.md "Observability": increments when an INSERT into `tickets` fails on its
+ * `(event_id, seat_id)` unique-violation — proof the database stopped an oversold seat.
+ * A counter for "oversold" would be a tautology (the constraint makes that outcome
+ * impossible), so this is the only honest metric for the guarantee.
+ */
+export function createOversellMetrics(registry: Registry): OversellMetrics {
+  const oversellPreventedTotal = new Counter({
+    name: 'oversell_prevented_total',
+    help: 'Ticket inserts rejected by the tickets_valid_seat_unique constraint',
+    registers: [registry],
+  });
+  return { oversellPreventedTotal };
+}

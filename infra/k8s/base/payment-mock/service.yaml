@@ -3,6 +3,8 @@ kind: Service
 metadata:
   name: payment-mock
   namespace: ticketing
+  labels:
+    app: payment-mock
 spec:
   selector:
     app: payment-mock

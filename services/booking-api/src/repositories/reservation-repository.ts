@@ -292,6 +292,28 @@ export async function markSeatsSold(
 }
 
 /**
+ * Undoes `markSeatsSold` for a SINGLE seat whose ticket insert then lost
+ * the `tickets_valid_seat_unique` race (docs/plan.md "Oversell") — without
+ * this, that seat would stay `sold` under a reservation that never got a
+ * ticket for it: permanently unsellable, no record of why. Scoped to
+ * `reservation_id = $3` so it's a no-op if the seat's already been
+ * reassigned to whoever actually holds the valid ticket by the time this
+ * runs — never clobbers another order's settled ownership of the seat.
+ */
+export async function releaseConflictedSeat(
+  client: PoolClient,
+  eventId: string,
+  seatId: string,
+  reservationId: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE seats SET status = 'available', reservation_id = NULL, updated_at = now()
+     WHERE event_id = $1 AND id = $2 AND reservation_id = $3 AND status = 'sold'`,
+    [eventId, seatId, reservationId],
+  );
+}
+
+/**
  * Starts the payment freeze (docs/plan.md "Betalning": Checkout
  * creation "slutar räkna ner"). The conditional `WHERE status =
  * 'active'` is what makes "en aktiv Checkout per kötoken" hold — a

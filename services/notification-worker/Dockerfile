@@ -51,4 +51,4 @@ COPY --from=build --chown=app:app /repo/services/notification-worker/dist ./dist
 USER 10001
 ENV NODE_ENV=production
 EXPOSE 3011
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "./dist/instrumentation.js", "dist/index.js"]

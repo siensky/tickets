@@ -3,6 +3,8 @@ kind: Service
 metadata:
   name: realtime-gateway
   namespace: ticketing
+  labels:
+    app: realtime-gateway
 spec:
   selector:
     app: realtime-gateway

@@ -42,6 +42,8 @@ spec:
           env:
             - name: NODE_ENV
               value: production
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: 'http://alloy.observability.svc.cluster.local:4318/v1/traces'
             - name: REALTIME_GATEWAY_PORT
               value: '3001'
             - name: REDIS_URL

@@ -92,6 +92,37 @@ spec:
             exec:
               command: ['pg_isready', '-U', 'postgres']
             periodSeconds: 20
+        # docs/plan.md "Observability": postgres-exporter som sidecar.
+        # DATA_SOURCE_NAME måste vara EN env-sträng — $(POSTGRES_PASSWORD)
+        # är Kubernetes' egen env-substitution inom samma container, inte
+        # ett skal, så den fungerar bara mot en tidigare `name:` i den HÄR
+        # listan.
+        - name: postgres-exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-shard-1-credentials
+                  key: password
+            - name: DATA_SOURCE_NAME
+              value: postgresql://postgres:$(POSTGRES_PASSWORD)@localhost:5432/tickets?sslmode=disable
+          ports:
+            - containerPort: 9187
+              name: metrics
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
   volumeClaimTemplates:
     - metadata:
         name: data

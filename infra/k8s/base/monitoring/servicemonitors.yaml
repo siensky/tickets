@@ -1,0 +1,121 @@
+# docs/plan.md "Observability": Prometheus hämtar (pull) via ServiceMonitor-
+# resurser. Dessa lever med applikationens egna manifest (kustomize),
+# inte i Terraform — se infra/terraform/observability.tf. Kube-prometheus-
+# stacks Prometheus är konfigurerad (observability.tf) att hitta
+# ServiceMonitors i ALLA namnrymder, inte bara sin egen release.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: booking-api
+  namespace: ticketing
+spec:
+  selector:
+    matchLabels:
+      app: booking-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: realtime-gateway
+  namespace: ticketing
+spec:
+  selector:
+    matchLabels:
+      app: realtime-gateway
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: scheduler-worker
+  namespace: ticketing
+spec:
+  selector:
+    matchLabels:
+      app: scheduler-worker
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: notification-worker
+  namespace: ticketing
+spec:
+  selector:
+    matchLabels:
+      app: notification-worker
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: payment-mock
+  namespace: ticketing
+spec:
+  selector:
+    matchLabels:
+      app: payment-mock
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+# Ett ServiceMonitor för båda shardarna — "component: postgres" delas redan
+# av deras Service-labels (samma label som StatefulSetens anti-affinitet).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres
+  namespace: data
+spec:
+  selector:
+    matchLabels:
+      component: postgres
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis
+  namespace: data
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+---
+# rabbitmq_prometheus-pluginets eget /metrics (infra/k8s/base/rabbitmq/
+# statefulset.yaml) — inte notification-workers egen ködjup-gauge, borttagen
+# i Fas 4 (docs/plan.md "Fasplan" Fas 3-review-noten under Fas 4).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rabbitmq
+  namespace: data
+spec:
+  selector:
+    matchLabels:
+      app: rabbitmq
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s

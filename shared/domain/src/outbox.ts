@@ -15,6 +15,7 @@ export const OUTBOX_EVENT_TYPES = {
   PAYMENT_SUCCEEDED: 'payment.succeeded',
   ORDER_CONFIRMED: 'order.confirmed',
   ORDER_REFUNDED: 'order.refunded',
+  ORDER_SEAT_REFUNDED: 'order.seat_refunded',
 } as const;
 
 export type OutboxEventType = (typeof OUTBOX_EVENT_TYPES)[keyof typeof OUTBOX_EVENT_TYPES];
@@ -65,4 +66,18 @@ export interface OrderRefundedPayload {
   readonly orderId: string;
   readonly eventId: string;
   readonly reservationId: string;
+}
+
+/**
+ * Payload for `order.seat_refunded` — written when one or more (but not
+ * all) of an order's seats lost the `tickets_valid_seat_unique` race
+ * (docs/plan.md "Oversell"): the rest of the order is confirmed as normal
+ * (`order.confirmed`), these specific seats are refunded instead.
+ */
+export interface OrderSeatRefundedPayload {
+  readonly paymentId: string;
+  readonly orderId: string;
+  readonly eventId: string;
+  readonly seatIds: readonly string[];
+  readonly amountCents: number;
 }

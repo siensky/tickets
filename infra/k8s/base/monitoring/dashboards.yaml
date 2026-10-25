@@ -1,0 +1,151 @@
+# docs/plan.md "Observability": Grafana-dashboards, provisionerade via
+# kube-prometheus-stacks dashboard-sidecar (letar ConfigMaps märkta
+# grafana_dashboard: "1" i ALLA namnrymder, satt i observability.tf).
+#
+# Bara paneler för mått som faktiskt finns byggs här. docs/plan.md
+# "Vad som mäts" nämner även "aktiva reservationer, insläppstakt, sålda
+# biljetter, konverteringsgrad" under "Affär" — ingen av dessa har en egen
+# counter i koden ännu (bara RED, oversell_prevented_total och
+# rabbitmq_queue_messages_ready existerar). Se noteringen i docs/plan.md
+# "Fasplan" under en kommande fas.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-red
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+data:
+  red-overview.json: |
+    {
+      "title": "RED overview",
+      "uid": "tickets-red-overview",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Request rate per service",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "sum(rate(http_requests_total[1m])) by (service)", "legendFormat": "{{service}}" }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Error rate (5xx) per service",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m])) by (service) / sum(rate(http_requests_total[1m])) by (service)",
+              "legendFormat": "{{service}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] }
+        },
+        {
+          "id": 3,
+          "title": "p95 request duration per service",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service))",
+              "legendFormat": "{{service}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+        },
+        {
+          "id": 4,
+          "title": "p99 request duration per service",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service))",
+              "legendFormat": "{{service}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-infra
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+data:
+  infrastructure.json: |
+    {
+      "title": "Infrastructure per shard",
+      "uid": "tickets-infra",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Postgres connections per shard",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "pg_stat_database_numbackends", "legendFormat": "{{instance}} / {{datname}}" }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Postgres up",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [{ "expr": "pg_up", "legendFormat": "{{instance}}" }]
+        },
+        {
+          "id": 3,
+          "title": "RabbitMQ queue depth (ready messages)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [{ "expr": "rabbitmq_queue_messages_ready", "legendFormat": "{{queue}}" }]
+        },
+        {
+          "id": 4,
+          "title": "Redis connected clients",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [{ "expr": "redis_connected_clients", "legendFormat": "{{instance}}" }]
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-business
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+data:
+  business.json: |
+    {
+      "title": "Business — oversell guarantee",
+      "uid": "tickets-business",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "oversell_prevented_total (should stay flat during normal operation)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "targets": [{ "expr": "oversell_prevented_total", "legendFormat": "{{service}}" }]
+        }
+      ]
+    }

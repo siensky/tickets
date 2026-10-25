@@ -3,9 +3,117 @@
 Fylls i under Fas 4 (backup/restore-övningen) och Fas 7. Ska svara på den
 muntliga frågan "Driften: backups, och vad ni gör när något går fel."
 
-## Återställning av databas (att fylla i i Fas 4)
+## Backup-lagring: Cloudflare R2 (Fas 4)
 
-## Vanliga larm och vad de betyder (att fylla i i Fas 4)
+`postgres-backup`-CronJobben (`infra/k8s/base/backup/cronjob.yaml`) laddar upp till
+Cloudflare R2 via `rclone`, konfigurerat helt via miljövariabler (ingen config-fil).
+Krediterna kommer från fyra GitHub repo-secrets, skapade av
+`.github/workflows/deploy.yml` (samma mönster som `tickets-app-secrets`) — se
+"Nödvändiga GitHub Actions-secrets" nedan.
+
+**Engångssteg i Cloudflare-dashboarden** (du gör detta manuellt, en gång):
+
+1. **R2 → Create bucket** — namn t.ex. `tickets-backups`.
+2. **Manage R2 API Tokens → Create API Token** — typ "R2 Token", behörighet
+   **Object Read & Write**, scope: **endast** den nya bucketen (samma princip som de
+   två Cloudflare-tokens i `docs/adr/0004-split-cloudflare-tokens.md` — en bred token
+   som även kan göra DNS/cache-ändringar hör inte hemma i en backup-CronJob).
+3. Spara **Access Key ID**, **Secret Access Key**, **Account ID**, och bygg endpointen:
+   `https://<account-id>.r2.cloudflarestorage.com`.
+4. Lägg dessa fyra som GitHub repo-secrets: `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+   `R2_ENDPOINT` (steg 3:s URL), `R2_BUCKET` (bucketnamnet från steg 1).
+
+## Grafana-inloggning via Auth0 (Fas 4)
+
+Grafana (`https://grafana.<domän>`, se `infra/terraform/observability.tf`) loggas in
+via en **egen** Auth0-"Application" — skild från booking-apis, eftersom den har andra
+callback-URL:er och inte ska dela klient-hemlighet med API:et.
+
+1. Auth0 dashboard → **Applications → Create Application → Regular Web Application**,
+   namn "Grafana".
+2. **Allowed Callback URLs:** `https://grafana.<domän>/login/generic_oauth`
+3. **Allowed Logout URLs:** `https://grafana.<domän>/login`
+4. Spara **Domain**, **Client ID**, **Client Secret** → sätt som Terraform-variabler
+   (`TF_VAR_grafana_auth0_domain`, `TF_VAR_grafana_auth0_client_id`,
+   `TF_VAR_grafana_auth0_client_secret`), aldrig i en committad `.tfvars`.
+
+Break-glass: ett admin-konto genereras av Terraform (`random_password.grafana_admin`,
+lagrat bara i `kubernetes_secret.grafana_admin` och Terraform-statefilen) ifall
+Auth0-anslutningen går ner. Hämta lösenordet vid behov med:
+
+```
+kubectl get secret grafana-admin-credentials -n observability -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+## Slack-larm (Fas 4)
+
+1. Slack → skapa en **Incoming Webhook** (en Slack-app, eller `api.slack.com/apps` →
+   Incoming Webhooks) kopplad till kanalen `#tickets-alerts`.
+2. Sätt URL:en som `TF_VAR_slack_webhook_url`.
+
+Alertmanager-reglerna ligger i `infra/terraform/observability.tf`
+(`alertmanager.config`), alertregler i `infra/k8s/base/monitoring/prometheusrule.yaml`.
+**Enklast att utlösa live under försvaret:** `kubectl delete pod` på en
+postgres-shard-podd → `PostgresDown` (postgres-exporter tappar kontakten) feedbackar i
+Slack inom ~1 minut; eller tillfälligt skala en deployment till 0 repliker → `HighErrorRate`.
+
+## Återställning av databas (Fas 4)
+
+**Dumparna skapas nattligt** (CronJobben ovan), namngivna
+`postgres/shard-<N>-<ISO8601-tidsstämpel>.dump` i R2-bucketen, `pg_dump -Fc`
+(komprimerat, egen binärformat — `pg_restore`, inte `psql`, återställer dem).
+
+**Genomför övningen mot en separat testdatabas, ALDRIG mot en shard i drift** —
+`docs/rules.md §12` förbjuder att köra migrations mot produktion, samma princip
+gäller en restore som skriver över data.
+
+```bash
+# 1. Hämta senaste dumpen för shard 0 (kör lokalt, med R2-krediterna som env-vars):
+export AWS_ACCESS_KEY_ID=<R2 access key>
+export AWS_SECRET_ACCESS_KEY=<R2 secret key>
+latest=$(aws s3 --endpoint-url https://<account-id>.r2.cloudflarestorage.com \
+  ls s3://<bucket>/postgres/ | grep shard-0 | sort | tail -1 | awk '{print $4}')
+aws s3 --endpoint-url https://<account-id>.r2.cloudflarestorage.com \
+  cp "s3://<bucket>/postgres/$latest" ./restore-test.dump
+
+# 2. Starta en TOM, separat Postgres (lokalt eller en engångspodd — inte en
+#    riktig shard):
+docker run --rm -d --name restore-test -e POSTGRES_PASSWORD=test -p 5433:5432 postgres:17-alpine
+
+# 3. Återställ:
+pg_restore -h localhost -p 5433 -U postgres -d postgres --create --clean \
+  --if-exists restore-test.dump
+
+# 4. Verifiera (samma invariant som kronjuveltestet, docs/plan.md "Tester"):
+psql -h localhost -p 5433 -U postgres -d tickets -c \
+  "SELECT count(*) FROM tickets; SELECT count(DISTINCT seat_id) FROM tickets WHERE status='valid';"
+# De två talen ska vara lika — ingen stol har mer än en giltig biljett.
+```
+
+**Tidtagning (RPO/RTO) — fyll i vid faktisk körning:**
+
+| Steg | Tid |
+|---|---|
+| Hitta + hämta senaste dumpen (RPO-underlag — hur gammal är den?) | _ej körd än_ |
+| `pg_restore` + verifiering (RTO-underlag) | _ej körd än_ |
+
+RPO är i praktiken **upp till 24 timmar** (nattlig dump, inget kontinuerligt WAL-arkiv)
+— ett medvetet val, inte en brist: `docs/plan.md` kräver inte point-in-time recovery
+(se "Flyttat till efter inlämningen"), och 24h RPO för en biljettdatabas där varje
+transaktion redan är beroende av Postgres' egna ACID-garantier under drift är rimligt
+för en examinationsuppgift. En skarp produktion med riktiga pengar hade motiverat WAL-
+arkivering (RPO i minuter) — se `docs/forsvar.md` om frågan kommer upp i försvaret.
+
+## Vanliga larm och vad de betyder (Fas 4)
+
+Larmreglerna: `infra/k8s/base/monitoring/prometheusrule.yaml`.
+
+| Larm | Betyder | Första åtgärd |
+|---|---|---|
+| `HighErrorRate` | >5% av en tjänsts requests svarar 5xx över 5 min | `kubectl logs` på tjänsten, kolla senaste deploy |
+| `PostgresDown` | `pg_up == 0` — postgres-exporter når inte databasen | `kubectl get pods -n data`, kolla om shard-podden crashat |
+| `RabbitMQQueueDepthHigh` | En kö har >900 väntande meddelanden (KEDAs tak är 1000 = 100/podd × 10 poddar, Fas 6) | Kolla om notification-worker hänger eller RabbitMQ är nere |
+| `PodCrashLooping` | >3 omstarter av en container på 15 min | `kubectl describe pod`, läs `Last State: Terminated` -reason |
 
 ## Shard nere (att fylla i i Fas 2/6)
 
@@ -17,6 +125,8 @@ dem misslyckas "Create/update app secrets"-steget:
 
 - `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` — från Auth0-tenanten (docs/plan.md "Auth").
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — från Stripes testläge (docs/plan.md "Betalning").
+- `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_BUCKET` — Fas 4,
+  se "Backup-lagring: Cloudflare R2" nedan.
 
 Lägg till dem under repots **Settings → Secrets and variables →
 Actions → New repository secret**, med exakt dessa namn. `QUEUE_TOKEN_SECRET`,

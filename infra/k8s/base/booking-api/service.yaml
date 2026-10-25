@@ -6,6 +6,8 @@ kind: Service
 metadata:
   name: booking-api
   namespace: ticketing
+  labels:
+    app: booking-api
 spec:
   selector:
     app: booking-api

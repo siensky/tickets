@@ -31,6 +31,16 @@ resources:
   - realtime-gateway/deployment.yaml
   - realtime-gateway/service.yaml
   - scheduler-worker/deployment.yaml
+  - scheduler-worker/service.yaml
   - notification-worker/deployment.yaml
+  - notification-worker/service.yaml
   - payment-mock/deployment.yaml
   - payment-mock/service.yaml
+  # Fas 4 (docs/plan.md "Observability"/"Backups"). Kräver att Terraform
+  # (infra/terraform/observability.tf) redan har skapat namnrymden
+  # "observability" och Prometheus Operators CRD:er (kube-prometheus-stack)
+  # — samma ordning som cert-manager/ClusterIssuers sedan Fas 1.
+  - monitoring/servicemonitors.yaml
+  - monitoring/prometheusrule.yaml
+  - monitoring/dashboards.yaml
+  - backup/cronjob.yaml

@@ -35,6 +35,8 @@ spec:
           env:
             - name: NODE_ENV
               value: production
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: 'http://alloy.observability.svc.cluster.local:4318/v1/traces'
             - name: SCHEDULER_WORKER_PORT
               value: '3010'
             - name: PGPASSWORD_SHARD_0

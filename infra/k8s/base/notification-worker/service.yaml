@@ -1,0 +1,17 @@
+# docs/plan.md "Observability": notification-worker körs utan Service
+# hittills (probes pekar på podd-IP) — Fas 4s ServiceMonitor (infra/k8s/
+# base/monitoring) behöver en Service att selektera mot.
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-worker
+  namespace: ticketing
+  labels:
+    app: notification-worker
+spec:
+  selector:
+    app: notification-worker
+  ports:
+    - port: 80
+      targetPort: http
+      name: http

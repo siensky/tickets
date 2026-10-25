@@ -18,6 +18,7 @@ import Fastify, {
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerWsRoute } from './routes/ws.js';
+import { shutdownTracing } from './instrumentation.js';
 
 const SERVICE_NAME = 'realtime-gateway';
 
@@ -74,6 +75,7 @@ export async function start(): Promise<void> {
     logger.info({ signal }, 'shutting down gracefully');
     await app.close();
     await closeRedisClient(redis);
+    await shutdownTracing();
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

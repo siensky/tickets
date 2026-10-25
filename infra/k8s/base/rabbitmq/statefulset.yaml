@@ -10,6 +10,20 @@
 # mäklaren självt. Lösenordet kommer från `rabbitmq-credentials`
 # (data-namnrymden, genererat en gång av .github/workflows/deploy.yml,
 # samma princip som Postgres-lösenorden).
+# docs/plan.md "Observability": rabbitmq_prometheus-pluginet (ingen separat
+# exporter-process — mäklaren exponerar /metrics själv på 15692 en gång
+# pluginet är påslaget). Varken image eller RABBITMQ_DEFAULT_USER-mekanismen
+# ovan ger ett sätt att slå på ett plugin via env — enabled_plugins är en
+# fil (Erlang-term), monterad via ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-enabled-plugins
+  namespace: data
+data:
+  enabled_plugins: |
+    [rabbitmq_management,rabbitmq_prometheus].
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -49,9 +63,14 @@ spec:
               name: amqp
             - containerPort: 15672
               name: management
+            - containerPort: 15692
+              name: metrics
           volumeMounts:
             - name: data
               mountPath: /var/lib/rabbitmq
+            - name: enabled-plugins
+              mountPath: /etc/rabbitmq/enabled_plugins
+              subPath: enabled_plugins
           resources:
             requests:
               cpu: 100m
@@ -62,25 +81,36 @@ spec:
           # B15-liknande resonemang som postgres-shard-0: Mnesia-återuppspelning
           # efter en hård nedstängning kan ta längre än en vanlig
           # liveness-cykel tillåter.
+          # rabbitmq-diagnostics startar en egen Erlang-nod för att ansluta till
+          # mäklaren via distribuerad Erlang — defaultens timeoutSeconds: 1 räcker
+          # inte, probe:n timar då ut även när mäklaren är frisk (sågs som ett
+          # evigt BackOff-krasch i produktion: "command timed out ... after 1s").
           startupProbe:
             exec:
               command: ['rabbitmq-diagnostics', 'check_running']
             failureThreshold: 30
             periodSeconds: 10
+            timeoutSeconds: 5
           readinessProbe:
             exec:
               command: ['rabbitmq-diagnostics', 'check_running']
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             exec:
               command: ['rabbitmq-diagnostics', 'check_running']
             periodSeconds: 20
+            timeoutSeconds: 5
           securityContext:
             runAsNonRoot: true
             runAsUser: 999
             allowPrivilegeEscalation: false
             capabilities:
               drop: ['ALL']
+      volumes:
+        - name: enabled-plugins
+          configMap:
+            name: rabbitmq-enabled-plugins
   volumeClaimTemplates:
     - metadata:
         name: data

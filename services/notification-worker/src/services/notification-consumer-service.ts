@@ -11,7 +11,11 @@ import { claimNotification, releaseNotificationClaim, type RedisClient } from '@
 import type { Logger } from '@tickets/observability';
 import { getOrderUserId } from '../repositories/orders-repository.js';
 import { getUserEmail } from '../repositories/users-repository.js';
-import { sendOrderConfirmationEmail, sendRefundEmail } from './email-service.js';
+import {
+  sendOrderConfirmationEmail,
+  sendRefundEmail,
+  sendSeatRefundEmail,
+} from './email-service.js';
 
 const DEDUPE_TTL_SECONDS = 24 * 60 * 60;
 
@@ -35,6 +39,14 @@ interface OrderRefundedPayloadShape {
   readonly reservationId: string;
 }
 
+interface OrderSeatRefundedPayloadShape {
+  readonly orderId: string;
+  readonly eventId: string;
+  readonly paymentId: string;
+  readonly seatIds: readonly string[];
+  readonly amountCents: number;
+}
+
 function isOrderConfirmedPayload(payload: unknown): payload is OrderConfirmedPayloadShape {
   return (
     typeof payload === 'object' &&
@@ -44,12 +56,28 @@ function isOrderConfirmedPayload(payload: unknown): payload is OrderConfirmedPay
   );
 }
 
+// Checked BEFORE isOrderRefundedPayload — both shapes carry `paymentId` and
+// neither carries `ticketIds`, so `seatIds` is what actually tells them
+// apart (docs/plan.md "Oversell": a partial seat refund is NOT the same
+// customer message as the whole order being refunded).
+function isOrderSeatRefundedPayload(
+  payload: unknown,
+): payload is OrderSeatRefundedPayloadShape {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'seatIds' in payload &&
+    Array.isArray(payload.seatIds)
+  );
+}
+
 function isOrderRefundedPayload(payload: unknown): payload is OrderRefundedPayloadShape {
   return (
     typeof payload === 'object' &&
     payload !== null &&
     'paymentId' in payload &&
-    !('ticketIds' in payload)
+    !('ticketIds' in payload) &&
+    !('seatIds' in payload)
   );
 }
 
@@ -93,6 +121,35 @@ async function handleOrderRefunded(
   sendRefundEmail(deps.logger, { email, orderId: payload.orderId });
 }
 
+async function handleOrderSeatRefunded(
+  deps: NotificationConsumerDeps,
+  payload: OrderSeatRefundedPayloadShape,
+): Promise<void> {
+  const userId = await getOrderUserId(
+    getPoolForEvent(deps.shardPools, payload.eventId),
+    payload.eventId,
+    payload.orderId,
+  );
+  if (userId === undefined) {
+    deps.logger.warn({ orderId: payload.orderId }, 'no order found for order.seat_refunded');
+    return;
+  }
+  const email = await getUserEmail(getGlobalPool(deps.shardPools), userId);
+  if (email === undefined) {
+    deps.logger.warn(
+      { userId, orderId: payload.orderId },
+      'no user found for order.seat_refunded',
+    );
+    return;
+  }
+  sendSeatRefundEmail(deps.logger, {
+    email,
+    orderId: payload.orderId,
+    seatIds: payload.seatIds,
+    amountCents: payload.amountCents,
+  });
+}
+
 export async function processNotificationEvent(
   deps: NotificationConsumerDeps,
   payload: unknown,
@@ -114,6 +171,10 @@ export async function processNotificationEvent(
   try {
     if (isOrderConfirmedPayload(payload)) {
       await handleOrderConfirmed(deps, payload);
+      return;
+    }
+    if (isOrderSeatRefundedPayload(payload)) {
+      await handleOrderSeatRefunded(deps, payload);
       return;
     }
     if (isOrderRefundedPayload(payload)) {

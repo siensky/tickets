@@ -1,0 +1,131 @@
+# docs/plan.md "Backups": nattlig pg_dump av BÅDA shardarna -> R2/B2,
+# 7 dagars rullande historik. Två containrar i stället för en ny image:
+# en initContainer (postgres:17-alpine, redan i repot) gör dumpen till en
+# delad emptyDir, en vanlig container (rclone/rclone — S3-kompatibelt,
+# R2 stöds direkt) laddar upp och städar bort allt äldre än 7 dagar.
+# Ingen ny Dockerfile, inget nytt CI-byggsteg.
+#
+# backup-r2-credentials skapas av .github/workflows/deploy.yml, samma
+# mönster som tickets-app-secrets (Auth0/Stripe) — källan är GitHub
+# repo-secrets, inte Terraform (R2-bucketen/kontot är inget klustret äger).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: data
+spec:
+  schedule: '30 2 * * *'
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          volumes:
+            - name: dumps
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
+          initContainers:
+            # pg_dump direkt som containerns command — kringgår
+            # postgres-imagens entrypoint-logik för initdb/chown helt
+            # (den exec:ar bara det givna kommandot när det inte är
+            # "postgres"), så runAsNonRoot nedan är säkert trots det
+            # dokumenterade undantaget för själva Postgres-StatefulSetens
+            # egen container (docs/plan.md "Säkerhet").
+            - name: pg-dump
+              image: postgres:17-alpine
+              command: ['/bin/sh', '-c']
+              args:
+                - |
+                  set -eu
+                  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+                  PGPASSWORD="$PGPASSWORD_SHARD_0" pg_dump \
+                    -h postgres-shard-0.data.svc.cluster.local -U postgres -d tickets \
+                    -Fc -f "/dumps/shard-0-${stamp}.dump"
+                  PGPASSWORD="$PGPASSWORD_SHARD_1" pg_dump \
+                    -h postgres-shard-1.data.svc.cluster.local -U postgres -d tickets \
+                    -Fc -f "/dumps/shard-1-${stamp}.dump"
+              env:
+                - name: PGPASSWORD_SHARD_0
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-shard-0-credentials
+                      key: password
+                - name: PGPASSWORD_SHARD_1
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-shard-1-credentials
+                      key: password
+              volumeMounts:
+                - name: dumps
+                  mountPath: /dumps
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 512Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 999
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ['ALL']
+          containers:
+            - name: upload
+              image: rclone/rclone:1.75.2
+              command: ['/bin/sh', '-c']
+              args:
+                - |
+                  set -eu
+                  rclone copy /dumps "r2:${R2_BUCKET}/postgres/" --no-traverse
+                  # 7 dagars rullande historik (docs/plan.md "Backups").
+                  rclone delete "r2:${R2_BUCKET}/postgres/" --min-age 7d
+              env:
+                - name: RCLONE_CONFIG_R2_TYPE
+                  value: s3
+                - name: RCLONE_CONFIG_R2_PROVIDER
+                  value: Cloudflare
+                - name: RCLONE_CONFIG_R2_ENV_AUTH
+                  value: 'false'
+                - name: RCLONE_CONFIG_R2_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-r2-credentials
+                      key: access-key-id
+                - name: RCLONE_CONFIG_R2_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-r2-credentials
+                      key: secret-access-key
+                - name: RCLONE_CONFIG_R2_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-r2-credentials
+                      key: endpoint
+                - name: R2_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-r2-credentials
+                      key: bucket
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: dumps
+                  mountPath: /dumps
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits: { cpu: 300m, memory: 256Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ['ALL']

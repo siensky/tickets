@@ -39,11 +39,20 @@ export const EXTERNAL_NPM_PACKAGES = [
   'amqplib',
   'zod',
   'posthog-node',
+  '@opentelemetry/api',
+  '@opentelemetry/auto-instrumentations-node',
+  '@opentelemetry/exporter-trace-otlp-http',
+  '@opentelemetry/resources',
+  '@opentelemetry/sdk-node',
+  '@opentelemetry/semantic-conventions',
 ];
 
 export function createServiceTsupConfig(): Options {
   return {
-    entry: ['src/index.ts'],
+    // instrumentation.ts is its own entry, not bundled into index.js: it's
+    // preloaded separately via `node --import` (docs/forsvar.md "Varför
+    // --import för OTel?"), so it needs its own dist/instrumentation.js.
+    entry: ['src/index.ts', 'src/instrumentation.ts'],
     format: ['esm'],
     target: 'node22',
     outDir: 'dist',

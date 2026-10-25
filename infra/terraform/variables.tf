@@ -45,6 +45,33 @@ variable "tailscale_hostname" {
   default     = "tickets-cp-1"
 }
 
+# --- Observability (Fas 4): Slack-larm, Grafana-inloggning via Auth0 ---
+
+variable "slack_webhook_url" {
+  description = "Incoming Webhook-URL för Slack-kanalen Alertmanager larmar i. Sätts via TF_VAR_slack_webhook_url."
+  type        = string
+  sensitive   = true
+}
+
+# Egen Auth0-"Application" (Regular Web Application), skild från
+# booking-apis — Grafana är en annan klient med andra callback-URL:er.
+# docs/runbook.md "Grafana-inloggning via Auth0" beskriver hur den skapas.
+variable "grafana_auth0_domain" {
+  description = "Auth0-tenantens domän (samma tenant som booking-api kan användas, men Grafana är en egen Application i den). Sätts via TF_VAR_grafana_auth0_domain."
+  type        = string
+}
+
+variable "grafana_auth0_client_id" {
+  description = "Client ID för Grafana-applikationen i Auth0. Sätts via TF_VAR_grafana_auth0_client_id."
+  type        = string
+}
+
+variable "grafana_auth0_client_secret" {
+  description = "Client secret för Grafana-applikationen i Auth0. Sätts via TF_VAR_grafana_auth0_client_secret."
+  type        = string
+  sensitive   = true
+}
+
 # --- Domän ---
 
 variable "domain_name" {
