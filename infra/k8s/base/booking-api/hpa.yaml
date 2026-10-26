@@ -1,0 +1,30 @@
+# docs/plan.md "Autoscaling": mål 70 % CPU, min 2, max 10.
+# `scaleDown.stabilizationWindowSeconds: 60` (standard 300) — kön töms
+# och poddarna ska skala ner inom demons tidsram, inte fem minuter
+# senare. Målet räknas mot `requests` (250m), inte `limits` (500m) —
+# just därför är de satt till 2× varandra i deployment.yaml: med ett
+# för lågt request hade en podd som drar 350m redan visat 350 %
+# utnyttjande och hoppat rakt till max, en kurva istället för ett
+# språng (se kommentaren i deployment.yaml).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: booking-api
+  namespace: ticketing
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: booking-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60

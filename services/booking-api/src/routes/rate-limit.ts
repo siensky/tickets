@@ -18,6 +18,16 @@
  * reserveras" och "används till revokering och aktivitetsspårning, inte
  * som enda sanning" (docs/plan.md "Väntrum") — en Redis-hicka ska sakta
  * ner botskyddet, inte lägga ner hela försäljningen med 500:or.
+ *
+ * `allowlistedIps` (Fas 6, docs/plan.md "Lasttest": "Lastgeneratorernas
+ * CF-verifierade adresser allowlistas i rate limitern under testet, med
+ * dokumenterad motivering") — annars mäter lasttestet vårt eget
+ * botskydd i stället för systemet. Tom som default; sätts bara
+ * TILLFÄLLIGT via `RATE_LIMIT_ALLOWLISTED_IPS` för den faktiska
+ * körningen (docs/runbook.md), aldrig permanent. Samma princip som
+ * Stripe-undantaget ovan: `request.ip` är redan verifierat mot
+ * Cloudflares intervall uppströms, aldrig en header en klient själv
+ * kan sätta.
  */
 import { checkRateLimit, type RedisClient } from '@tickets/redis';
 import type { Logger } from '@tickets/observability';
@@ -32,11 +42,13 @@ export function registerRateLimitHook(
   redis: RedisClient,
   limitPerSecond: number,
   logger: Logger,
+  allowlistedIps: ReadonlySet<string> = new Set(),
 ): void {
   app.addHook('onRequest', async (request) => {
     if (
       request.url.startsWith(STRIPE_WEBHOOK_PATH_PREFIX) ||
-      EXEMPT_PATH_PREFIXES.some((prefix) => request.url.startsWith(prefix))
+      EXEMPT_PATH_PREFIXES.some((prefix) => request.url.startsWith(prefix)) ||
+      allowlistedIps.has(request.ip)
     ) {
       return;
     }

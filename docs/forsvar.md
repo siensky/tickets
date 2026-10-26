@@ -1067,3 +1067,34 @@ byggverktygskonfiguration, inte applikationskod som lagergränserna (`boundaries
 ska gälla för. Verifierat genom att återskapa exakt det `lint-staged` kör
 (`eslint --fix tsup.base.ts ...`) — ger nu bara samma ofarliga "File ignored"-varning som de
 andra `*.config.ts`-filerna redan hade.
+
+## Varför en PodDisruptionBudget på en tjänst som bara har EN podd?
+
+docs/plan.md säger rakt ut att `minAvailable: 1` aldrig kan uppfyllas med en enda podd —
+`kubectl drain` skulle hänga för alltid. Så varför lägga till `scheduler-worker/pdb.yaml` och
+`payment-mock/pdb.yaml` (Fas 6) i stället för att bara avstå, vilket planen själv erbjuder som
+ett giltigt alternativ ("eller ingen PDB")?
+
+**`maxUnavailable: 1`, inte `minAvailable: 1`.** Med en enda podd är `maxUnavailable: 1`
+matematiskt identiskt med att inte ha någon PDB alls — poddens enda instans FÅR bli
+otillgänglig, det finns ingen andra att skydda. Objektet gör alltså ingenting annorlunda
+*idag*.
+
+Det är ändå värt att committa, av tre skäl:
+
+1. **Dokumentation som kod.** Ett `kubectl get pdb -n ticketing` visar direkt att tjänsten
+   *medvetet* saknar skydd mot frivillig disruption (node-drain, en samtidig
+   cluster-upgrade), i stället för att en läsare måste gissa om det är ett glömt steg eller ett
+   avsiktligt val.
+2. **Framtidssäkring utan omarbete.** Höjs `scheduler-worker` eller `payment-mock` någon gång
+   till fler repliker (planen nämner inget sådant, men inget hindrar det heller) börjar
+   `maxUnavailable: 1` INTE längre vara ekvivalent med "ingen PDB" — den börjar faktiskt
+   begränsa hur många repliker en nod-drain får ta samtidigt, utan att någon behöver komma på
+   att lägga till objektet då.
+3. **Konsekvens med `booking-api`/`realtime-gateway`**, som redan har flera repliker och där en
+   PDB (om de hade haft en) hade gjort verklig skillnad — att ha SAMMA mönster på alla
+   tjänster, bara med ett för tillfället overksamt värde på de två enreplikstjänsterna, är
+   enklare att resonera om än "några tjänster har PDB, andra inte, av skäl man måste slå upp".
+
+Kostnaden är noll: ett overksamt Kubernetes-objekt kostar inget i drift, bara fem extra rader
+YAML.

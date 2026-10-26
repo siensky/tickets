@@ -66,28 +66,69 @@ export async function touchAdmittedActivity(
 export interface AdmissionBatchResult {
   readonly admittedQueueTokenIds: readonly string[];
   readonly remainingDepth: number;
+  readonly prunedExpiredCount: number;
 }
 
 /**
  * Släpper in upp till `batchSize` av de som väntat längst (lägst score).
  * `ZPOPMIN` är redan en atomisk Redis-kommando — ingen Lua behövs för
  * själva poppningen.
+ *
+ * Score = ankomsttid (ms, `Date.now()` i `joinWaitingRoom`) — samma
+ * klocka tokenens egen `exp` beräknades från vid JOIN
+ * (shared/auth/src/queue-token.ts), så `now() - score` jämfört med
+ * `sessionTotalMinutes` återskapar exakt samma gräns utan att tokenen
+ * själv behöver avkodas här.
+ *
+ * Fas 6 (Fas 3-reviewns notering): en poppad post som redan passerat
+ * sin sessions-TTL markeras INTE insläppt — annars slösas kvoten på en
+ * token ingen längre kan använda. Loopen fortsätter popppa tills
+ * `batchSize` LEVANDE poster hittats eller kön är tom, så en djup kö
+ * full av redan döda sessioner inte i onödan sänker den faktiska
+ * insläppstakten för de som fortfarande är giltiga.
+ *
+ * Känt avvägning: är HELA den återstående kön död (`queue-storm` långt
+ * efter att insläppstakten inte hunnit med) gör detta en engångs-
+ * "städning" i en enda tick med många ZPOPMIN-anrop istället för att
+ * fördela kostnaden över flera tick — accepterat medvetet, samma princip
+ * som NOWAIT-409:orna i reservationstransaktionen (docs/plan.md
+ * "Concurrency-kärnan"): korrekthet före finess i ett sällan uppnått
+ * värsta fall.
  */
 export async function admitNextBatch(
   redis: Redis,
   eventId: string,
   batchSize: number,
   inactivityTtlSeconds: number,
+  sessionTotalMinutes: number,
 ): Promise<AdmissionBatchResult> {
   const key = waitingRoomKey(eventId);
-  const popped = await redis.zpopmin(key, batchSize);
+  const sessionTotalMs = sessionTotalMinutes * 60_000;
   const admittedQueueTokenIds: string[] = [];
-  for (let i = 0; i < popped.length; i += 2) {
-    const queueTokenId = popped[i];
-    if (queueTokenId !== undefined) {
-      admittedQueueTokenIds.push(queueTokenId);
+  let prunedExpiredCount = 0;
+
+  let remaining = batchSize;
+  while (remaining > 0) {
+    const popped = await redis.zpopmin(key, remaining);
+    if (popped.length === 0) {
+      break;
     }
+    const now = Date.now();
+    for (let i = 0; i < popped.length; i += 2) {
+      const queueTokenId = popped[i];
+      const rawScore = popped[i + 1];
+      if (queueTokenId === undefined || rawScore === undefined) {
+        continue;
+      }
+      if (now - Number(rawScore) > sessionTotalMs) {
+        prunedExpiredCount += 1;
+      } else {
+        admittedQueueTokenIds.push(queueTokenId);
+      }
+    }
+    remaining = batchSize - admittedQueueTokenIds.length;
   }
+
   await Promise.all(
     admittedQueueTokenIds.map((queueTokenId) =>
       redis.set(admittedKey(eventId, queueTokenId), '1', 'EX', inactivityTtlSeconds),
@@ -97,7 +138,7 @@ export async function admitNextBatch(
   if (remainingDepth === 0) {
     await redis.srem(waitingRoomActiveEventsKey(), eventId);
   }
-  return { admittedQueueTokenIds, remainingDepth };
+  return { admittedQueueTokenIds, remainingDepth, prunedExpiredCount };
 }
 
 export async function listActiveWaitingRoomEvents(redis: Redis): Promise<string[]> {

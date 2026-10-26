@@ -1,0 +1,18 @@
+# docs/plan.md "Autoscaling": PodDisruptionBudget för enreplikstjänster.
+# `minAvailable: 1` hade aldrig gått att uppfylla med bara 1 podd —
+# `kubectl drain` skulle hänga för alltid (docs/plan.md säger detta
+# rakt ut). `maxUnavailable: 1` är den tillåtna formen: den stoppar inte
+# en nods-drain (enda podden FÅR bli otillgänglig, det finns ingen
+# andra att skydda), men gör ändå explicit att Kubernetes aldrig frivilligt
+# tar ner MER än den enda podden samtidigt — t.ex. under en samtidig
+# multi-nod-operation.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: scheduler-worker
+  namespace: ticketing
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: scheduler-worker

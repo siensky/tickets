@@ -1,8 +1,10 @@
 /**
  * Läser väntrummets config-nycklar (docs/plan.md "Väntrum": "ändringsbara
- * live"). Egen, minimal kopia av booking-apis motsvarighet (bara de två
- * nycklar insläppsjobbet faktiskt behöver — inte sessionstotalen, som
- * bara kötokens `exp` bryr sig om) — se docs/rules.md §1.
+ * live"). Egen, minimal kopia av booking-apis motsvarighet (docs/rules.md
+ * §1). Läser numera även `queue_session_total_minutes` — Fas 6
+ * (Fas 3-reviewns notering): insläppsjobbet måste kunna räkna ut om en
+ * ZSET-post redan är för gammal INNAN den markeras insläppt, annars
+ * slösas insläppskvoten på döda sessioner i en djup kö.
  */
 import { InternalError } from '@tickets/domain';
 import type { Pool } from 'pg';
@@ -11,6 +13,7 @@ import type { QueueConfig } from '../types/queue-config.js';
 const QUEUE_CONFIG_KEYS = [
   'queue_admission_rate_per_minute',
   'queue_session_inactivity_minutes',
+  'queue_session_total_minutes',
 ] as const;
 
 function parsePositiveInteger(key: string, rawValue: string): number {
@@ -30,7 +33,12 @@ export async function getQueueConfig(pool: Pool): Promise<QueueConfig> {
 
   const admissionRatePerMinute = values.get('queue_admission_rate_per_minute');
   const sessionInactivityMinutes = values.get('queue_session_inactivity_minutes');
-  if (admissionRatePerMinute === undefined || sessionInactivityMinutes === undefined) {
+  const sessionTotalMinutes = values.get('queue_session_total_minutes');
+  if (
+    admissionRatePerMinute === undefined ||
+    sessionInactivityMinutes === undefined ||
+    sessionTotalMinutes === undefined
+  ) {
     throw new InternalError('Queue config keys are missing from the config table', {
       foundKeys: [...values.keys()],
     });
@@ -44,6 +52,10 @@ export async function getQueueConfig(pool: Pool): Promise<QueueConfig> {
     sessionInactivityMinutes: parsePositiveInteger(
       'queue_session_inactivity_minutes',
       sessionInactivityMinutes,
+    ),
+    sessionTotalMinutes: parsePositiveInteger(
+      'queue_session_total_minutes',
+      sessionTotalMinutes,
     ),
   };
 }

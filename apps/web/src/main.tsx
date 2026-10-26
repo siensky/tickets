@@ -6,6 +6,7 @@ import { App } from './App.js';
 import { AppAuthProvider } from './lib/auth-provider.js';
 import { queryClient } from './lib/query-client.js';
 import { registerServiceWorker } from './lib/service-worker-registration.js';
+import './styles/globals.css';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

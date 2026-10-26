@@ -139,7 +139,111 @@ Larmreglerna: `infra/k8s/base/monitoring/prometheusrule.yaml`.
 | `RabbitMQQueueDepthHigh` | En kö har >900 väntande meddelanden (KEDAs tak är 1000 = 100/podd × 10 poddar, Fas 6) | Kolla om notification-worker hänger eller RabbitMQ är nere |
 | `PodCrashLooping` | >3 omstarter av en container på 15 min | `kubectl describe pod`, läs `Last State: Terminated` -reason |
 
-## Shard nere (att fylla i i Fas 2/6)
+## Shard nere (Fas 6)
+
+**Döda ALDRIG en hel nod** — bara podden (docs/plan.md "Demomanus"):
+Cloudflare Free gör inga origin-healthchecks, så en död nod hade fått
+~halva trafiken att fortsätta gå dit och få 5xx tills `terraform apply`
+hunnit köra. Poddnivå räcker för att visa samma sak utan den risken.
+
+```sh
+kubectl delete pod -n data -l app=postgres-shard-1 --grace-period=0 --force
+```
+
+**Vad som ska hända:** `events-service.ts`s `listAllEvents` och
+`my-tickets-service.ts`s `listMyTickets` (`Promise.allSettled` över båda
+shards) degraderar till ett partiellt resultat + en loggad varning för
+den nedgångna shardens anrop — aldrig ett 500 för hela listan. Nya
+bokningsförsök mot ett event på shard-0 fortsätter fungera obrutet;
+försök mot ett event på shard-1 får fel (väntat, det ÄR nere) tills
+podden schemaläggs om (Kubernetes gör detta automatiskt, nätverksvolymen
+— Hetzner CSI — följer med till den nya noden).
+
+**Återställning:** inget manuellt steg krävs utöver att vänta —
+StatefulSet:et skapar om podden, PVC:n (Hetzner CSI, nätverksvolym)
+monteras om med datan intakt. Verifiera med
+`kubectl get pods -n data -l app=postgres-shard-1 -w`.
+
+**Under `shard-failure`-scenariot** (tests/load/shard-failure.js): kör
+kommandot ovan ungefär halvvägs in i körningen. Alla k6-scenarier kör
+mot ETT `EVENT_ID` (upptäckt i Fas 6-reviewn: "bara de försök som
+hashade till shard-1 påverkas" går alltså INTE att observera i denna
+körning — hela eventet ligger på en enda shard, så antingen påverkas
+ALLA försök eller INGA, beroende på vilken shard just det eventet
+hashar till). Vill du visa att den ANDRA shardens events fortsätter
+fungera obrutet, kör mot två olika `EVENT_ID` (ett per shard — se vilken
+shard ett givet id hashar till via `shared/db/src/shard-router.ts`s
+`hashEventIdToShardIndex`) och jämför rapporterna för de två.
+
+## Lasttest: allowlista generatorernas IP:n i rate limitern (Fas 6)
+
+`services/booking-api/src/routes/rate-limit.ts`s `RATE_LIMIT_ALLOWLISTED_IPS`
+(docs/plan.md "Lasttest": "Lastgeneratorernas CF-verifierade adresser
+allowlistas i rate limitern under testet, med dokumenterad motivering")
+— utan den mäter `normal-sale`/`spike-sale`/`queue-storm` vårt eget
+botskydd (429:or) i stället för systemet, eftersom alla VU:er på en
+generator-VM delar samma källIP.
+
+**Motivering:** adresserna är lastgeneratorernas EGNA, kända IP:n
+(`hcloud_server.loadgen`, aldrig en header en klient kan förfalska —
+samma princip som `CF-Connecting-IP`-litandet, docs/plan.md "Botskydd").
+Allowlistningen är TILLFÄLLIG, bara under den faktiska körningen.
+
+```sh
+# 1. Hämta generatorernas IP:er
+terraform -chdir=infra/terraform output -json loadgen_ipv4s
+
+# 2. Sätt dem (kommaseparerat) på booking-api, EN gång innan körningen
+kubectl set env deployment/booking-api -n ticketing \
+  RATE_LIMIT_ALLOWLISTED_IPS="1.2.3.4,5.6.7.8,9.10.11.12"
+
+# 3. ALLTID efteråt — ta bort igen, annars är botskyddet kvar avstängt
+kubectl set env deployment/booking-api -n ticketing RATE_LIMIT_ALLOWLISTED_IPS-
+```
+
+## Lasttest: förutfärdade Auth0-tokens (Fas 6)
+
+`tests/load/lib/config.js`s `AUTH_TOKENS` (docs/plan.md "Auth": "Lasttest
+använder förutfärdade tokens") — checkout kräver en riktig Auth0-
+inloggning, men VILKEN användare som betalar är inte det scenariot
+mäter. En liten pool av riktiga access-tokens räcker, återanvänd över
+alla 50 000 VU.
+
+**Engångsförberedelse i Auth0 Dashboard** (samma SPA-app som
+`AUTH0_WEB_CLIENT_ID`, docs/runbook.md "Nödvändiga GitHub
+Actions-secrets"): **Applications → (appen) → Settings → Advanced
+Settings → Grant Types** → slå på **Password** (avstängt som default för
+en SPA-app — ROPG är annars avsett för M2M/legacy-klienter, men är den
+enklaste vägen till ett RIKTIGT token utan att browserautomatisera hela
+Universal Login för varje token som `booking-flow.spec.ts` gör). Kräver
+även att tenantens **Authentication → Database → "Default Directory"**
+är satt (Auth0-inställning, inte app-specifik) — annars svarar
+`/oauth/token` med `unauthorized_client` oavsett Grant Types-inställningen.
+
+**Slå AV Password-grantet igen efter lasttestet** — det är en
+PRODUKTIONS-app (samma `AUTH0_WEB_CLIENT_ID` som den riktiga
+inloggningen), och ROPG skickar användarens lösenord direkt till din
+egen klient istället för Auth0:s hostade sida. Lämna det inte på
+permanent. En egen, separat Auth0-app bara för lasttestet vore renare
+men är inte prioriterat.
+
+**Hämta ett token** (samma testkonto som e2e-sviten,
+`AUTH0_TEST_USER_EMAIL`/`AUTH0_TEST_USER_PASSWORD`):
+
+```sh
+curl -s "https://$AUTH0_DOMAIN/oauth/token" \
+  -H 'content-type: application/json' \
+  -d "{\"grant_type\":\"password\",\"username\":\"$AUTH0_TEST_USER_EMAIL\",\"password\":\"$AUTH0_TEST_USER_PASSWORD\",\"client_id\":\"$AUTH0_WEB_CLIENT_ID\",\"audience\":\"$AUTH0_AUDIENCE\",\"scope\":\"openid profile email\"}" \
+  | jq -r '.access_token'
+```
+
+Upprepa med ytterligare testkonton (skapa några fler i Auth0 för
+poolens skull) om du vill undvika en enda delad identitet i
+ordertabellen under rapportens granskning — en handfull räcker, inte
+50 000. Klistra in dem kommaseparerat: `k6 run -e
+AUTH_TOKENS=tok1,tok2,tok3 ...`. Tokens har en begränsad livstid
+(Auth0-defaulten är timmar, inte dagar) — hämta färska strax innan en
+körning, inte dagen före.
 
 ## Nödvändiga GitHub Actions-secrets (Fas 3)
 

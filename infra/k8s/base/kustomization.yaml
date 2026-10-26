@@ -12,6 +12,13 @@
 # tjänster. Fyra nya GitHub-secrets krävs för att "Create/update app
 # secrets"-steget ska lyckas — se docs/runbook.md "Nödvändiga GitHub
 # Actions-secrets".
+#
+# Fas 6 (docs/plan.md "Autoscaling"/"Zero-downtime"): HPA på
+# booking-api/realtime-gateway, KEDA ScaledObject + TriggerAuthentication
+# på notification-worker, PodDisruptionBudget på de två enreplikstjänsterna
+# (scheduler-worker, payment-mock). Förutsätter att KEDA-operatorn redan
+# är installerad (infra/terraform/helm.tf) — annars avvisar klustret
+# `ScaledObject`/`TriggerAuthentication` som okända CRD:er.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -28,14 +35,20 @@ resources:
   - booking-api/deployment.yaml
   - booking-api/service.yaml
   - booking-api/ingress.yaml
+  - booking-api/ingress-loadtest.yaml
+  - booking-api/hpa.yaml
   - realtime-gateway/deployment.yaml
   - realtime-gateway/service.yaml
+  - realtime-gateway/hpa.yaml
   - scheduler-worker/deployment.yaml
   - scheduler-worker/service.yaml
+  - scheduler-worker/pdb.yaml
   - notification-worker/deployment.yaml
   - notification-worker/service.yaml
+  - notification-worker/scaledobject.yaml
   - payment-mock/deployment.yaml
   - payment-mock/service.yaml
+  - payment-mock/pdb.yaml
   # Fas 4 (docs/plan.md "Observability"/"Backups"). Kräver att Terraform
   # (infra/terraform/observability.tf) redan har skapat namnrymden
   # "observability" och Prometheus Operators CRD:er (kube-prometheus-stack)

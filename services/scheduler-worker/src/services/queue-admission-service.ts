@@ -12,7 +12,7 @@
  * än en gång per statuspolling.
  */
 import { getGlobalPool, getPoolForEvent, type ShardPools } from '@tickets/db';
-import type { Logger } from '@tickets/observability';
+import type { BusinessMetrics, Logger } from '@tickets/observability';
 import {
   admitNextBatch,
   drainWaitingRoom,
@@ -77,16 +77,33 @@ async function admitBatchForEvent(
   redis: RedisClient,
   eventId: string,
   tickIntervalMs: number,
+  logger: Logger,
+  businessMetrics: BusinessMetrics,
 ): Promise<readonly string[]> {
   const config = await getQueueConfig(getGlobalPool(shardPools));
   const batchSize = batchSizeForTick(config.admissionRatePerMinute, tickIntervalMs);
   const inactivityTtlSeconds = config.sessionInactivityMinutes * 60;
-  const { admittedQueueTokenIds } = await admitNextBatch(
+  const { admittedQueueTokenIds, remainingDepth, prunedExpiredCount } = await admitNextBatch(
     redis,
     eventId,
     batchSize,
     inactivityTtlSeconds,
+    config.sessionTotalMinutes,
   );
+  if (prunedExpiredCount > 0) {
+    logger.info(
+      { eventId, prunedExpiredCount },
+      'queue admission: skipped already-expired queue sessions instead of admitting them',
+    );
+  }
+  // docs/plan.md "Vad som mäts": ködjup + insläppstakt.
+  businessMetrics.waitingRoomDepth.set({ event_id: eventId }, remainingDepth);
+  if (admittedQueueTokenIds.length > 0) {
+    businessMetrics.queueAdmissionsTotal.inc(
+      { event_id: eventId },
+      admittedQueueTokenIds.length,
+    );
+  }
   return admittedQueueTokenIds;
 }
 
@@ -96,6 +113,7 @@ async function processEvent(
   eventId: string,
   tickIntervalMs: number,
   logger: Logger,
+  businessMetrics: BusinessMetrics,
 ): Promise<void> {
   const pool = getPoolForEvent(shardPools, eventId);
   const salesWindow = await getEventSalesWindow(pool, eventId);
@@ -109,6 +127,8 @@ async function processEvent(
     redis,
     eventId,
     tickIntervalMs,
+    logger,
+    businessMetrics,
   );
   if (admittedQueueTokenIds.length > 0) {
     await notifyAdmitted(redis, admittedQueueTokenIds);
@@ -119,6 +139,7 @@ export function startQueueAdmissionJob(
   shardPools: ShardPools,
   redis: RedisClient,
   logger: Logger,
+  businessMetrics: BusinessMetrics,
   intervalMs = DEFAULT_TICK_INTERVAL_MS,
 ): QueueAdmissionJob {
   let tickInFlight: Promise<void> | null = null;
@@ -127,7 +148,7 @@ export function startQueueAdmissionJob(
     const eventIds = await listActiveWaitingRoomEvents(redis);
     for (const eventId of eventIds) {
       try {
-        await processEvent(shardPools, redis, eventId, intervalMs, logger);
+        await processEvent(shardPools, redis, eventId, intervalMs, logger, businessMetrics);
       } catch (error) {
         logger.warn(
           { eventId, error },

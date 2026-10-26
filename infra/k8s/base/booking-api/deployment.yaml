@@ -1,7 +1,18 @@
 # docs/plan.md "Zero-downtime — kräver alla fyra": readinessProbe,
 # maxUnavailable: 0, preStop-hook + terminationGracePeriodSeconds, och
 # graceful shutdown i appen (redan byggt i src/index.ts — SIGTERM →
-# app.close()). HPA läggs till i Fas 6, repliker är statiska här.
+# app.close()). HPA (fas 6, hpa.yaml) äger replikantalet — MEDVETET
+# inget `spec.replicas` här. Pipelinen deployar med `kubectl apply`:
+# står fältet kvar skriver VARJE apply tillbaka det statiska talet över
+# HPA:ns egna, aktuella beslut (Kubernetes' egen HPA-dokumentation,
+# upptäckt i Fas 6-reviewn — en tidigare kommentar här hade resonemanget
+# baklänges). Under en `deploy-under-load`-körning hade booking-api
+# alltså skalats NER mitt i lasten vid varje ny deploy, precis det
+# `maxUnavailable: 0` ska förhindra. Priset för att utelämna fältet är
+# en engångs-dipp till Kubernetes' default (1 podd) vid just DEN apply
+# som först tar bort fältet — HPA:ns `minReplicas: 2` tar över inom
+# sekunder, och det händer bara en gång (nu), inte vid varje framtida
+# deploy.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -10,7 +21,6 @@ metadata:
   labels:
     app: booking-api
 spec:
-  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:

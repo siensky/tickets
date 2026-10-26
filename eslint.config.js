@@ -85,7 +85,23 @@ export default tseslint.config(
         // importerar från repositories/ (förbjudet nedan) flaggades
         // korrekt, men index.ts fick ALDRIG en type alls — "from" eller
         // "to" mot service-root slog därför aldrig in, obemärkt.
-        { type: 'service-root', pattern: 'services/*/src/index.ts', mode: 'file' },
+        //
+        // `*.ts` (en ENDA `*`, spänner inte över `/`), inte bara
+        // `index.ts` — Fas 6 la till `dependencies.ts` som en till lös
+        // fil direkt i `src/` (samma skäl som index.ts: ren
+        // konstruktion, ingen Fastify-routing), och den hade annars
+        // blivit obevakad av exakt samma anledning som ovan.
+        // `instrumentation.ts` (fanns redan i alla fem tjänster) fångas
+        // nu också, verifierat ofarligt — den importerar bara `shared`.
+        { type: 'service-root', pattern: 'services/*/src/*.ts', mode: 'file' },
+        // Fas 6: engångsskript (reset-sale.ts m.fl.) — upptäckt i
+        // Fas 6-reviewn att boundaries-listan saknade denna mapp helt,
+        // vilket tyst satte lagerregeln ur spel här (samma riskklass
+        // som den tidigare `boundaries/root-path`-regressionen,
+        // eslint.config.test.ts). Egen typ, inte `service-root`: ett
+        // skript ska bara få prata med repositories/shared, aldrig
+        // registrera routes.
+        { type: 'scripts', pattern: 'services/*/src/scripts/**' },
         { type: 'shared', pattern: 'shared/*/src/**' },
       ],
     },
@@ -177,6 +193,12 @@ export default tseslint.config(
                 to: {
                   element: {
                     types: {
+                      // 'service-root' med sig själv: `*.ts` matchar NU
+                      // flera lösa filer per tjänst (index.ts,
+                      // dependencies.ts, instrumentation.ts) — de
+                      // importerar redan av varandra (index.ts →
+                      // instrumentation.ts sedan tidigare, index.ts →
+                      // dependencies.ts sedan Fas 6).
                       anyOf: [
                         'routes',
                         'controllers',
@@ -185,10 +207,17 @@ export default tseslint.config(
                         'mappers',
                         'schemas-layer',
                         'shared',
+                        'service-root',
                       ],
                     },
                   },
                 },
+              },
+            },
+            {
+              from: { element: { type: 'scripts' } },
+              allow: {
+                to: { element: { types: { anyOf: ['repositories', 'mappers', 'shared'] } } },
               },
             },
           ],

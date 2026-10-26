@@ -157,13 +157,12 @@ jobs:
       - name: Build the web app
         env:
           VITE_API_BASE_URL: https://api.tikknet.se
-          # realtime-gateway har ÄNNU INGEN egen ingress
-          # (infra/k8s/base/realtime-gateway saknar ingress.yaml, ett
-          # eget fynd under Fas 5 — se docs/plan.md "kända luckor").
-          # Satt till den tilltänkta adressen; WS kopplar inte upp förrän
-          # den routningen finns, men det är redan hanterat —
-          # useQueueSocket är bara en optimering, resten av appen
-          # fungerar via REST-pollning utan den.
+          # Fas 5-reviewn flaggade detta som obyggt ("realtime-gateway
+          # saknar ingress"), men det var redan löst sedan Fas 3:
+          # infra/k8s/base/booking-api/ingress.yaml routar /ws till
+          # realtime-gateway på SAMMA host (docs/plan.md "Trafikväg":
+          # ingen egen WS-subdomän). Rättat i Fas 6 — se docs/plan.md
+          # "Fas 5 — kända luckor".
           VITE_WS_BASE_URL: wss://api.tikknet.se
           VITE_AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
           VITE_AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
@@ -274,9 +273,18 @@ jobs:
           # booking-api/notification-worker/scheduler-worker (namnrymden
           # "ticketing") läser samma lösenord via secretKeyRef för att
           # bygga RABBITMQ_URL — samma skäl som Postgres-lösenorden ovan.
+          #
+          # "amqp-url" är till för KEDA (infra/k8s/base/notification-worker/
+          # scaledobject.yaml): dess RabbitMQ-scaler vill ha en FÄRDIG
+          # anslutningssträng via en TriggerAuthentication-secret, inte
+          # bara lösenordet — KEDA läser Deployment-objektet via API:et
+          # och kan inte lösa upp Kubernetes' egna `$(RABBITMQ_PASSWORD)`-
+          # substitution som RABBITMQ_URL-env-variabeln använder. Samma
+          # lösenord, bara i ett format KEDA kan använda direkt.
           password=$(kubectl get secret rabbitmq-credentials -n data -o jsonpath='{.data.password}' | base64 -d)
           kubectl create secret generic rabbitmq-credentials -n ticketing \
             --from-literal=password="$password" \
+            --from-literal=amqp-url="amqp://app:${password}@rabbitmq.data.svc.cluster.local:5672" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       # docs/plan.md "Fasplan" Fas 3 / "Secrets": GitHub Actions secrets →

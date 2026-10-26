@@ -5,6 +5,8 @@
  * This only knows how to shape one request and parse one response.
  */
 
+import type { EventCategory } from './categories.js';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
 export class ApiError extends Error {
@@ -54,6 +56,7 @@ export interface EventSummary {
   readonly id: string;
   readonly title: string;
   readonly artist: string;
+  readonly category: EventCategory;
   readonly venueId: string;
   readonly venueName: string;
   readonly venueCity: string;
@@ -65,8 +68,23 @@ export interface EventSummary {
   readonly isAfterClose: boolean;
 }
 
-export function listEvents(): Promise<{ events: EventSummary[] }> {
-  return request('/events');
+export interface ListEventsFilter {
+  readonly category?: EventCategory;
+  readonly q?: string;
+}
+
+export function listEvents(
+  filter: ListEventsFilter = {},
+): Promise<{ events: EventSummary[] }> {
+  const params = new URLSearchParams();
+  if (filter.category !== undefined) {
+    params.set('category', filter.category);
+  }
+  if (filter.q !== undefined && filter.q.length > 0) {
+    params.set('q', filter.q);
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : '';
+  return request(`/events${query}`);
 }
 
 export function getEvent(eventId: string): Promise<EventSummary> {

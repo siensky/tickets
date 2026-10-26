@@ -11,6 +11,7 @@ export function toEventSummary(row: EventRow, venue: VenueRow): EventSummary {
     id: row.id,
     title: row.title,
     artist: row.artist,
+    category: row.category,
     venueId: row.venueId,
     venueName: venue.name,
     venueCity: venue.city,

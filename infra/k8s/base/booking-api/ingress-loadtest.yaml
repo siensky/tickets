@@ -1,0 +1,47 @@
+# docs/plan.md "Lasttest": huvudkörningen går mot ett SEPARAT värdnamn
+# direkt mot ingress (infra/terraform/dns.tf: `loadtest`, icke-proxat).
+# EGEN Ingress istället för en rad till i ingress.yaml — håller den
+# normala produktionsingressen orörd, och gör det uppenbart vad som är
+# "riktig trafik" kontra "lasttest" i en `kubectl get ingress`.
+#
+# Samma path-uppdelning som ingress.yaml (/metrics stängt, /ws till
+# realtime-gateway, / till booking-api) — ett lasttest övar hela flödet,
+# inte bara REST-vägen.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: booking-api-loadtest
+  namespace: ticketing
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - loadtest.tikknet.se
+      secretName: booking-api-loadtest-tls
+  rules:
+    - host: loadtest.tikknet.se
+      http:
+        paths:
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: metrics-blackhole
+                port:
+                  number: 80
+          - path: /ws
+            pathType: Exact
+            backend:
+              service:
+                name: realtime-gateway
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: booking-api
+                port:
+                  number: 80

@@ -1,5 +1,9 @@
 # docs/plan.md "Tjänster": notification-worker, 1–10 repliker (KEDA på
-# RabbitMQ-ködjup, fas 6 — statisk replik = 1 här tills dess).
+# RabbitMQ-ködjup, scaledobject.yaml). MEDVETET inget `spec.replicas` —
+# se booking-api/deployment.yaml:s kommentar (samma problem gäller KEDA:s
+# underliggande HPA). Kubernetes' eget default (1) råkar redan matcha
+# `minReplicaCount: 1` här, så det finns inte heller en engångsdipp att
+# tala om.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,7 +12,6 @@ metadata:
   labels:
     app: notification-worker
 spec:
-  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -82,6 +85,16 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
+          lifecycle:
+            preStop:
+              # docs/plan.md "Zero-downtime — kräver alla fyra": saknades
+              # här (fanns redan på booking-api/realtime-gateway/
+              # payment-mock) — en RabbitMQ-konsument kan ha ett
+              # meddelande under behandling precis när KEDA skalar ner
+              # eller en deploy rullar, och ska hinna ur rotation innan
+              # SIGTERM.
+              exec:
+                command: ['sh', '-c', 'sleep 5']
           securityContext:
             runAsNonRoot: true
             runAsUser: 10001

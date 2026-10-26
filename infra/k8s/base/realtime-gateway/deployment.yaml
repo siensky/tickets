@@ -1,6 +1,9 @@
 # docs/plan.md "Tjänster": egen tjänst så en booking-api-deploy aldrig
-# tappar WebSocket-anslutningar. HPA (vila 2, topp 4) läggs till i Fas 6
-# — repliker är statiska här, samma mönster som booking-api.
+# tappar WebSocket-anslutningar. HPA (vila 2, topp 4, minnesbaserad —
+# hpa.yaml) äger replikantalet — MEDVETET inget `spec.replicas` här, se
+# booking-api/deployment.yaml:s kommentar för varför (annars skriver
+# VARJE `kubectl apply` tillbaka ett statiskt tal över HPA:ns löpande
+# beslut, inte bara en engångsdipp).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +12,6 @@ metadata:
   labels:
     app: realtime-gateway
 spec:
-  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -58,10 +60,17 @@ spec:
           resources:
             requests:
               cpu: 250m
-              memory: 256Mi
+              # Höjt från 256Mi (Fas 6-reviewn): en Node 22-process med
+              # OTel förinstrumenterad ligger ofta redan nära 70 % av
+              # 256Mi i vila, vilket hade kunnat trigga HPA:n (hpa.yaml)
+              # till max direkt utan en riktig kurva. OVERIFIERAT mot en
+              # riktig podd (ingen Tailscale-åtkomst i byggmiljön, samma
+              # begränsning som Fas 4:s observability) — mät faktisk
+              # RSS i vila vid första riktiga deploy och justera.
+              memory: 320Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 640Mi
           readinessProbe:
             httpGet:
               path: /health/ready

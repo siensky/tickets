@@ -1,8 +1,9 @@
 import type { JSX } from 'react';
-import { Link, Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router-dom';
+import { Navbar } from './components/Navbar.js';
 import { CheckoutCancelPage, CheckoutSuccessPage } from './routes/CheckoutResultPage.js';
 import { EventPage } from './routes/EventPage.js';
-import { EventsListPage } from './routes/EventsListPage.js';
+import { HomePage } from './routes/HomePage.js';
 import { MyTicketsPage } from './routes/MyTicketsPage.js';
 import { ReservationPage } from './routes/ReservationPage.js';
 import { SeatmapPage } from './routes/SeatmapPage.js';
@@ -15,11 +16,9 @@ import { SeatmapPage } from './routes/SeatmapPage.js';
 export function App(): JSX.Element {
   return (
     <>
-      <nav>
-        <Link to="/">Evenemang</Link> | <Link to="/my-tickets">Mina biljetter</Link>
-      </nav>
+      <Navbar />
       <Routes>
-        <Route path="/" element={<EventsListPage />} />
+        <Route path="/" element={<HomePage />} />
         <Route path="/events/:eventId" element={<EventPage />} />
         <Route path="/events/:eventId/seatmap" element={<SeatmapPage />} />
         <Route

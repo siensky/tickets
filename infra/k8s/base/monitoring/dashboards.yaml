@@ -2,12 +2,12 @@
 # kube-prometheus-stacks dashboard-sidecar (letar ConfigMaps märkta
 # grafana_dashboard: "1" i ALLA namnrymder, satt i observability.tf).
 #
-# Bara paneler för mått som faktiskt finns byggs här. docs/plan.md
-# "Vad som mäts" nämner även "aktiva reservationer, insläppstakt, sålda
-# biljetter, konverteringsgrad" under "Affär" — ingen av dessa har en egen
-# counter i koden ännu (bara RED, oversell_prevented_total och
-# rabbitmq_queue_messages_ready existerar). Se noteringen i docs/plan.md
-# "Fasplan" under en kommande fas.
+# Fas 6 lade till de affärsmått som saknades sedan Fas 4 (aktiva
+# reservationer, ködjup, insläppstakt, sålda biljetter — se
+# shared/observability/src/metrics.ts:s `createBusinessMetrics`) och en
+# egen "Autoscaling & lasttest"-dashboard (HPA/KEDA-kurvan, CPU/minne
+# mot tröskel, podd-omstarter, nodkapacitet) — se docs/plan.md
+# "Mät HPA-kurvan" och "Demomanus" steg 5.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -134,11 +134,11 @@ metadata:
 data:
   business.json: |
     {
-      "title": "Business — oversell guarantee",
+      "title": "Business — bokningsflöde & oversell guarantee",
       "uid": "tickets-business",
       "schemaVersion": 39,
-      "refresh": "30s",
-      "time": { "from": "now-6h", "to": "now" },
+      "refresh": "10s",
+      "time": { "from": "now-1h", "to": "now" },
       "panels": [
         {
           "id": 1,
@@ -146,6 +146,194 @@ data:
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
           "targets": [{ "expr": "oversell_prevented_total", "legendFormat": "{{service}}" }]
+        },
+        {
+          "id": 2,
+          "title": "Ködjup (väntrummet, per event)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [{ "expr": "waiting_room_depth", "legendFormat": "{{event_id}}" }]
+        },
+        {
+          "id": 3,
+          "title": "Insläppstakt (admissions/min, per event)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            {
+              "expr": "sum(rate(queue_admissions_total[1m])) by (event_id) * 60",
+              "legendFormat": "{{event_id}}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Aktiva reservationer (per event)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "targets": [{ "expr": "active_reservations", "legendFormat": "{{event_id}}" }]
+        },
+        {
+          "id": 5,
+          "title": "Sålda biljetter vs. 5 000-taket (per event)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "targets": [
+            { "expr": "sold_tickets", "legendFormat": "{{event_id}}" },
+            { "expr": "vector(5000)", "legendFormat": "Biljettak (5 000)" }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Konverteringsgrad (sålda biljetter / köjoin, per event)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+          "targets": [
+            {
+              "expr": "sold_tickets / on(event_id) sum(queue_joins_total) by (event_id)",
+              "legendFormat": "{{event_id}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] }
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-autoscaling
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+data:
+  autoscaling.json: |
+    {
+      "title": "Autoscaling & lasttest",
+      "uid": "tickets-autoscaling",
+      "schemaVersion": 39,
+      "refresh": "10s",
+      "time": { "from": "now-30m", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Repliker över tid (booking-api / realtime-gateway / notification-worker) — HPA/KEDA-kurvan",
+          "description": "docs/plan.md \"Demomanus\": booking-api ska skala 2→10 i en gradvis kurva, notification-worker skalas av KEDA på ködjup. Samma metrik (kube_deployment_status_replicas) för båda — KEDA skalar samma Deployment via sin egen, underliggande HPA.",
+          "type": "timeseries",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "expr": "kube_deployment_status_replicas{namespace=\"ticketing\", deployment=~\"booking-api|realtime-gateway|notification-worker\"}",
+              "legendFormat": "{{deployment}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "min": 0 }, "overrides": [] }
+        },
+        {
+          "id": 2,
+          "title": "HPA: booking-api — aktuellt vs. min/max",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+          "targets": [
+            {
+              "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"ticketing\", horizontalpodautoscaler=\"booking-api\"}",
+              "legendFormat": "aktuella repliker"
+            },
+            {
+              "expr": "kube_horizontalpodautoscaler_spec_max_replicas{namespace=\"ticketing\", horizontalpodautoscaler=\"booking-api\"}",
+              "legendFormat": "max"
+            },
+            {
+              "expr": "kube_horizontalpodautoscaler_spec_min_replicas{namespace=\"ticketing\", horizontalpodautoscaler=\"booking-api\"}",
+              "legendFormat": "min"
+            }
+          ],
+          "fieldConfig": { "defaults": { "min": 0 }, "overrides": [] }
+        },
+        {
+          "id": 3,
+          "title": "HPA: realtime-gateway — aktuellt vs. min/max",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+          "targets": [
+            {
+              "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"ticketing\", horizontalpodautoscaler=\"realtime-gateway\"}",
+              "legendFormat": "aktuella repliker"
+            },
+            {
+              "expr": "kube_horizontalpodautoscaler_spec_max_replicas{namespace=\"ticketing\", horizontalpodautoscaler=\"realtime-gateway\"}",
+              "legendFormat": "max"
+            },
+            {
+              "expr": "kube_horizontalpodautoscaler_spec_min_replicas{namespace=\"ticketing\", horizontalpodautoscaler=\"realtime-gateway\"}",
+              "legendFormat": "min"
+            }
+          ],
+          "fieldConfig": { "defaults": { "min": 0 }, "overrides": [] }
+        },
+        {
+          "id": 4,
+          "title": "CPU per booking-api-podd (HPA-trigger, mål ≈0.175 cores = 70% av 250m request)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+          "targets": [
+            {
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"ticketing\", pod=~\"booking-api-.*\", container=\"booking-api\"}[2m])) by (pod)",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+        },
+        {
+          "id": 5,
+          "title": "Minne per realtime-gateway-podd (HPA-trigger, mål ≈224Mi = 70% av 320Mi request)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+          "targets": [
+            {
+              "expr": "sum(container_memory_working_set_bytes{namespace=\"ticketing\", pod=~\"realtime-gateway-.*\", container=\"realtime-gateway\"}) by (pod)",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+        },
+        {
+          "id": 6,
+          "title": "Podd-omstarter senaste 15 min (crash-loop-detektor)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+          "targets": [
+            {
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"ticketing\"}[15m])) by (pod)",
+              "legendFormat": "{{pod}}"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Nod-CPU-utnyttjande (klusterkapacitet under lasttest)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+          "targets": [
+            {
+              "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[2m])) * 100)",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] }
+        },
+        {
+          "id": 8,
+          "title": "Nod-minnesutnyttjande (klusterkapacitet under lasttest)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+          "targets": [
+            {
+              "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] }
         }
       ]
     }

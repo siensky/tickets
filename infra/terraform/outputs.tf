@@ -27,3 +27,13 @@ output "api_fqdn" {
   description = "Backendens fullständiga domännamn."
   value       = "api.${var.domain_name}"
 }
+
+output "loadgen_ipv4s" {
+  description = "Publika IPv4-adresser för lastgenerator-VM:erna (loadgen_node_count). Tom lista i vardagen — SSH:a hit för att köra k6."
+  value       = [for s in hcloud_server.loadgen : s.ipv4_address]
+}
+
+output "loadtest_fqdn" {
+  description = "Direkt-mot-ingress-värdnamnet huvudkörningen ska gå mot (docs/plan.md \"Lasttest\") — icke-proxat, kräver att loadgen_node_count > 0:s IP:er är allowlistade i firewall.tf innan DNS-propageringen hunnit klart."
+  value       = "loadtest.${var.domain_name}"
+}
