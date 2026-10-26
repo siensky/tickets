@@ -14,11 +14,11 @@ describe('eventIdParamSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects an unknown extra field (strict mode)', () => {
+  it('accepts an extra route param (NOT strict) — Fastify always includes every matched path segment, e.g. :reservationId on GET /events/:eventId/reservations/:reservationId', () => {
     const result = eventIdParamSchema.safeParse({
       eventId: '123e4567-e89b-12d3-a456-426614174000',
-      admin: true,
+      reservationId: '223e4567-e89b-12d3-a456-426614174000',
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 });

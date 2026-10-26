@@ -26,6 +26,31 @@ import { E2E_EVENT_ID } from '../seed.js';
 
 const APP_ORIGIN = new URL(process.env['E2E_BASE_URL'] ?? 'http://localhost:5173').origin;
 
+// Forwards browser console/page errors into the CI text log, and dumps
+// the visible page text on failure — found live that the uploaded
+// artifact (traces/screenshots) was never actually reachable (wrong
+// path in e2e.yml, now fixed, but this gives a result in THIS run's
+// plain log too, no artifact download needed).
+test.beforeEach(({ page }) => {
+  page.on('console', (msg) => {
+    process.stdout.write(`[browser:${msg.type()}] ${msg.text()}\n`);
+  });
+  page.on('pageerror', (error) => {
+    process.stdout.write(`[pageerror] ${error.message}\n`);
+  });
+});
+
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) {
+    const bodyText = await page
+      .locator('body')
+      .innerText()
+      .catch(() => '(could not read body)');
+    process.stdout.write(`[on-failure] current URL: ${page.url()}\n`);
+    process.stdout.write(`[on-failure] visible page text:\n${bodyText}\n`);
+  }
+});
+
 async function admitTheOnlyWaitingToken(): Promise<void> {
   const redis = createRedisClient(process.env['E2E_REDIS_URL'] ?? 'redis://localhost:6379');
   try {
