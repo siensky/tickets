@@ -7,9 +7,30 @@ variable "hcloud_token" {
 }
 
 variable "cloudflare_api_token" {
-  description = "Cloudflare API-token för TERRAFORM: Zone:DNS:Edit + Zone Settings:Edit + Cache Rules:Edit (SSL-läge, cache-regel, DNS-poster). Används ALDRIG i klustret — se cloudflare_dns_token för den smalare token cert-manager får. Sätts via TF_VAR_cloudflare_api_token."
+  description = "Cloudflare API-token för TERRAFORM: Zone:DNS:Edit + Zone Settings:Edit + Cache Rules:Edit (SSL-läge, cache-regel, DNS-poster) + Account:Workers Scripts:Edit (frontend-proxy-Workern, cloudflare-frontend.tf). Används ALDRIG i klustret — se cloudflare_dns_token för den smalare token cert-manager får. Sätts via TF_VAR_cloudflare_api_token."
   type        = string
   sensitive   = true
+}
+
+# Kontots ID (inte zonens) — syns i Cloudflare-dashboarden, höger kolumn
+# på nästan vilken sida som helst i kontot. Krävs av
+# cloudflare_workers_script/cloudflare_workers_custom_domain, som är
+# kontoresurser, till skillnad från DNS-posterna/cache-reglerna ovan som
+# bara behöver zone_id (från data.cloudflare_zone.this).
+variable "cloudflare_account_id" {
+  description = "Cloudflare-kontots ID (Account ID, INTE zone ID). Sätts via TF_VAR_cloudflare_account_id."
+  type        = string
+}
+
+# Samma bucket som de nattliga databas-backuperna (docs/adr/0005), bara
+# namnet — Terraform äger aldrig bucketen själv eller rör dess
+# S3-kompatibla R2-credentials (de är `deploy.yml`:s GitHub-secrets,
+# helt separat token enligt samma princip som cloudflare_dns_token).
+# Måste vara SAMMA sträng som GitHub-secreten R2_BUCKET, annars pekar
+# Workern och rclone-uppladdningen på olika buckets.
+variable "r2_bucket_name" {
+  description = "Namnet på R2-bucketen som delas mellan backuper och PWA-filerna (docs/runbook.md). Sätts via TF_VAR_r2_bucket_name."
+  type        = string
 }
 
 # Separat, SMALARE token för cert-managers DNS-01-secret i klustret

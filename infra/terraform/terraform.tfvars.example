@@ -5,15 +5,17 @@
 # tailscale_node_authkey) hör INTE hemma ens här — sätt dem som
 # miljövariabler istället, så de aldrig kan hamna i en fil av misstag:
 #   export TF_VAR_hcloud_token="..."
-#   export TF_VAR_cloudflare_api_token="..."       # Terraform: DNS + Zone Settings + Cache Rules
+#   export TF_VAR_cloudflare_api_token="..."       # Terraform: DNS + Zone Settings + Cache Rules + Workers Scripts
 #   export TF_VAR_cloudflare_dns_token="..."       # cert-manager i klustret: ENDAST DNS
 #   export TF_VAR_tailscale_node_authkey="..."
 #   export TF_VAR_slack_webhook_url="..."          # Alertmanager -> Slack
 #   export TF_VAR_grafana_auth0_client_id="..."
 #   export TF_VAR_grafana_auth0_client_secret="..."
 
-domain_name       = "example.se"
-letsencrypt_email = "din@epost.se"
+domain_name           = "example.se"
+letsencrypt_email     = "din@epost.se"
+cloudflare_account_id = "..." # Cloudflare-dashboarden, höger kolumn
+r2_bucket_name        = "..." # MÅSTE vara samma sträng som GitHub-secreten R2_BUCKET
 
 ssh_public_key  = "ssh-ed25519 AAAA... din@dator"
 admin_ipv4_cidr = "203.0.113.42/32" # din egen publika IP, som /32

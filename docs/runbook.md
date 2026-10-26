@@ -23,6 +23,30 @@ Krediterna kommer från fyra GitHub repo-secrets, skapade av
 4. Lägg dessa fyra som GitHub repo-secrets: `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
    `R2_ENDPOINT` (steg 3:s URL), `R2_BUCKET` (bucketnamnet från steg 1).
 
+## Frontend-proxy-Workern (Fas 5)
+
+`deploy-frontend`-jobbet laddar bara upp filerna till R2 — det kopplar INGET till
+apex-domänen. Utan `infra/terraform/cloudflare-frontend.tf` (en Cloudflare Worker som
+läser bucketen via en R2-binding och faller tillbaka till `index.html` för
+klientsidig routing) saknar `<domän>` helt en DNS-post: `ERR_NAME_NOT_RESOLVED`,
+hittat live efter den första riktiga deployen. En vanlig R2 "Custom Domain" dög inte
+— den gör hela bucketen publik, inklusive databas-backuperna.
+
+**Engångssteg innan `terraform apply`:**
+
+1. **Cloudflare-dashboarden → ditt API-token (samma som `cloudflare_api_token`) →
+   Edit → lägg till behörigheten `Account | Workers Scripts | Edit`** (utöver
+   DNS/Zone Settings/Cache Rules den redan har).
+2. Sätt två nya Terraform-variabler (ingen av dem är en hemlighet, men hör inte
+   hemma i en committad `.tfvars` ändå — samma `terraform.tfvars` som `domain_name`):
+   - `cloudflare_account_id` — samma **Account ID** du sparade i steg 3 ovan.
+   - `r2_bucket_name` — **måste** vara exakt samma sträng som GitHub-secreten
+     `R2_BUCKET`, annars pekar Workern och `rclone`-uploaden på olika buckets.
+3. `terraform apply`. Om det failar på just `cloudflare_workers_script`-resursen med
+   ett behörighetsfel specifikt för R2-bindingen (inte bara scriptet självt), testa
+   att även lägga till `Account | Workers R2 Storage | Edit` på samma token — det är
+   overifierat om Workers Scripts-behörigheten ensam räcker för en R2-binding.
+
 ## Grafana-inloggning via Auth0 (Fas 4)
 
 Grafana (`https://grafana.<domän>`, se `infra/terraform/observability.tf`) loggas in

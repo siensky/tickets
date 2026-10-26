@@ -51,8 +51,19 @@ resource "cloudflare_ruleset" "edge_cache" {
       }
     },
     {
+      # "matches" (regex) kräver Business-plan eller WAF Advanced-
+      # tillägget ("not entitled", hittat live vid första riktiga
+      # applyn av den här regeln) — starts_with()/contains() ger samma
+      # praktiska träffbild (båda /venues/:id/sections OCH
+      # /venues/:id/sections/:id/seats, precis som den ursprungliga
+      # regexen utan $-ankare redan gjorde) utan att kräva entitlement.
+      # OBS: wirefilter blandar de två formerna — starts_with/ends_with
+      # är FUNKTIONSANROP (`starts_with(fält, "x")`, "expected
+      # ComparisonOp" annars), medan contains är INFIX
+      # (`fält contains "x"`, "unknown identifier" som funktionsanrop).
+      # Båda felen hittade live, i tur och ordning.
       description = "Cacha arenageometrin (venue-sektioner + stolsgeometri) i 30 dagar vid kanten — statisk layout, docs/plan.md 'Arenakartans geometri'"
-      expression  = "(http.request.uri.path matches \"^/venues/[^/]+/sections\" and http.host eq \"api.${var.domain_name}\")"
+      expression  = "(starts_with(http.request.uri.path, \"/venues/\") and http.request.uri.path contains \"/sections\" and http.host eq \"api.${var.domain_name}\")"
       action      = "set_cache_settings"
       action_parameters = {
         cache = true
@@ -63,8 +74,11 @@ resource "cloudflare_ruleset" "edge_cache" {
       }
     },
     {
+      # Samma skäl som ovan — ends_with "/seats/status" är tillräckligt
+      # specifikt (enda routen i API:et med den suffixen, se
+      # services/booking-api/src/routes/seatmap.ts).
       description = "Cacha per-event stolsstatus i 1s vid kanten, matchar klientens 2s polling — docs/plan.md 'Stolarnas status'"
-      expression  = "(http.request.uri.path matches \"^/events/[^/]+/sections/[^/]+/seats/status\" and http.host eq \"api.${var.domain_name}\")"
+      expression  = "(starts_with(http.request.uri.path, \"/events/\") and ends_with(http.request.uri.path, \"/seats/status\") and http.host eq \"api.${var.domain_name}\")"
       action      = "set_cache_settings"
       action_parameters = {
         cache = true
