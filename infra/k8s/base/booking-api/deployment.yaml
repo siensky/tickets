@@ -81,6 +81,11 @@ spec:
               value: '50'
             - name: PAYMENT_FROZEN_MINUTES
               value: '10'
+            # docs/plan.md "Klienter": appen och API:et är alltid olika
+            # origin (tikknet.se vs api.tikknet.se) — utan detta blockerar
+            # webbläsaren varje svar till PWA:n.
+            - name: CORS_ALLOWED_ORIGINS
+              value: 'https://tikknet.se'
             # Inte hemliga — rena URL:er. Byts till apps/webs riktiga
             # domän den dagen fas 5 bygger PWA:n.
             - name: CHECKOUT_SUCCESS_URL

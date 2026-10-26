@@ -39,12 +39,17 @@ import Fastify, {
   type RawServerDefault,
 } from 'fastify';
 import { registerCheckoutRoutes } from './routes/checkout.js';
+import { registerCors } from './routes/cors.js';
 import { registerErrorHandler } from './routes/error-handler.js';
+import { registerEventRoutes } from './routes/events.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
+import { registerMyTicketsRoutes } from './routes/my-tickets.js';
 import { registerQueueRoutes } from './routes/queue.js';
 import { registerRateLimitHook } from './routes/rate-limit.js';
 import { registerReservationRoutes } from './routes/reservations.js';
+import { registerSeatMarkRoutes } from './routes/seat-marks.js';
+import { registerSeatmapRoutes } from './routes/seatmap.js';
 import { registerWebhookRoutes } from './routes/webhooks.js';
 import { shutdownTracing } from './instrumentation.js';
 import { createStripeClient } from './services/stripe-client.js';
@@ -157,12 +162,16 @@ function registerRoutes(
   stripe: ReturnType<typeof createStripeClient>,
   logger: Logger,
 ): void {
+  registerCors(app);
   registerHealthRoutes(app);
   registerMetricsRoutes(app, registry);
   registerErrorHandler(app);
   registerRateLimitHook(app, deps.redis, deps.rateLimitPerSecond, logger);
+  registerEventRoutes(app, { shardPools: deps.shardPools, logger });
+  registerSeatmapRoutes(app, { shardPools: deps.shardPools, redis: deps.redis, logger });
   registerQueueRoutes(app, deps);
   registerReservationRoutes(app, deps);
+  registerSeatMarkRoutes(app, deps);
   registerCheckoutRoutes(
     app,
     {
@@ -177,6 +186,7 @@ function registerRoutes(
     },
     deps.auth0Verifier,
   );
+  registerMyTicketsRoutes(app, { shardPools: deps.shardPools, logger }, deps.auth0Verifier);
   registerWebhookRoutes(app, {
     shardPools: deps.shardPools,
     stripe,

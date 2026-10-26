@@ -58,6 +58,19 @@ export default tseslint.config(
       'import/resolver': {
         typescript: true,
       },
+      // Utan detta defaultar root-path till `process.cwd()` VID LINT-
+      // TILLFÄLLET, inte till repo-roten — och eftersom varje paket kör
+      // sitt eget "eslint ." (package.json:s "lint"-skript, det CI
+      // faktiskt anropar via `turbo run lint`), blir cwd t.ex.
+      // "services/booking-api" i stället för repo-roten. Mönstren nedan
+      // ("services/*/src/controllers/**") matchar då aldrig något alls
+      // — "pnpm lint" passerar grönt oavsett om ett lagerbrott finns,
+      // obemärkt eftersom noll fel ser likadant ut som "inga brott" och
+      // "ingenting bevakas" (samma klass bugg som importresolvern ovan,
+      // hittat under Fas 5-reviewn). En absolut sökväg görs aldrig om
+      // mot cwd (node:path.resolve returnerar en redan absolut sökväg
+      // oförändrad), så detta gäller oavsett varifrån eslint körs.
+      'boundaries/root-path': import.meta.dirname,
       'boundaries/elements': [
         { type: 'routes', pattern: 'services/*/src/routes/**' },
         { type: 'controllers', pattern: 'services/*/src/controllers/**' },

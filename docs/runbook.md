@@ -126,9 +126,25 @@ dem misslyckas "Create/update app secrets"-steget:
 - `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` — från Auth0-tenanten (docs/plan.md "Auth").
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — från Stripes testläge (docs/plan.md "Betalning").
 - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_BUCKET` — Fas 4,
-  se "Backup-lagring: Cloudflare R2" nedan.
+  se "Backup-lagring: Cloudflare R2" nedan. Återanvänds i Fas 5 av
+  `deploy-frontend`-jobbet för att ladda upp PWA:ns statiska filer till
+  samma bucket, under prefixet `frontend/` (medvetet val — se docs/plan.md
+  "Fas 5 — kända luckor": en egen bucket vore renare men är inte
+  prioriterat).
 
-Lägg till dem under repots **Settings → Secrets and variables →
+**Fas 5 — en till secret:** `AUTH0_WEB_CLIENT_ID` — Client ID för en
+**Single Page Application**-typ Auth0-"Application" (skild från Grafanas
+och från ett ev. M2M-konto till scanner-appen senare), skapad så:
+
+1. Auth0 dashboard → **Applications → Create Application → Single Page
+   Application**, namn t.ex. "Tickets Web". SPA-klienter har inget
+   client secret — bara Client ID behövs.
+2. **Allowed Callback URLs / Allowed Logout URLs / Allowed Web Origins:**
+   `https://tikknet.se` (lägg till `http://localhost:5173` också om du
+   vill kunna logga in mot samma Auth0-app från lokal dev).
+3. Kopiera **Client ID** → GitHub repo-secret `AUTH0_WEB_CLIENT_ID`.
+
+Lägg till alla secrets under repots **Settings → Secrets and variables →
 Actions → New repository secret**, med exakt dessa namn. `QUEUE_TOKEN_SECRET`,
 `QR_TOKEN_SECRET` och payment-mocks webhook-hemlighet behöver INGEN
 GitHub-secret — de genereras en gång av workflowen själv och lever bara

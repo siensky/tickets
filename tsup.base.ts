@@ -30,6 +30,7 @@ import type { Options } from 'tsup';
  */
 export const EXTERNAL_NPM_PACKAGES = [
   'fastify',
+  '@fastify/cors',
   '@fastify/websocket',
   'ws',
   'pino',

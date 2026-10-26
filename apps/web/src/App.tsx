@@ -1,15 +1,35 @@
 import type { JSX } from 'react';
+import { Link, Route, Routes } from 'react-router-dom';
+import { CheckoutCancelPage, CheckoutSuccessPage } from './routes/CheckoutResultPage.js';
+import { EventPage } from './routes/EventPage.js';
+import { EventsListPage } from './routes/EventsListPage.js';
+import { MyTicketsPage } from './routes/MyTicketsPage.js';
+import { ReservationPage } from './routes/ReservationPage.js';
+import { SeatmapPage } from './routes/SeatmapPage.js';
 
 /**
- * Root component. Routing (events, waiting room, seat map, checkout,
- * my tickets) is built out in Fas 5 — this is the bootable shell that
- * proves the toolchain (React 19, TanStack Query, Vite) works end to end.
+ * Root component (docs/plan.md "Domän och användarflöde"): välj
+ * evenemang → väntrum → arenakarta → reservation → (inloggning +)
+ * betalning, plus "mina biljetter" oberoende av flödet.
  */
 export function App(): JSX.Element {
   return (
-    <main>
-      <h1>Tickets</h1>
-      <p>Skeleton — bokningsflödet byggs i Fas 5 (se docs/plan.md).</p>
-    </main>
+    <>
+      <nav>
+        <Link to="/">Evenemang</Link> | <Link to="/my-tickets">Mina biljetter</Link>
+      </nav>
+      <Routes>
+        <Route path="/" element={<EventsListPage />} />
+        <Route path="/events/:eventId" element={<EventPage />} />
+        <Route path="/events/:eventId/seatmap" element={<SeatmapPage />} />
+        <Route
+          path="/events/:eventId/reservations/:reservationId"
+          element={<ReservationPage />}
+        />
+        <Route path="/my-tickets" element={<MyTicketsPage />} />
+        <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
+        <Route path="/checkout/cancel" element={<CheckoutCancelPage />} />
+      </Routes>
+    </>
   );
 }

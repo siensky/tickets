@@ -30,8 +30,12 @@ jobs:
   test:
     uses: ./.github/workflows/test.yml
 
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+    secrets: inherit
+
   build-and-push:
-    needs: test
+    needs: [test, e2e]
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.sha.outputs.short }}
@@ -125,6 +129,57 @@ jobs:
             ${{ env.IMAGE_BASE }}/migrations:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # docs/plan.md "Fas 5 — kända luckor": PWA:ns statiska filer delar
+  # medvetet R2-bucketen med databas-backuperna (backup-r2-credentials,
+  # prefix "frontend/" i stället för en egen bucket) — en egen bucket
+  # vore renare men är inte prioriterat, flaggat i muntligt försvar som
+  # en förbättring. `sync`, inte `copy`: gamla hashade asset-filer från
+  # föregående build ska försvinna, inte samlas på hög i all evighet.
+  deploy-frontend:
+    needs: [test, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the web app
+        env:
+          VITE_API_BASE_URL: https://api.tikknet.se
+          # realtime-gateway har ÄNNU INGEN egen ingress
+          # (infra/k8s/base/realtime-gateway saknar ingress.yaml, ett
+          # eget fynd under Fas 5 — se docs/plan.md "kända luckor").
+          # Satt till den tilltänkta adressen; WS kopplar inte upp förrän
+          # den routningen finns, men det är redan hanterat —
+          # useQueueSocket är bara en optimering, resten av appen
+          # fungerar via REST-pollning utan den.
+          VITE_WS_BASE_URL: wss://api.tikknet.se
+          VITE_AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
+          VITE_AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
+          VITE_AUTH0_CLIENT_ID: ${{ secrets.AUTH0_WEB_CLIENT_ID }}
+        run: pnpm --filter @tickets/web run build
+
+      - name: Upload static files to R2
+        run: |
+          docker run --rm -v "$PWD/apps/web/dist:/data" \
+            -e RCLONE_CONFIG_R2_TYPE=s3 \
+            -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+            -e RCLONE_CONFIG_R2_ENV_AUTH=false \
+            -e RCLONE_CONFIG_R2_ACCESS_KEY_ID="${{ secrets.R2_ACCESS_KEY_ID }}" \
+            -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="${{ secrets.R2_SECRET_ACCESS_KEY }}" \
+            -e RCLONE_CONFIG_R2_ENDPOINT="${{ secrets.R2_ENDPOINT }}" \
+            rclone/rclone:1.75.2 sync /data "r2:${{ secrets.R2_BUCKET }}/frontend/"
 
   deploy:
     needs: build-and-push

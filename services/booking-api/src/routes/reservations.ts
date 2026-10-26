@@ -28,7 +28,10 @@ export function registerReservationRoutes(
 
   app.post('/events/:eventId/reservations', {
     preHandler: requireAdmitted,
-    handler: createCreateReservationHandler(deps.shardPools),
+    handler: createCreateReservationHandler(deps.shardPools, {
+      redis: deps.redis,
+      logger: deps.logger,
+    }),
   });
   app.get('/events/:eventId/reservations/:reservationId', {
     preHandler: requireQueueToken,

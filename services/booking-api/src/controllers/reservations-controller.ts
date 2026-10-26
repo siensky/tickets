@@ -11,6 +11,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { readRequiredHeader } from './http-headers.js';
 import { getReservationForQueueToken, reserveSeats } from '../services/reservation-service.js';
+import { notifySeatsTaken, type SeatMarkServiceDeps } from '../services/seat-mark-service.js';
 
 const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
 const reservationRouteParamsSchema = z
@@ -23,7 +24,10 @@ export function readIdempotencyKey(request: FastifyRequest): string {
   });
 }
 
-export function createCreateReservationHandler(shardPools: ShardPools) {
+export function createCreateReservationHandler(
+  shardPools: ShardPools,
+  seatMarkDeps: SeatMarkServiceDeps,
+) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const bodyResult = createReservationRequestSchema.safeParse(request.body);
     if (!bodyResult.success) {
@@ -44,6 +48,14 @@ export function createCreateReservationHandler(shardPools: ShardPools) {
       seatIds: bodyResult.data.seatIds,
       queueTokenId: queueAuth.queueTokenId,
       idempotencyKey: readIdempotencyKey(request),
+    });
+    // Best-effort — docs/plan.md "din stol togs": notifiera alla andra
+    // kötoken som hade något av dessa stolar markerat. Får aldrig fälla
+    // detta svar, reservationen är redan committad.
+    await notifySeatsTaken(seatMarkDeps, {
+      eventId: queueAuth.eventId,
+      seatIds: result.seatIds,
+      takenByQueueTokenId: queueAuth.queueTokenId,
     });
     reply.code(201).send(result);
   };

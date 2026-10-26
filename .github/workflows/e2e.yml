@@ -1,0 +1,220 @@
+name: E2E
+
+# Återanvänds av ci.yml, precis som test.yml (docs/rules.md §8:
+# "Unit-, integrations- och e2e-tester i pipelinen", docs/plan.md
+# fasplan Fas 5: "G: e2e i pipeline").
+#
+# Startar Postgres + Redis + RabbitMQ + payment-mock via SAMMA
+# docker-compose.yml/tjänster som lokal utveckling redan använder,
+# migrerar båda shardarna med shared/db/scripts/migrate-all-shards.sh
+# (samma skript som en riktig deploy kör), seedar en fast
+# testdatafixture (tests/e2e/seed.ts), bygger och startar booking-api +
+# scheduler-worker + payment-mock + webappen, och kör sedan Playwright
+# mot dem — inklusive en RIKTIG Auth0-inloggning (ett dedikerat
+# testkonto, docs/runbook.md "Nödvändiga GitHub Actions-secrets") och en
+# betalning mot payment-mock (aldrig riktiga Stripe).
+#
+# RabbitMQ + scheduler-worker MÅSTE vara igång, även fast svaret läses
+# via GET /me/tickets (REST), inte ett AMQP-meddelande direkt: webhooken
+# skriver bara till outbox-tabellen, det är scheduler-workers
+# outbox-relay som publicerar den till RabbitMQ, och booking-apis egen
+# konsument (startPaymentConsumerWithRetry) som faktiskt myntar
+# biljetterna och flippar ordern till "paid". Utan båda stannar varje
+# order på "pending" för alltid — hittat live (en tidigare version av
+# denna kommentar antog felaktigt att RabbitMQ kunde hoppas över här).
+on:
+  workflow_call:
+    secrets:
+      AUTH0_DOMAIN:
+        required: true
+      AUTH0_AUDIENCE:
+        required: true
+      AUTH0_WEB_CLIENT_ID:
+        required: true
+      AUTH0_TEST_USER_EMAIL:
+        required: true
+      AUTH0_TEST_USER_PASSWORD:
+        required: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL_SHARD_0: postgresql://postgres:postgres@localhost:5432/tickets
+      DATABASE_URL_SHARD_1: postgresql://postgres:postgres@localhost:5452/tickets
+      REDIS_URL: redis://localhost:6379
+      E2E_REDIS_URL: redis://localhost:6379
+      QUEUE_TOKEN_SECRET: e2e-test-queue-token-secret-at-least-32-bytes!!
+      RATE_LIMIT_PER_SECOND: '1000'
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
+      AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
+      # Aldrig riktiga Stripe — pekas om mot payment-mock nedan, samma
+      # mekanism som lasttestet använder (docs/plan.md "payment-mock för
+      # lasttest"). Delad hemlighet mellan booking-api och payment-mock,
+      # inte en riktig Stripe-webhook-hemlighet.
+      STRIPE_SECRET_KEY: sk_test_e2e_not_a_real_key
+      STRIPE_HOST: localhost
+      STRIPE_PORT: '3002'
+      STRIPE_WEBHOOK_SECRET: whsec_e2e_shared_with_payment_mock
+      QR_TOKEN_SECRET: e2e-test-qr-token-secret
+      BOOKING_API_PORT: '3000'
+      BOOKING_API_WEBHOOK_URL: http://localhost:3000/webhooks/stripe
+      PAYMENT_MOCK_PORT: '3002'
+      # Deterministiskt i CI — inget slumpat kaos (docs/plan.md
+      # "payment-mock för lasttest" beskriver kaoset, men det hör till
+      # LASTTESTET, inte till detta funktionstest).
+      PAYMENT_MOCK_FAILURE_RATE: '0'
+      PAYMENT_MOCK_DUPLICATE_WEBHOOK_RATE: '0'
+      PAYMENT_MOCK_LATE_WEBHOOK_RATE: '0'
+      PAYMENT_MOCK_LATENCY_MIN_MS: '50'
+      PAYMENT_MOCK_LATENCY_MAX_MS: '500'
+      VITE_API_BASE_URL: http://localhost:3000
+      VITE_AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
+      VITE_AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
+      VITE_AUTH0_CLIENT_ID: ${{ secrets.AUTH0_WEB_CLIENT_ID }}
+      E2E_BASE_URL: http://localhost:5173
+      E2E_AUTH0_TEST_USER_EMAIL: ${{ secrets.AUTH0_TEST_USER_EMAIL }}
+      E2E_AUTH0_TEST_USER_PASSWORD: ${{ secrets.AUTH0_TEST_USER_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start Postgres + Redis + RabbitMQ
+        run: docker compose up -d postgres-shard-0 postgres-shard-1 redis rabbitmq
+
+      - name: Wait for Postgres + Redis + RabbitMQ to report healthy
+        # RabbitMQs healthcheck (docker-compose.yml) kan ta betydligt
+        # längre än Postgres/Redis — 10s interval × 10 försök i värsta
+        # fall, därför fler varv här än de 30 × 2s som räckte innan.
+        run: |
+          for i in $(seq 1 60); do
+            s0=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q postgres-shard-0)")
+            s1=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q postgres-shard-1)")
+            sr=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q redis)")
+            sm=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q rabbitmq)")
+            if [ "$s0" = "healthy" ] && [ "$s1" = "healthy" ] && [ "$sr" = "healthy" ] && [ "$sm" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres/Redis/RabbitMQ never became healthy" >&2
+          exit 1
+
+      - name: Run migrations against both shards
+        run: bash shared/db/scripts/migrate-all-shards.sh
+
+      - name: Seed e2e fixture data
+        run: pnpm --filter @tickets/e2e-tests run seed
+
+      - name: Install Playwright's browser
+        run: pnpm --filter @tickets/e2e-tests exec playwright install --with-deps chromium
+
+      - name: Build booking-api
+        run: pnpm --filter @tickets/booking-api run build
+
+      - name: Start booking-api in the background
+        run: |
+          node --import ./services/booking-api/dist/instrumentation.js \
+            ./services/booking-api/dist/index.js > booking-api.log 2>&1 &
+
+      - name: Wait for booking-api to report ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health/ready > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat booking-api.log >&2
+          echo "booking-api never became ready" >&2
+          exit 1
+
+      - name: Build payment-mock
+        run: pnpm --filter @tickets/payment-mock run build
+
+      - name: Start payment-mock in the background
+        run: |
+          node --import ./services/payment-mock/dist/instrumentation.js \
+            ./services/payment-mock/dist/index.js > payment-mock.log 2>&1 &
+
+      - name: Wait for payment-mock to report ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3002/health/ready > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat payment-mock.log >&2
+          echo "payment-mock never became ready" >&2
+          exit 1
+
+      - name: Build scheduler-worker
+        run: pnpm --filter @tickets/scheduler-worker run build
+
+      - name: Start scheduler-worker in the background
+        # Äger outbox-relayen — utan den körande kommer webhookens
+        # outbox-rad aldrig publiceras till RabbitMQ, och ordern stannar
+        # på "pending" oavsett hur länge testet väntar.
+        run: |
+          node --import ./services/scheduler-worker/dist/instrumentation.js \
+            ./services/scheduler-worker/dist/index.js > scheduler-worker.log 2>&1 &
+
+      - name: Wait for scheduler-worker to report ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3010/health/ready > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat scheduler-worker.log >&2
+          echo "scheduler-worker never became ready" >&2
+          exit 1
+
+      - name: Build the web app
+        run: pnpm --filter @tickets/web run build
+
+      - name: Start the web app in the background
+        # Porten sätts i package.json:s "preview"-skript, inte här: pnpm
+        # forwardar inte "-- --port 5173" rent till Vite (ekar det som
+        # "vite preview -- --port 5173", och Vite ignorerar allt efter
+        # det extra "--" tyst och faller tillbaka på sin egen default
+        # 4173) — verifierat orsaken till att detta jobb failade live.
+        run: pnpm --filter @tickets/web run preview > web.log 2>&1 &
+
+      - name: Wait for the web app to respond
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5173 > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat web.log >&2
+          echo "web app never became ready" >&2
+          exit 1
+
+      - name: Run the e2e suite
+        run: pnpm --filter @tickets/e2e-tests run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          # Playwrights DEFAULT utdatakatalog är "test-results/" (traces,
+          # skärmdumpar, error-context.md) — "playwright-report/" skapas
+          # bara av HTML-reportern, som inte är konfigurerad här. Fel
+          # sökväg hittat live: varnade "No files were found" på varje
+          # misslyckad körning, så ingen trace gick att hämta efteråt.
+          path: tests/e2e/test-results/
+          retention-days: 7
+
+      - name: Stop background services
+        if: always()
+        run: docker compose down -v
