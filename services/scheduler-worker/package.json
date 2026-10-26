@@ -14,7 +14,8 @@
     "reset-sale": "tsx src/scripts/reset-sale.ts",
     "generate-sale-report": "tsx src/scripts/generate-sale-report.ts",
     "seed-demo-events": "tsx src/scripts/seed-demo-events.ts",
-    "import-tickets": "tsx src/scripts/import-tickets.ts"
+    "import-tickets": "tsx src/scripts/import-tickets.ts",
+    "seed-real-venue": "tsx src/scripts/seed-real-venue.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "1.10.0",
