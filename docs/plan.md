@@ -926,6 +926,19 @@ Fas 3/5):
 - **realtime-gatewayens minnesrequest (320Mi, upp från 256Mi) och
   HPA-tröskeln är en ouppmätt uppskattning** (deployment.yaml/hpa.yaml)
   — mät faktisk RSS i vila vid första riktiga deploy.
+- **CSV-biljettimporten (se "Import av biljettnummer (CSV)" ovan) är nu
+  byggd** — `services/scheduler-worker/src/scripts/import-tickets.ts`,
+  byggd på en EGEN liten gren efter Fas 6, inte en del av den
+  ursprungliga leveransen. Två antaganden som INTE ges av uppgiften
+  (bekräftat med användaren att den riktiga filens format är okänt):
+  (1) CSV:n antas vara EN kolumn (`ticket_number` per rad), utan
+  sektion/rad/plats — paras ihop positionellt mot venuets befintliga
+  `venue_seats` i en fixerad ordning. Anger den riktiga filen i stället
+  sektion/rad/plats per biljettnummer måste ihopparningen bytas ut. (2)
+  Inget skript seedar ännu den "riktiga" venuens 5 000 `venue_seats`
+  själv (bara 30-sätes demo-venuen i seed-demo-events.ts) — det är ett
+  separat, ännu obyggt steg före importen kan köras mot ett riktigt
+  event.
 
 **Flyttat till efter inlämningen:** scanner-appen (Expo) · proof of work + Turnstile ·
 PostHog + session replay · ArgoCD + Sealed Secrets · Tempo-backend · DLQ med adminvy ·

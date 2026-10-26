@@ -3,6 +3,36 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## CSV-biljettimport (egen liten gren, efter Fas 6)
+
+Byggd på `feature/csv-ticket-import` (inte `feature/fas6`/`main` direkt, på
+uttrycklig begäran): `services/scheduler-worker/src/scripts/import-tickets.ts` +
+`src/repositories/csv-ticket-import-repository.ts`. Läser en CSV, validerar
+exakt 5 000 rader/inga dubbletter/inget annat separatortecken än radbrytning,
+`INSERT ... ON CONFLICT (event_id, ticket_number) DO NOTHING` — idempotent, och
+en omkörning som skulle skriva ANNAN data (annat pris, annan venue) avbryts nu
+explicit i stället för att tyst rapportera "0 nya" (hittat i review, se nedan).
+
+Den riktiga uppgiftens CSV-format är okänt (bekräftat med användaren) — skriptet
+antar en kolumn (`ticket_number` per rad) och parar ihop raderna POSITIONELLT,
+i filordning, mot venuets `venue_seats` i en fixerad ordning (sektion →
+`display_order`/id → rad (text, lexikografisk) → platsnummer/id). Dokumenterat
+som ett antagande i skriptets egen header, inte en bekräftad sanning. INGET
+skript seedar ännu en "riktig" 5 000-sätes venue — bara 30-sätes demo-venuen
+(seed-demo-events.ts) finns. Se docs/plan.md "Fas 6 — kända luckor".
+
+Reviewad av en oberoende subagent (code-safety-reviewer): inga Kritiska/Höga
+fynd. Fixat: för löst separatorval (bara komma kollades, inte `;`/citat),
+icke-deterministisk sekvensordning (display_order saknade tie-breaker),
+`as`-cast utan kommentar (§2), `main()` nära 50-radersgränsen (extraherat),
+`parsePriceCents` accepterade `1e3`/hex/decimaler och saknade övre gräns,
+`eventId` normaliserades inte (case/format). Manuellt end-to-end-testat mot en
+riktig lokal Postgres (docker-compose): happy path, omkörning (idempotent),
+fel radantal, dubblett, fel separator, obefintligt event, pris 0,
+venue-storleksmismatch (1 säte ist. för 5000) — alla gav tydliga, korrekta fel.
+Typecheck/lint/boundaries/secret-namespaces gröna. INTE körd mot ett riktigt
+kluster (samma Tailscale-begränsning som resten av Fas 6).
+
 ## Läget efter Fas 6
 
 **Grafana byggdes ut EFTER den initiala Fas 6-leveransen, på uttrycklig begäran**

@@ -8,8 +8,8 @@
  * redan byggda bokningsflödet"), inte bara ett utställningsfönster.
  *
  * Idempotent: fasta UUID:er, `ON CONFLICT DO NOTHING` — körs en gång,
- * ofarligt att köra om (samma princip som den (ännu obyggda) CSV-
- * importen, docs/plan.md "Databas").
+ * ofarligt att köra om (samma princip som CSV-importen,
+ * scripts/import-tickets.ts, docs/plan.md "Databas").
  *
  * Eventen (sharded) och deras `seats` skrivs bara till DEN shard
  * eventet faktiskt hashar till (`getPoolForEvent`) — till skillnad från

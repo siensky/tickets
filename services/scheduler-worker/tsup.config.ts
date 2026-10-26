@@ -6,5 +6,6 @@ export default defineConfig(
     'src/scripts/reset-sale.ts',
     'src/scripts/generate-sale-report.ts',
     'src/scripts/seed-demo-events.ts',
+    'src/scripts/import-tickets.ts',
   ]),
 );
