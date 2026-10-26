@@ -4,19 +4,24 @@ name: E2E
 # "Unit-, integrations- och e2e-tester i pipelinen", docs/plan.md
 # fasplan Fas 5: "G: e2e i pipeline").
 #
-# Startar Postgres + Redis + payment-mock via SAMMA docker-compose.yml/
-# tjänster som lokal utveckling redan använder, migrerar båda shardarna
-# med shared/db/scripts/migrate-all-shards.sh (samma skript som en
-# riktig deploy kör), seedar en fast testdatafixture (tests/e2e/seed.ts),
-# bygger och startar booking-api + payment-mock + webappen, och kör
-# sedan Playwright mot dem — inklusive en RIKTIG Auth0-inloggning (ett
-# dedikerat testkonto, docs/runbook.md "Nödvändiga GitHub
-# Actions-secrets") och en betalning mot payment-mock (aldrig riktiga
-# Stripe). RabbitMQ startas INTE — booking-apis konsument kopplar i
-# bakgrunden med backoff och blockerar aldrig `app.listen` (se
-# services/booking-api/src/index.ts:startPaymentConsumerWithRetry); den
-# behövs inte för detta flödet, som läser "mina biljetter" direkt via
-# GET /me/tickets i stället för att vänta på ett AMQP-meddelande.
+# Startar Postgres + Redis + RabbitMQ + payment-mock via SAMMA
+# docker-compose.yml/tjänster som lokal utveckling redan använder,
+# migrerar båda shardarna med shared/db/scripts/migrate-all-shards.sh
+# (samma skript som en riktig deploy kör), seedar en fast
+# testdatafixture (tests/e2e/seed.ts), bygger och startar booking-api +
+# scheduler-worker + payment-mock + webappen, och kör sedan Playwright
+# mot dem — inklusive en RIKTIG Auth0-inloggning (ett dedikerat
+# testkonto, docs/runbook.md "Nödvändiga GitHub Actions-secrets") och en
+# betalning mot payment-mock (aldrig riktiga Stripe).
+#
+# RabbitMQ + scheduler-worker MÅSTE vara igång, även fast svaret läses
+# via GET /me/tickets (REST), inte ett AMQP-meddelande direkt: webhooken
+# skriver bara till outbox-tabellen, det är scheduler-workers
+# outbox-relay som publicerar den till RabbitMQ, och booking-apis egen
+# konsument (startPaymentConsumerWithRetry) som faktiskt myntar
+# biljetterna och flippar ordern till "paid". Utan båda stannar varje
+# order på "pending" för alltid — hittat live (en tidigare version av
+# denna kommentar antog felaktigt att RabbitMQ kunde hoppas över här).
 on:
   workflow_call:
     secrets:
@@ -86,21 +91,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Start Postgres + Redis
-        run: docker compose up -d postgres-shard-0 postgres-shard-1 redis
+      - name: Start Postgres + Redis + RabbitMQ
+        run: docker compose up -d postgres-shard-0 postgres-shard-1 redis rabbitmq
 
-      - name: Wait for Postgres + Redis to report healthy
+      - name: Wait for Postgres + Redis + RabbitMQ to report healthy
+        # RabbitMQs healthcheck (docker-compose.yml) kan ta betydligt
+        # längre än Postgres/Redis — 10s interval × 10 försök i värsta
+        # fall, därför fler varv här än de 30 × 2s som räckte innan.
         run: |
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             s0=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q postgres-shard-0)")
             s1=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q postgres-shard-1)")
             sr=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q redis)")
-            if [ "$s0" = "healthy" ] && [ "$s1" = "healthy" ] && [ "$sr" = "healthy" ]; then
+            sm=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q rabbitmq)")
+            if [ "$s0" = "healthy" ] && [ "$s1" = "healthy" ] && [ "$sr" = "healthy" ] && [ "$sm" = "healthy" ]; then
               exit 0
             fi
             sleep 2
           done
-          echo "Postgres/Redis never became healthy" >&2
+          echo "Postgres/Redis/RabbitMQ never became healthy" >&2
           exit 1
 
       - name: Run migrations against both shards
@@ -146,6 +155,27 @@ jobs:
           done
           cat payment-mock.log >&2
           echo "payment-mock never became ready" >&2
+          exit 1
+
+      - name: Build scheduler-worker
+        run: pnpm --filter @tickets/scheduler-worker run build
+
+      - name: Start scheduler-worker in the background
+        # Äger outbox-relayen — utan den körande kommer webhookens
+        # outbox-rad aldrig publiceras till RabbitMQ, och ordern stannar
+        # på "pending" oavsett hur länge testet väntar.
+        run: |
+          node --import ./services/scheduler-worker/dist/instrumentation.js \
+            ./services/scheduler-worker/dist/index.js > scheduler-worker.log 2>&1 &
+
+      - name: Wait for scheduler-worker to report ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3010/health/ready > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat scheduler-worker.log >&2
+          echo "scheduler-worker never became ready" >&2
           exit 1
 
       - name: Build the web app

@@ -147,6 +147,11 @@ test('bokar en plats, loggar in och betalar: hela flödet fram till biljetten', 
   await expect(page.getByRole('heading', { name: 'E2E Concert' })).toBeVisible({
     timeout: 20_000, // webhook-leveransen har sin egen latens (PAYMENT_MOCK_LATENCY_MAX_MS)
   });
-  await expect(page.getByText('Status: paid')).toBeVisible();
+  // Ordern hinner visas som "pending" innan hela betalningspipen (webhook
+  // → outbox → RabbitMQ → booking-apis konsument) hunnit flippa den till
+  // "paid" — sidan pollar nu om (MyTicketsPage.tsx), men det tar fler
+  // sekunder än defaultens 5000ms. Hittat live: utan både pollingen OCH
+  // den här förlängda timeouten fastnade testet på "pending" varje gång.
+  await expect(page.getByText('Status: paid')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/Rad A, plats 1 — valid/)).toBeVisible();
 });

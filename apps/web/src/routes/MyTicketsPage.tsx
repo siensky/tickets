@@ -24,6 +24,16 @@ export function MyTicketsPage(): JSX.Element {
       return listMyTickets(accessToken);
     },
     enabled: isAuthenticated,
+    // Betalningen bekräftas asynkront (webhook → outbox → RabbitMQ →
+    // booking-apis konsument, se e2e.yml) efter att webbläsaren redan
+    // navigerat hit — utan polling fastnar sidan på "pending" för gott,
+    // även om ordern blir "paid" i databasen sekunder senare. Hittat
+    // live: e2e-testet fastnade alltid här, oavsett hur snabbt
+    // betalningspipen faktiskt var, eftersom sidan bara hämtade en gång.
+    refetchInterval: (query) =>
+      query.state.data?.orders.some((order) => order.status === 'pending') === true
+        ? 2000
+        : false,
   });
 
   if (!isAuth0Configured) {
