@@ -3,6 +3,49 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Riktig lasttestkörning, första försöket (efter Fas 6)
+
+`seed-real-venue.ts` (ny, samma mönster som seed-demo-events.ts/
+csv-ticket-import-repository.ts) byggdes och pushades direkt till `main`
+(på uttrycklig begäran, undantag från den annars gällande regeln att
+användaren alltid committar/pushar själv) för att lösa det kvarstående
+gapet: inget skript skapade en "riktig" 5 000-sätes venue innan
+CSV-importen kunde köras mot ett riktigt event.
+
+**Hittat live under den första riktiga körningen mot klustret:**
+`infra/terraform/cloud-init/loadgen.yaml.tftpl` installerade `curl`/
+`gnupg` men inte `dirmngr` — `gpg --keyserver ... --recv-keys` kan då
+inte nå en keyserver alls (`can't connect to the dirmngr`), k6:s
+apt-nyckel importerades aldrig, repot avvisades som osignerat, och
+`apt-get install k6` floppade med "Unable to locate package k6" på
+ALLA TRE lastgeneratorerna i samma körning. Fixat: `dirmngr` tillagd i
+`packages:`. De tre redan uppe VM:erna fick k6 installerat manuellt via
+SSH (apt-get install dirmngr + om-körd gpg/apt-get-sekvens) i stället
+för att vänta på en ny `terraform apply`/omstart.
+
+**Också hittat:** att `terraform apply -var="loadgen_node_count=3"`
+(utan `-target`) planerade om att ERSÄTTA `control_plane`/`workers[0]`
+(`user_data` "forces replacement") — nästan säkert eftersom
+`TF_VAR_tailscale_node_authkey` i den aktuella terminalsessionen skiljer
+sig från vad som bakades in i noden vid dess senaste skapande (ingen
+default, sätts bara via env var, se `variables.tf`). Löst genom att
+ALDRIG köra den fulla planen, bara `-target=hcloud_server.loadgen
+-target=hcloud_firewall.loadgen` (DNS-posten för `loadtest.tikknet.se`
+uteslöts medvetet, eftersom dess `for_each` drar in nodernas IP:n som
+beroende och därmed drar in hela ersättningsplanen igen) — pekade i
+stället `loadtest.tikknet.se` mot `control_plane`s publika IP via
+`/etc/hosts` på varje generator-VM, eftersom Ingress/TLS-certet för det
+hostnamnet redan fanns sedan deploy. Samma mekanism (env-var-drift på
+`tailscale_node_authkey`) förklarar troligen varför `tailscale status`
+visar fyra döda `tickets-cp-1-x`-enheter sedan tidigare — detta har
+hänt förut.
+
+**Separat:** `admin_ipv4_cidr` i `terraform.tfvars` var inaktuell (gammal
+IP), vilket gjorde att SSH mot både klustret och lastgeneratorerna
+tystnade helt (brandväggen släppte inte igenom, inget felmeddelande).
+Måste uppdateras varje gång den lokala maskinens publika IP ändras —
+inget skript bevakar detta.
+
 ## CSV-biljettimport (egen liten gren, efter Fas 6)
 
 Byggd på `feature/csv-ticket-import` (inte `feature/fas6`/`main` direkt, på

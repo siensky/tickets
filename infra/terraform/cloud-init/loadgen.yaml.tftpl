@@ -6,6 +6,11 @@ package_update: true
 packages:
   - curl
   - gnupg
+  # `gpg --keyserver` needs dirmngr to actually reach a keyserver — without
+  # it the k6 apt key never imports, the repo is rejected as unsigned, and
+  # `apt-get install k6` fails with "Unable to locate package k6" (hit live
+  # on all three generator VMs in one run, see docs/phase-status.md).
+  - dirmngr
 
 runcmd:
   # Samma motivering som cloud-init/k3s-server.yaml.tftpl (docs/plan.md
