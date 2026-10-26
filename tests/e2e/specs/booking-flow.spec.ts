@@ -106,7 +106,14 @@ async function reserveOneSeat(page: Page): Promise<void> {
   await expect(seatmapLink).toBeVisible({ timeout: 10_000 });
   await seatmapLink.click();
 
-  await page.getByRole('button', { name: 'A' }).click();
+  // `exact: true` krävs sedan Fas 6: utan den matchar Playwrights
+  // skiftlägesokänsliga DELSTRÄNGSmatchning även Navbar.tsx:s
+  // "Logga in"-knapp (som finns på ALLA sidor, "Logg[a] in" innehåller
+  // bokstaven "a") — en global nav-knapp med "a" i texten var alltid en
+  // landmina för en bar bokstavsselektor, den utlöstes bara aldrig förrän
+  // Fas 6:s navbar fanns. Hittat live: CI klickade fel knapp och hamnade
+  // på Auth0:s riktiga inloggningssida mitt i platsvalet.
+  await page.getByRole('button', { name: 'A', exact: true }).click();
   await page.getByRole('button', { name: /Rad A, plats 1/ }).click();
   await expect(page.getByText('1 av 5 stolar valda')).toBeVisible();
   await page.getByRole('button', { name: 'Gå vidare' }).click();
