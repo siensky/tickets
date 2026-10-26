@@ -16,6 +16,7 @@ import {
   type RedisClient,
 } from '@tickets/redis';
 import { createQueueTokenSecret, issueQueueToken } from '@tickets/auth';
+import type { BusinessMetrics } from '@tickets/observability';
 import { getQueueConfig, parsePositiveInteger } from '../repositories/config-repository.js';
 import { getEventSalesWindow } from '../repositories/events-repository.js';
 import type {
@@ -30,6 +31,7 @@ export interface QueueServiceDeps {
   readonly shardPools: ShardPools;
   readonly redis: RedisClient;
   readonly queueTokenSecret: ReturnType<typeof createQueueTokenSecret>;
+  readonly businessMetrics: BusinessMetrics;
 }
 
 // Cachar varje nyckel var för sig (docs/plan.md "Redis —
@@ -90,6 +92,9 @@ export async function joinQueue(
     config.sessionTotalMinutes * 60,
   );
   await joinWaitingRoom(deps.redis, input.eventId, issued.queueTokenId);
+  // docs/plan.md "Vad som mäts": insläppstakt/konverteringsgrad räknas
+  // i Grafana som en kvot mot den här nämnaren.
+  deps.businessMetrics.queueJoinsTotal.inc({ event_id: input.eventId });
 
   return { token: issued.token, eventId: input.eventId };
 }

@@ -10,7 +10,7 @@ import type { Logger } from '@tickets/observability';
 import { getEventById, listEvents } from '../repositories/events-repository.js';
 import { getVenueById, getVenuesByIds } from '../repositories/venues-repository.js';
 import { toEventSummary } from '../mappers/event-mapper.js';
-import type { EventRow, EventSummary } from '../types/event.js';
+import type { EventRow, EventsFilter, EventSummary } from '../types/event.js';
 
 export interface EventsServiceDeps {
   readonly shardPools: ShardPools;
@@ -28,9 +28,12 @@ export interface EventsServiceDeps {
  * being down degrades the listing to a partial result, not a 500 for
  * every event on the shard that's still healthy.
  */
-export async function listAllEvents(deps: EventsServiceDeps): Promise<EventSummary[]> {
+export async function listAllEvents(
+  deps: EventsServiceDeps,
+  filter: EventsFilter = {},
+): Promise<EventSummary[]> {
   const outcomes = await Promise.allSettled(
-    deps.shardPools.pools.map((pool) => listEvents(pool)),
+    deps.shardPools.pools.map((pool) => listEvents(pool, filter)),
   );
   const rows = outcomes.flatMap((outcome, shardIndex) => {
     if (outcome.status === 'rejected') {

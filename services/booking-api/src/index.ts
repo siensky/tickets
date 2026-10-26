@@ -11,13 +11,9 @@
  * connections, waits for in-flight requests to finish, then closes every
  * connection pool, before exiting.
  */
+import { closeShardPools } from '@tickets/db';
 import {
-  createAuth0Verifier,
-  createQueueTokenSecret,
-  type Auth0Verifier,
-} from '@tickets/auth';
-import { closeShardPools, createShardPools, type ShardPools } from '@tickets/db';
-import {
+  createBusinessMetrics,
   createHttpMetrics,
   createLogger,
   createOversellMetrics,
@@ -26,7 +22,7 @@ import {
   type Logger,
   type OversellMetrics,
 } from '@tickets/observability';
-import { closeRedisClient, createRedisClient, type RedisClient } from '@tickets/redis';
+import { closeRedisClient } from '@tickets/redis';
 import { connectConsumer, type RabbitConsumer } from '@tickets/rabbit';
 import { OUTBOX_EVENT_TYPES, OUTBOX_EXCHANGE } from '@tickets/domain';
 import { realpathSync } from 'node:fs';
@@ -38,6 +34,12 @@ import Fastify, {
   type RawRequestDefaultExpression,
   type RawServerDefault,
 } from 'fastify';
+import {
+  createStripeClientFromEnv,
+  loadDependencies,
+  requireEnv,
+  type Dependencies,
+} from './dependencies.js';
 import { registerCheckoutRoutes } from './routes/checkout.js';
 import { registerCors } from './routes/cors.js';
 import { registerErrorHandler } from './routes/error-handler.js';
@@ -91,70 +93,6 @@ function registerRedMetricsHook(app: FastifyApp, httpMetrics: HttpMetrics): void
   });
 }
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (value === undefined || value === '') {
-    throw new Error(`${name} must be set`);
-  }
-  return value;
-}
-
-interface Dependencies {
-  readonly shardPools: ShardPools;
-  readonly redis: RedisClient;
-  readonly logger: Logger;
-  readonly queueTokenSecret: ReturnType<typeof createQueueTokenSecret>;
-  readonly auth0Verifier: Auth0Verifier;
-  readonly stripeSecretKey: string;
-  readonly qrTokenSecret: string;
-  readonly paymentFrozenMinutes: number;
-  readonly successUrl: string;
-  readonly cancelUrl: string;
-  readonly rateLimitPerSecond: number;
-}
-
-/**
- * `STRIPE_HOST`/`STRIPE_PORT` är avsiktligt separata från
- * `STRIPE_SECRET_KEY` — tomma i produktion (riktiga Stripe), satta till
- * `payment-mock` under lasttest (docs/plan.md "payment-mock för
- * lasttest"). services/stripe-client.ts kräver ingen kod-ändring för
- * att peka om sig.
- */
-function createStripeClientFromEnv(secretKey: string): ReturnType<typeof createStripeClient> {
-  const host = process.env['STRIPE_HOST'];
-  const port = process.env['STRIPE_PORT'];
-  return createStripeClient({
-    secretKey,
-    host,
-    protocol: host === undefined ? undefined : 'http',
-    port: port === undefined ? undefined : Number(port),
-  });
-}
-
-function loadDependencies(logger: Logger): Dependencies {
-  const shardPools = createShardPools({
-    onShardError: (shardIndex, error) => {
-      logger.warn({ shardIndex, error }, 'shard connection error');
-    },
-  });
-  return {
-    shardPools,
-    logger,
-    redis: createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379'),
-    queueTokenSecret: createQueueTokenSecret(requireEnv('QUEUE_TOKEN_SECRET')),
-    auth0Verifier: createAuth0Verifier({
-      domain: requireEnv('AUTH0_DOMAIN'),
-      audience: requireEnv('AUTH0_AUDIENCE'),
-    }),
-    stripeSecretKey: requireEnv('STRIPE_SECRET_KEY'),
-    qrTokenSecret: requireEnv('QR_TOKEN_SECRET'),
-    paymentFrozenMinutes: Number(process.env['PAYMENT_FROZEN_MINUTES'] ?? 10),
-    successUrl: process.env['CHECKOUT_SUCCESS_URL'] ?? 'https://example.test/checkout/success',
-    cancelUrl: process.env['CHECKOUT_CANCEL_URL'] ?? 'https://example.test/checkout/cancel',
-    rateLimitPerSecond: Number(process.env['RATE_LIMIT_PER_SECOND'] ?? 50),
-  };
-}
-
 function registerRoutes(
   app: FastifyApp,
   registry: Parameters<typeof registerMetricsRoutes>[1],
@@ -166,7 +104,13 @@ function registerRoutes(
   registerHealthRoutes(app);
   registerMetricsRoutes(app, registry);
   registerErrorHandler(app);
-  registerRateLimitHook(app, deps.redis, deps.rateLimitPerSecond, logger);
+  registerRateLimitHook(
+    app,
+    deps.redis,
+    deps.rateLimitPerSecond,
+    logger,
+    deps.rateLimitAllowlistedIps,
+  );
   registerEventRoutes(app, { shardPools: deps.shardPools, logger });
   registerSeatmapRoutes(app, { shardPools: deps.shardPools, redis: deps.redis, logger });
   registerQueueRoutes(app, deps);
@@ -291,8 +235,9 @@ export async function start(): Promise<void> {
   const registry = createRegistry(SERVICE_NAME);
   const httpMetrics = createHttpMetrics(registry);
   const oversellMetrics = createOversellMetrics(registry);
+  const businessMetrics = createBusinessMetrics(registry);
   const app = createApp(logger);
-  const deps = loadDependencies(logger);
+  const deps = loadDependencies(logger, businessMetrics);
   const stripe = createStripeClientFromEnv(deps.stripeSecretKey);
 
   registerRoutes(app, registry, deps, stripe, logger);

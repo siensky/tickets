@@ -51,3 +51,18 @@ export function configCacheKey(key: string): string {
 export function wsChannel(queueTokenId: string): string {
   return `ws:${queueTokenId}`;
 }
+
+/**
+ * Mönstret EN podd `PSUBSCRIBE`:ar på för ALLA sina WS-klienter (Fas 6,
+ * Fas 3-reviewns notering) — se ws-subscriber-registry.ts i
+ * realtime-gateway, som dispatchar varje träff lokalt istället för att
+ * varje klient håller sin egen duplicerade Redis-anslutning.
+ */
+export function wsChannelPattern(): string {
+  return 'ws:*';
+}
+
+/** Motsatsen till wsChannel — plockar ut queueTokenId ur en kanal som matchade wsChannelPattern(). */
+export function queueTokenIdFromWsChannel(channel: string): string {
+  return channel.slice('ws:'.length);
+}

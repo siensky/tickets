@@ -1,0 +1,36 @@
+# docs/plan.md "Autoscaling": minnesbaserad, min 2, max 4.
+# "Nedskalning utlovas inte" (docs/plan.md) — Node återlämnar inte minne
+# till OS:et, så RSS stannar uppe efter toppen, och att skala ner en
+# WS-gateway dödar aktiva anslutningar. HPA:n finns ändå (VG kräver att
+# INSTANSANTALET skalar, upp räcker för det) — upp-och-NER demonstreras
+# på booking-api istället (docs/plan.md "Demomanus").
+#
+# 70 % mot `requests` (320Mi, deployment.yaml), samma 2×-förhållande
+# till `limits` (640Mi) som booking-apis CPU-mål — ingen siffra för
+# memory-tröskeln ges i docs/plan.md, så samma, redan motiverade
+# procentsats återanvänds här för konsekvens. Requesten höjdes i Fas 6-
+# reviewn (se deployment.yaml:s kommentar) specifikt för att 70 % inte
+# ska träffas direkt av en Node+OTel-process redan i vila — ändå
+# OVERIFIERAT mot en riktig podd.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: realtime-gateway
+  namespace: ticketing
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: realtime-gateway
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60

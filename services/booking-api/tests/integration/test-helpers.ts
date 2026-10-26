@@ -167,12 +167,24 @@ export async function seedVenueSeat(
 
 export async function seedEventForVenue(
   pool: Pool,
-  params: { eventId: string; venueId: string; title?: string },
+  params: {
+    eventId: string;
+    venueId: string;
+    title?: string;
+    artist?: string;
+    category?: string;
+  },
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO events (id, venue_id, title, artist, starts_at, sales_open_at, sales_close_at)
-     VALUES ($1, $2, $3, 'Test Artist', now() + interval '7 days', now() - interval '1 day', now() + interval '6 days')`,
-    [params.eventId, params.venueId, params.title ?? 'Test Event'],
+    `INSERT INTO events (id, venue_id, title, artist, category, starts_at, sales_open_at, sales_close_at)
+     VALUES ($1, $2, $3, $4, $5, now() + interval '7 days', now() - interval '1 day', now() + interval '6 days')`,
+    [
+      params.eventId,
+      params.venueId,
+      params.title ?? 'Test Event',
+      params.artist ?? 'Test Artist',
+      params.category ?? 'music',
+    ],
   );
 }
 

@@ -3,6 +3,125 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Läget efter Fas 6
+
+**Grafana byggdes ut EFTER den initiala Fas 6-leveransen, på uttrycklig begäran**
+(användaren frågade "kan jag se allt det här i Grafana?" efter rapporten): saknade
+tidigare helt en panel för replikantal/HPA-kurva, och de fyra affärsmåtten
+("aktiva reservationer, insläppstakt, sålda biljetter, konverteringsgrad",
+docs/plan.md "Vad som mäts") fanns fortfarande inte i koden (bara flaggat som en
+lucka sedan Fas 4). Nu: `shared/observability/src/metrics.ts`s `createBusinessMetrics`
+(`active_reservations`/`sold_tickets`/`waiting_room_depth` som Gauges — kan gå NER,
+till skillnad från Counters; `queue_joins_total`/`queue_admissions_total` som
+Counters). Satta från `services/booking-api/src/services/queue-service.ts` (join) och
+`services/scheduler-worker/src/services/queue-admission-service.ts` (ködjup,
+insläpp) samt en NY periodisk job `business-metrics-service.ts` (samma
+`setInterval`-mönster som reservation-release-service.ts, 5 s, `.reset()` före varje
+tick så en grupp som går till noll inte fastnar på sitt sista värde — GROUP BY
+returnerar inga rader för en tom grupp). SQL i en ny `repositories/
+business-metrics-repository.ts`. Två nya Grafana-dashboards/utökningar i
+`infra/k8s/base/monitoring/dashboards.yaml`: "Business" fick 5 nya paneler
+(ködjup, insläppstakt, aktiva reservationer, sålda biljetter vs. 5000-taket,
+konverteringsgrad), och en helt ny "Autoscaling & lasttest"-dashboard (replikkurva
+via `kube_deployment_status_replicas` — samma metrik för HPA OCH KEDA eftersom båda
+bara skalar den underliggande Deploymenten, HPA min/max per tjänst, CPU/minne per
+podd mot tröskel, podd-omstarter, nod-CPU/minne). Allt OVERIFIERAT mot ett riktigt
+kluster (samma Tailscale-begränsning). `services/booking-api/src/index.ts` passerade
+300-radersgränsen av tillägget — `Dependencies`/`loadDependencies`/`requireEnv`/
+`createStripeClientFromEnv` flyttade till en ny `dependencies.ts` i samma mapp.
+`eslint.config.js`s `service-root`-boundaries-typ vidgades från `index.ts` specifikt
+till `*.ts` (en ensam `*`, spänner inte `/`) för att täcka den nya filen OCH
+`instrumentation.ts` (fanns redan i alla fem tjänster, var tidigare obevakad av
+exakt samma skäl som `scripts/`-gapet ovan) — en policy för `service-root` → `service-root`
+lades till samtidigt (`index.ts` importerar nu från `dependencies.ts`).
+
+**Autoscaling byggt, inget uppmätt mot ett riktigt kluster** (samma gräns som Fas 4):
+HPA på booking-api (CPU 70 %) och realtime-gateway (minne 70 % av 320Mi — höjt från
+256Mi i reviewn, Node+OTel ligger ofta redan nära det i vila, ändå overifierat), KEDA
+`ScaledObject` + `TriggerAuthentication` på notification-worker (RabbitMQ-ködjup, se
+`infra/k8s/base/notification-worker/scaledobject.yaml` — `advanced.horizontalPodAutoscalerConfig.behavior`
+krävs explicit för att 60 s-nedskalningsfönstret faktiskt ska gälla, `cooldownPeriod`
+styr bara skala-till-0). **Viktigt upptäckt i reviewn:** `spec.replicas` TAS INTE MED i
+booking-api/realtime-gateway/notification-worker-deploymenterna längre — står det kvar
+skriver `kubectl apply` tillbaka ett statiskt tal över HPA:ns/KEDA:s löpande beslut vid
+VARJE deploy (inte bara en engångsdipp, som en nu rättad kommentar tidigare påstod
+baklänges).
+
+**Lasttest-infrastruktur byggd, ALDRIG körd** (ingen k6-binär eller kluster i
+byggmiljön): `tests/load/{smoke,queue-storm,normal-sale,spike-sale}.js` +
+`lib/{config,booking-flow}.js`, `deploy-under-load.js`/`shard-failure.js` återexporterar
+normal-sale. `queue-storm.js` använder en RIKTIG WebSocket (`k6/ws`) mot
+realtime-gateway — särskilt overifierad, smoke-testa den specifikt först.
+`queue_admission_rate_per_minute` MÅSTE höjas live (config-tabellen) innan
+normal-sale/spike-sale körs på riktigt, annars växer kön obegränsat (se kommentaren i
+normal-sale.js) — inget skript gör detta automatiskt. Terraform: `hcloud_server.loadgen`
+(egen brandvägg, `hcloud_firewall.loadgen` — en delad brandvägg med klustret hade gett
+en beroendecykel), `loadtest.<domän>`-DNS-posten är villkorad på `loadgen_node_count > 0`.
+Reset/rapport-skript: `services/scheduler-worker/src/scripts/{reset-sale,generate-sale-report,seed-demo-events}.ts`
+— ny mapp, `scripts` registrerad i `eslint.config.js`:s `boundaries/elements` (saknades
+helt innan reviewn, samma riskklass som den tidigare `boundaries/root-path`-regressionen).
+All SQL i den mappen flyttad till `repositories/sale-reset-repository.ts`/
+`sale-report-repository.ts` (docs/rules.md §4) — `reset-sale.ts` körde tidigare
+`BEGIN`/`COMMIT` via `Pool.query()` direkt, vilket INTE garanterar samma anslutning och
+alltså inte var en riktig transaktion; nu `pool.connect()` + en `PoolClient`.
+
+**realtime-gateway: en delad Redis-prenumeration per podd** (Fas 3-reviewns notering
+löst): `shared/redis/src/pubsub.ts`s `subscribeToChannelPrefix` (`PSUBSCRIBE ws:*`) +
+`services/realtime-gateway/src/services/ws-subscriber-registry.ts` (lokal
+kanal→handler-tabell) ersätter en duplicerad Redis-anslutning per WS-klient. Både
+pubsub.ts och registryt har nu try/catch runt varje meddelande/handler — en delad
+anslutning gör annars ETT trasigt meddelande till en krasch för ALLA klienter på podden,
+inte bara en (hittat i reviewn). `ws.ts` (route) splittrad i en tunn route +
+`controllers/ws-controller.ts` — `eslint-plugin-boundaries` tillåter inte routes → att
+importera services-layer direkt.
+
+**Köinsläpp: döda sessioner slösar inte längre kvoten** (andra Fas 3-reviewns notering
+löst): `admitNextBatch` (`shared/redis/src/waiting-room.ts`) tar nu en 5:e parameter
+(`sessionTotalMinutes`) och jämför ZSET:ets ankomsttid mot den innan en poppad post
+markeras insläppt — en redan utgången session hoppas över och loopen fortsätter popppa
+efter fler levande poster i samma tick. `queue-config-repository.ts` (scheduler-worker)
+läser åter `queue_session_total_minutes` (en tidigare medveten uteslutning, nu
+reverserad av just detta skäl).
+
+**Ny kategori/sök-funktion på events** (inte bara styling, uttryckligen efterfrågat):
+migration `1700000013000_add-events-category.ts` lägger till `events.category`
+(`music`/`sports`/`theatre`/`festival`, NOT NULL DEFAULT 'music', indexerad).
+`GET /events?category=&q=` — `shared/schemas/src/events-query.ts` (ny Zod-schema),
+scatter-gather över båda shards i `events-repository.ts`/`events-service.ts` (samma
+`Promise.allSettled`-mönster som `my-tickets-service.ts`). `q` matchar titel/artist via
+`ILIKE`.
+
+**Frontend: Tailwind v4, men UTAN Preflight** (`apps/web/src/styles/globals.css`
+importerar `tailwindcss/theme.css` + `tailwindcss/utilities.css`, INTE det samlade
+`'tailwindcss'`-importet) — upptäckt i reviewn: Preflight hade nollställt
+webbläsarstandarden för rubriker/knappar/listor på EventPage/SeatmapPage/
+ReservationPage/MyTicketsPage, som Fas 6 INTE byggde om, och gjort just
+bokningsflödet (det som visas på försvaret) visuellt trasigt. Ny startsida
+(`routes/HomePage.tsx`, ersätter `EventsListPage.tsx`) + `components/{Navbar,EventCard}.tsx`
+— kategori/sök-filter lever i URL:ens query-sträng (`useSearchParams`), inte lokalt
+state, så en delad länk återskapar vyn. `lib/categories.ts` har en `isEventCategory`-
+typguard (inte en `as`-kastning, docs/rules.md §2).
+
+**`services/scheduler-worker/src/scripts/seed-demo-events.ts`** seedar 5 extra
+demo-event (en delad liten arenageometri, 30 platser) över alla fyra kategorier, för att
+startsidan inte ska vara tom. Skriver bara till DEN shard ett event faktiskt hashar till
+(`getPoolForEvent`) — till skillnad från `tests/e2e/seed.ts`, som ofarligt kan duplicera
+sin fixture på båda shards eftersom den bara läser ETT känt event-id; `listAllEvents`
+gör en RIKTIG scatter-gather-sammanslagning, så en dubblett hade synts två gånger.
+
+**Realtime-gateway-ingressen var redan löst sedan Fas 3** — Fas 5-reviewns notering om
+en "saknad ingress" var ett falskt larm: `infra/k8s/base/booking-api/ingress.yaml`
+routar redan `/ws` till `realtime-gateway` på samma host (`api.tikknet.se`). Rättat i
+både `docs/plan.md` och `.github/workflows/deploy.yml`:s kommentarer.
+
+**Rate limiter-allowlist för lastgeneratorer:** `RATE_LIMIT_ALLOWLISTED_IPS`
+(booking-api, tom som default) — se docs/runbook.md "Lasttest: allowlista
+generatorernas IP:n i rate limitern" för kommandot (`kubectl set env`, ta bort efteråt).
+
+**PodDisruptionBudget på scheduler-worker/payment-mock** (`maxUnavailable: 1`) är
+medvetet overksam idag (en enda podd) — motivering i docs/forsvar.md "Varför en
+PodDisruptionBudget på en tjänst som bara har EN podd?".
+
 ## Läget efter Fas 5
 
 **CORS saknades helt i booking-api** fram till Fas 5-reviewn — appen och API:et är

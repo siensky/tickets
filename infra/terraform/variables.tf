@@ -143,6 +143,21 @@ variable "demo_server_type" {
   default     = "cpx32"
 }
 
+# Separat resurs igen (samma motivering som demo_node_count ovan) — k6-
+# generatorerna är inte en del av k3s-klustret alls (cloud-init/
+# loadgen.yaml.tftpl), bara VM:er som anropar klustrets publika IP.
+variable "loadgen_node_count" {
+  description = "Antal lastgenerator-VM:er, bara under den faktiska k6-körningen (docs/plan.md \"Lasttest\": \"2–3 Hetzner-maskiner ... körs några timmar och rivs\"). 0 i vardagen."
+  type        = number
+  default     = 0
+}
+
+variable "loadgen_server_type" {
+  description = "Hetzner servertyp för lastgeneratorerna. CPX32 (samma som demo_server_type) — k6:s per-VU-modell för WebSockets är minnestung vid 50 000 VU (docs/plan.md \"Lasttest\")."
+  type        = string
+  default     = "cpx32"
+}
+
 variable "k3s_version" {
   description = "k3s-kanal (t.ex. v1.31.4+k3s1). Pinnad version, inte 'stable' eller 'latest', för reproducerbara noder."
   type        = string

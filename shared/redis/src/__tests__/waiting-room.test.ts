@@ -39,39 +39,92 @@ describe('getWaitingRoomStatus', () => {
 
 describe('admitNextBatch', () => {
   it('marks every popped member as admitted and keeps the active-events set when the queue is not empty', async () => {
+    const now = Date.now();
     const set = vi.fn().mockResolvedValue('OK');
     const srem = vi.fn();
+    const zpopmin = vi
+      .fn()
+      .mockResolvedValue(['token-a', String(now), 'token-b', String(now)]);
     const redis = {
-      zpopmin: vi.fn().mockResolvedValue(['token-a', '100', 'token-b', '200']),
+      zpopmin,
       set,
       zcard: vi.fn().mockResolvedValue(3),
       srem,
     } as unknown as Redis;
 
-    const result = await admitNextBatch(redis, 'event-1', 2, 600);
+    const result = await admitNextBatch(redis, 'event-1', 2, 600, 15);
 
     expect(result).toEqual({
       admittedQueueTokenIds: ['token-a', 'token-b'],
       remainingDepth: 3,
+      prunedExpiredCount: 0,
     });
     expect(set).toHaveBeenCalledWith('admitted:event-1:token-a', '1', 'EX', 600);
     expect(set).toHaveBeenCalledWith('admitted:event-1:token-b', '1', 'EX', 600);
     expect(srem).not.toHaveBeenCalled();
+    expect(zpopmin).toHaveBeenCalledTimes(1);
   });
 
   it('removes the event from the active-events set once the queue drains to empty', async () => {
     const srem = vi.fn();
     const redis = {
-      zpopmin: vi.fn().mockResolvedValue(['token-a', '100']),
+      zpopmin: vi.fn().mockResolvedValue(['token-a', String(Date.now())]),
       set: vi.fn().mockResolvedValue('OK'),
       zcard: vi.fn().mockResolvedValue(0),
       srem,
     } as unknown as Redis;
 
-    const result = await admitNextBatch(redis, 'event-1', 5, 600);
+    const result = await admitNextBatch(redis, 'event-1', 5, 600, 15);
 
     expect(result.remainingDepth).toBe(0);
     expect(srem).toHaveBeenCalledWith('waitingroom:active-events', 'event-1');
+  });
+
+  it('skips an already-expired entry instead of admitting it, and does not waste the quota on it', async () => {
+    const now = Date.now();
+    const staleScore = String(now - 20 * 60_000); // 20 min gammal, sessionen är 15 min
+    const set = vi.fn().mockResolvedValue('OK');
+    const zpopmin = vi
+      .fn()
+      .mockResolvedValueOnce(['dead-token', staleScore])
+      .mockResolvedValueOnce([]);
+    const redis = {
+      zpopmin,
+      set,
+      zcard: vi.fn().mockResolvedValue(0),
+      srem: vi.fn(),
+    } as unknown as Redis;
+
+    const result = await admitNextBatch(redis, 'event-1', 1, 600, 15);
+
+    expect(result.admittedQueueTokenIds).toEqual([]);
+    expect(result.prunedExpiredCount).toBe(1);
+    expect(set).not.toHaveBeenCalled();
+    // Letar vidare efter en levande post istället för att nöja sig med den döda.
+    expect(zpopmin).toHaveBeenCalledTimes(2);
+  });
+
+  it('backfills the batch with the next live entry when an earlier pop was already expired', async () => {
+    const now = Date.now();
+    const staleScore = String(now - 20 * 60_000);
+    const freshScore = String(now);
+    const zpopmin = vi
+      .fn()
+      .mockResolvedValueOnce(['dead-token', staleScore])
+      .mockResolvedValueOnce(['live-token', freshScore]);
+    const set = vi.fn().mockResolvedValue('OK');
+    const redis = {
+      zpopmin,
+      set,
+      zcard: vi.fn().mockResolvedValue(0),
+      srem: vi.fn(),
+    } as unknown as Redis;
+
+    const result = await admitNextBatch(redis, 'event-1', 1, 600, 15);
+
+    expect(result.admittedQueueTokenIds).toEqual(['live-token']);
+    expect(result.prunedExpiredCount).toBe(1);
+    expect(set).toHaveBeenCalledWith('admitted:event-1:live-token', '1', 'EX', 600);
   });
 });
 

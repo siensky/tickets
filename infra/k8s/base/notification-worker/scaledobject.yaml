@@ -1,0 +1,56 @@
+# docs/plan.md "Autoscaling": KEDA på notification-worker, RabbitMQ-
+# ködjup, 100 meddelanden/podd, min 1, max 10.
+#
+# `cooldownPeriod` styr BARA nedskalning till 0 repliker — ingen effekt
+# här eftersom `minReplicaCount: 1` aldrig går till 0 (upptäckt i Fas 6-
+# reviewn, en tidigare kommentar hävdade felaktigt att den motsvarade
+# HPA:ns `stabilizationWindowSeconds`). Nedskalning mellan N och 1
+# styrs istället av KEDA:s UNDERLIGGANDE HPA, vars `behavior` därför
+# sätts explicit nedan — annars gäller HPA:s eget default (300 s), inte
+# planens 60 s.
+#
+# RabbitMQ-scalern vill ha en FULL anslutningssträng, inte bara
+# lösenordet — `rabbitmq-credentials` (ticketing-namnrymden) har sedan
+# tidigare bara nyckeln `password` (deploy.yml bygger RABBITMQ_URL via
+# Kubernetes' egen `$(VAR)`-substitution i env, som KEDA INTE kan läsa:
+# KEDA läser Deployment-objektet rakt av via API:et, inte den redan
+# substituerade processmiljön i en körande container). Fas 6 lägger
+# därför till en egen nyckel `amqp-url` i SAMMA secret (deploy.yml),
+# byggd av samma lösenordsvariabel i samma steg — ingen ny hemlighet,
+# bara samma värde i ett format KEDA kan använda direkt.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: notification-worker-rabbitmq-auth
+  namespace: ticketing
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: rabbitmq-credentials
+      key: amqp-url
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: notification-worker
+  namespace: ticketing
+spec:
+  scaleTargetRef:
+    name: notification-worker
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  cooldownPeriod: 60
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 60
+  triggers:
+    - type: rabbitmq
+      metadata:
+        # services/notification-worker/src/index.ts: ORDER_EVENTS_QUEUE.
+        queueName: notification-worker.order-events
+        mode: QueueLength
+        value: '100'
+      authenticationRef:
+        name: notification-worker-rabbitmq-auth

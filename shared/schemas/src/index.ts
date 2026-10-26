@@ -15,5 +15,6 @@
  */
 export const SCHEMAS_PACKAGE_NAME = '@tickets/schemas';
 export * from './event-id-param.js';
+export * from './events-query.js';
 export * from './reservation.js';
 export * from './seatmap-params.js';

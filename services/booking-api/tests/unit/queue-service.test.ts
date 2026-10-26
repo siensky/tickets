@@ -1,12 +1,25 @@
 import { SalesClosedError, SalesNotOpenError } from '@tickets/domain';
 import { createQueueTokenSecret, verifyQueueToken } from '@tickets/auth';
 import type { ShardPools } from '@tickets/db';
+import type { BusinessMetrics } from '@tickets/observability';
 import type { RedisClient } from '@tickets/redis';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { getQueueStatus, joinQueue } from '../../src/services/queue-service.js';
 
 const SECRET = createQueueTokenSecret('unit-test-secret-at-least-32-bytes!!');
+
+function fakeBusinessMetrics(): BusinessMetrics {
+  const counter = { inc: vi.fn() };
+  const gauge = { set: vi.fn(), reset: vi.fn() };
+  return {
+    activeReservations: gauge,
+    soldTickets: gauge,
+    waitingRoomDepth: gauge,
+    queueJoinsTotal: counter,
+    queueAdmissionsTotal: counter,
+  } as unknown as BusinessMetrics;
+}
 
 function fakeShardPools(salesWindow: { salesOpenAt: Date; salesCloseAt: Date }): ShardPools {
   const query = vi.fn().mockImplementation((sql: string) => {
@@ -78,7 +91,7 @@ describe('joinQueue', () => {
     const { redis, zadd } = fakeRedis();
 
     const result = await joinQueue(
-      { shardPools, redis, queueTokenSecret: SECRET },
+      { shardPools, redis, queueTokenSecret: SECRET, businessMetrics: fakeBusinessMetrics() },
       { eventId: 'event-1' },
     );
 
@@ -101,7 +114,15 @@ describe('joinQueue', () => {
     const { redis } = fakeRedis();
 
     await expect(
-      joinQueue({ shardPools, redis, queueTokenSecret: SECRET }, { eventId: 'event-1' }),
+      joinQueue(
+        {
+          shardPools,
+          redis,
+          queueTokenSecret: SECRET,
+          businessMetrics: fakeBusinessMetrics(),
+        },
+        { eventId: 'event-1' },
+      ),
     ).rejects.toThrow(SalesNotOpenError);
   });
 
@@ -114,7 +135,15 @@ describe('joinQueue', () => {
     const { redis } = fakeRedis();
 
     await expect(
-      joinQueue({ shardPools, redis, queueTokenSecret: SECRET }, { eventId: 'event-1' }),
+      joinQueue(
+        {
+          shardPools,
+          redis,
+          queueTokenSecret: SECRET,
+          businessMetrics: fakeBusinessMetrics(),
+        },
+        { eventId: 'event-1' },
+      ),
     ).rejects.toThrow(SalesClosedError);
   });
 });
@@ -129,7 +158,7 @@ describe('getQueueStatus', () => {
     const { redis, expire } = fakeRedis({ exists: vi.fn().mockResolvedValue(1) });
 
     const status = await getQueueStatus(
-      { shardPools, redis, queueTokenSecret: SECRET },
+      { shardPools, redis, queueTokenSecret: SECRET, businessMetrics: fakeBusinessMetrics() },
       'event-1',
       'token-1',
     );
@@ -146,7 +175,7 @@ describe('getQueueStatus', () => {
     });
 
     const status = await getQueueStatus(
-      { shardPools, redis, queueTokenSecret: SECRET },
+      { shardPools, redis, queueTokenSecret: SECRET, businessMetrics: fakeBusinessMetrics() },
       'event-1',
       'token-1',
     );
@@ -161,7 +190,7 @@ describe('getQueueStatus', () => {
     });
 
     const status = await getQueueStatus(
-      { shardPools, redis, queueTokenSecret: SECRET },
+      { shardPools, redis, queueTokenSecret: SECRET, businessMetrics: fakeBusinessMetrics() },
       'event-1',
       'ghost',
     );
@@ -180,7 +209,12 @@ describe('getQueueStatus', () => {
     });
 
     const status = await getQueueStatus(
-      { shardPools: closedShardPools, redis, queueTokenSecret: SECRET },
+      {
+        shardPools: closedShardPools,
+        redis,
+        queueTokenSecret: SECRET,
+        businessMetrics: fakeBusinessMetrics(),
+      },
       'event-1',
       'ghost',
     );

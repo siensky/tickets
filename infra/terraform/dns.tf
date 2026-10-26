@@ -28,6 +28,28 @@ resource "cloudflare_dns_record" "api" {
   ttl     = 1 # "Auto" när proxied = true
 }
 
+# docs/plan.md "Lasttest": huvudkörningen går mot ett SEPARAT värdnamn
+# direkt mot ingress, inte via Cloudflare — `proxied = false` (grå moln):
+# en proxad post hade fortsatt mäta Cloudflares nät och dessutom krockat
+# med 20 000+ VU-gränslandet i deras gratisplans användarvillkor.
+# Ingressen (infra/k8s/base/booking-api/ingress-loadtest.yaml) terminerar
+# TLS själv här, med sitt eget cert-manager-utfärdade certifikat.
+#
+# Villkorad på loadgen_node_count > 0 (upptäckt i Fas 6-reviewn): en
+# ICKE-proxad post pekar rakt på nodernas publika IP:n, förbi
+# Cloudflares skydd — en permanent sådan hade läckt origin-adresserna
+# även i vardagen, utan att något lasttest faktiskt pågår.
+resource "cloudflare_dns_record" "loadtest" {
+  for_each = var.loadgen_node_count > 0 ? toset(values(local.node_ipv4_by_name)) : toset([])
+
+  zone_id = data.cloudflare_zone.this.zone_id
+  name    = "loadtest"
+  type    = "A"
+  content = each.value
+  proxied = false
+  ttl     = 60
+}
+
 # Fas 4: Grafana måste vara nåbar för README:ts "adress till dashboard"
 # (docs/plan.md "Context" "Inlämning"), skyddad av Auth0-OAuth-inloggningen
 # i observability.tf — inte Tailscale-only, till skillnad från

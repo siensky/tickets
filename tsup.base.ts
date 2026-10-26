@@ -48,12 +48,17 @@ export const EXTERNAL_NPM_PACKAGES = [
   '@opentelemetry/semantic-conventions',
 ];
 
-export function createServiceTsupConfig(): Options {
+/**
+ * `extraEntries` (Fas 6): engångsskript som ska byggas till sin EGEN
+ * `dist/scripts/*.js`, körda manuellt (`node dist/scripts/reset-sale.js`),
+ * aldrig via den vanliga `start()`-entrypointen (docs/rules.md §11).
+ */
+export function createServiceTsupConfig(extraEntries: readonly string[] = []): Options {
   return {
     // instrumentation.ts is its own entry, not bundled into index.js: it's
     // preloaded separately via `node --import` (docs/forsvar.md "Varför
     // --import för OTel?"), so it needs its own dist/instrumentation.js.
-    entry: ['src/index.ts', 'src/instrumentation.ts'],
+    entry: ['src/index.ts', 'src/instrumentation.ts', ...extraEntries],
     format: ['esm'],
     target: 'node22',
     outDir: 'dist',

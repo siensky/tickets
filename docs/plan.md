@@ -810,7 +810,7 @@ tillsammans fyra av de betygsgrundande kraven. Omfördelning ensamt räckte inte
 | **3** | 27–28/10 | Väntrum med **signerad stateless kötoken**. `realtime-gateway` + Redis Pub/Sub + **läsbart tillstånd bakom varje WS-meddelande**. `notification-worker` + dedupe + **delivery limit**. `payment-mock`. Stripe: **raw body, rate-limit-undantag, 200-snabbt**, **frysning + återbetalning**. Auth0. Rate limiting. | **Klar efter review** (se nedan) — Flödet komplett |
 | **4** | 29–31/10 | kube-prometheus-stack, Loki + Alloy, OTel-instrumentering. **`retentionSize` + PVC-dimensionering.** Dashboards, `oversell_prevented_total`, larm → Slack. Nattlig `pg_dump` av båda shardarna → R2 (se `docs/adr/0005-backup-storage-r2.md`) + runbook-skript för återställningsövningen (ej ännu körd mot riktigt kluster — kräver Tailscale-åtkomst). **Fas 3-review-noten löst:** den egna `rabbitmq_queue_messages_ready`-gaugen (queue-depth-metric.ts) är borttagen; RabbitMQs eget `rabbitmq_prometheus`-plugin är källan nu. | **Klar efter review** (se nedan) — G: metrics, logging, backup |
 | **5** | 1/11 | Minimal men komplett PWA: evenemang, väntrum, arenakarta (sektionsvy), reservation, checkout, mina biljetter. TanStack Query. Playwright e2e. **Notering från Fas 3-review:** WS-klienten autentiserar genom att skicka `{"token": "..."}` som sitt FÖRSTA meddelande efter anslutning — token ligger INTE i `/ws?token=...` (loggas annars i klartext). Serversidan väntar 5 s på detta meddelande innan den stänger anslutningen. **Byggdes också i denna fas, eftersom planen förutsatte dem utan att de fanns:** `GET /events`, `GET /events/:id`, venue-sektioner + stolgeometri, per-event stolsstatus, `GET /me/tickets` — fullt lagerindelade (controller/service/repository/mapper). Samt det kvarvarande Fas 3-gapet **"din stol togs"**, kopplat ände-till-ände (markering, omvänt Redis-index, WS-notis, frontend-lyssnare). CORS lades till i booking-api (saknades helt — se Fas 5-review). | **Klar efter review** (se nedan) — G: e2e i pipeline |
-| **6** | 2–3/11 | HPA (**requests 250m**) + KEDA, `scaleDown` 60 s. Zero-downtime: probes, `maxUnavailable: 0`, preStop, graceful shutdown, **`Recreate` på scheduler-worker**. k6-scenarier, lastgeneratorer, fd-gränser. **Mät HPA-kurvan, sedan den stora körningen.** **Notering från Fas 4-review:** `RabbitMQQueueDepthHigh`-larmets tröskel (900, `infra/k8s/base/monitoring/prometheusrule.yaml`) antar redan KEDAs planerade tak (100 meddelanden/podd × 10 poddar) — dubbelkolla att siffran fortfarande stämmer när `ScaledObject`:en faktiskt byggs här. **Noteringar från Fas 3-review, innan `queue-storm`:** (1) `realtime-gateway` ger varje WS-klient sin egen duplicerade Redis-anslutning (`subscribeToChannel`) — vid 50 000 samtidiga klienter går det långt över Redis standardgräns på 10 000 anslutningar; bör bli EN subscriber per podd (`psubscribe ws:*` + en lokal kanal→socket-tabell) innan lasttestet körs. (2) `queue_session_total_minutes`/`queue_admission_rate_per_minute` måste tunas till queue-storms skala — kötokenets JWT-`exp` sätts vid JOIN, inte vid insläpp, så med låg insläppstakt och djup kö hinner token gå ut innan användaren släpps in; `admitNextBatch` (ZPOPMIN) märker heller inte redan utgångna token innan den "släpper in" dem, vilket slösar insläppskvoten på döda poster. **Tillagt efter Fas 5-granskning, på uttrycklig begäran — INTE ett betygskrav, körs här ändå:** UI/styling-ombyggnad av PWA:n (hittills helt ostylad HTML, se "Fas 5 — kända luckor"). Ny startsida à la Ticketmaster — landningssida med utvalda konserter/evenemang + utfyllnadsinnehåll, mobile first. Navbar med kategorier (musik, sport, teater, festivaler), sökfält, inloggningsknapp. Bläddring per kategori, "köp biljetter"-knapp per evenemang leder in i det redan byggda bokningsflödet (Fas 5: väntrum → arenakarta → reservation → checkout). Färgschema röd/vit/svart + blå accent — proffsigt, "clean", dyr känsla, inte en lekstuga. **Inte bara styling:** kategori/sök kräver en ny `category`-kolumn på `events` (migration) och att `GET /events` stödjer filtrering — events är shard-partitionerat på sitt eget `id`, så en sökning över kategori blir scatter-gather över båda shards, samma princip som `GET /me/tickets` redan använder (`services/booking-api/src/services/my-tickets-service.ts`), inte en enkel `WHERE`-rad på en databas. | **VG** |
+| **6** | 2–3/11 | HPA (**requests 250m**) + KEDA, `scaleDown` 60 s. Zero-downtime: probes, `maxUnavailable: 0`, preStop, graceful shutdown, **`Recreate` på scheduler-worker**. k6-scenarier, lastgeneratorer, fd-gränser. **Mät HPA-kurvan, sedan den stora körningen.** ~~**Notering från Fas 4-review:** `RabbitMQQueueDepthHigh`-larmets tröskel (900, `infra/k8s/base/monitoring/prometheusrule.yaml`) antar redan KEDAs planerade tak...~~ — **dubbelkollad**: `ScaledObject`:en (`infra/k8s/base/notification-worker/scaledobject.yaml`) är byggd med exakt 100 meddelanden/podd × max 10 poddar = 1000, så 900 stämmer fortfarande. ~~**Noteringar från Fas 3-review, innan `queue-storm`:** (1) `realtime-gateway` ger varje WS-klient sin egen duplicerade Redis-anslutning...~~ — **löst**: (1) EN delad `psubscribe ws:*`-anslutning per podd (`shared/redis/src/pubsub.ts`s `subscribeToChannelPrefix` + `services/realtime-gateway/src/services/ws-subscriber-registry.ts`), varje WS-anslutning registrerar sig lokalt (synkront, inget eget Redis-anrop) mot sin kötoken-id. (2) `admitNextBatch` (`shared/redis/src/waiting-room.ts`) hoppar nu över redan utgångna ZSET-poster (jämfört mot ankomsttid + `queue_session_total_minutes`) i stället för att markera dem insläppta, och fortsätter poppa efter fler levande poster i samma tick — scheduler-worker läser nu åter `queue_session_total_minutes` (queue-config-repository.ts). **Tillagt efter Fas 5-granskning, på uttrycklig begäran — INTE ett betygskrav, körs här ändå:** UI/styling-ombyggnad av PWA:n (hittills helt ostylad HTML, se "Fas 5 — kända luckor"). Ny startsida à la Ticketmaster — landningssida med utvalda konserter/evenemang + utfyllnadsinnehåll, mobile first. Navbar med kategorier (musik, sport, teater, festivaler), sökfält, inloggningsknapp. Bläddring per kategori, "köp biljetter"-knapp per evenemang leder in i det redan byggda bokningsflödet (Fas 5: väntrum → arenakarta → reservation → checkout). Färgschema röd/vit/svart + blå accent — proffsigt, "clean", dyr känsla, inte en lekstuga. **Inte bara styling:** kategori/sök kräver en ny `category`-kolumn på `events` (migration) och att `GET /events` stödjer filtrering — events är shard-partitionerat på sitt eget `id`, så en sökning över kategori blir scatter-gather över båda shards, samma princip som `GET /me/tickets` redan använder (`services/booking-api/src/services/my-tickets-service.ts`), inte en enkel `WHERE`-rad på en databas. | **Klar efter review** (se nedan) — VG |
 | — | **4/11** | **MUNTLIGT FÖRSVAR** | |
 | **7** | 5–8/11 | `architecture.md`, ADR:er, `runbook.md` med **RPO/RTO**, README med adresser. Polering. | **Inlämning 8/11** |
 
@@ -869,11 +869,13 @@ Fas 3):
   klientsidig routing (`cloudflare_workers_custom_domain` skapar DNS-posten åt
   apex). Se docs/runbook.md "Frontend-proxy-Workern" för engångsstegen (ny
   behörighet på Terraforms Cloudflare-token + två nya variabler).
-  **Ny lucka hittad i samma arbete:** `realtime-gateway` har fortfarande ingen
-  ingress (`infra/k8s/base/realtime-gateway/` saknar `ingress.yaml`) — `wss://
-  api.tikknet.se` i `deploy-frontend` är den TILLTÄNKTA adressen, men routningen
-  dit finns inte än. Ofarligt eftersom WS bara är en optimering (REST-pollning
-  täcker allt), men bör in i Fas 6.
+  ~~Ny lucka hittad i samma arbete: `realtime-gateway` har fortfarande ingen
+  ingress~~ — **falskt larm, upptäckt i Fas 6-reviewn**: `infra/k8s/base/
+  realtime-gateway/` har visserligen ingen egen `ingress.yaml`, men routningen
+  dit finns redan sedan Fas 3 — `infra/k8s/base/booking-api/ingress.yaml`
+  routar `/ws` till `realtime-gateway` på SAMMA host (`api.tikknet.se`),
+  matchar planens egen "Trafikväg" (ingen egen WS-subdomän). `wss://
+  api.tikknet.se` i `deploy-frontend` fungerar alltså redan.
 - ~~Playwright-sviten stannar vid reservationen~~ — **löst**: sviten loggar nu in
   med ett RIKTIGT Auth0-testkonto (automatiserar den riktiga, hostade
   Universal-Login-sidan) och betalar mot payment-mock, ända fram till att
@@ -893,6 +895,37 @@ Fas 3):
   `import.meta.dirname`. `scripts/verify-boundaries-enforcement.mjs` testar nu
   BÅDA fallen (cwd=repo-rot och cwd=paketkatalog) så regressionen inte kan
   smyga tillbaka obemärkt.
+
+**Fas 6 — kända luckor kvar efter reviewn** (flaggas hellre än göms, samma princip som
+Fas 3/5):
+
+- **Hela lasttest-infrastrukturen (Terraform, k6-scripten, rapport-/
+  reset-skripten) är byggd men ALDRIG körd mot ett riktigt kluster** —
+  samma gräns som Fas 4:s observability-infra (`infra/terraform/
+  observability.tf` m.fl.), ingen Tailscale-åtkomst i byggmiljön, och
+  ingen k6-binär fanns att testa mot ens lokalt. `tests/load/queue-storm.js`s
+  WebSocket-anslutning (`k6/ws`) är särskilt overifierad — smoke-testa
+  den specifikt med få VU innan en riktig körning.
+- **HPA-kurvan** (docs/plan.md "Autoscaling": "Mät kurvan i Fas 6 före
+  den stora körningen") är alltså heller inte uppmätt än — Grafana-
+  panelen för den finns nu ("Autoscaling & lasttest"-dashboarden,
+  `infra/k8s/base/monitoring/dashboards.yaml`, tillagd EFTER den
+  initiala Fas 6-leveransen på uttrycklig begäran), men ingenting har
+  faktiskt synts i den än.
+- **De fyra affärsmåtten ("aktiva reservationer, insläppstakt, sålda
+  biljetter, konverteringsgrad") finns nu i koden** (`shared/
+  observability/src/metrics.ts`s `createBusinessMetrics`, se
+  docs/phase-status.md) — löst samtidigt som Grafana-utbyggnaden, inte
+  i den ursprungliga Fas 6-leveransen.
+- **`queue_admission_rate_per_minute` måste höjas live** innan
+  `normal-sale`/`spike-sale` körs på riktigt (se kommentaren i
+  tests/load/normal-sale.js) — annars ackumuleras en obegränsad kö.
+  Inget skript gör detta automatiskt; ett medvetet val (samma anda som
+  reset-sale.ts: ingen automatisk körning av något som kan snedvrida
+  nästa körning).
+- **realtime-gatewayens minnesrequest (320Mi, upp från 256Mi) och
+  HPA-tröskeln är en ouppmätt uppskattning** (deployment.yaml/hpa.yaml)
+  — mät faktisk RSS i vila vid första riktiga deploy.
 
 **Flyttat till efter inlämningen:** scanner-appen (Expo) · proof of work + Turnstile ·
 PostHog + session replay · ArgoCD + Sealed Secrets · Tempo-backend · DLQ med adminvy ·

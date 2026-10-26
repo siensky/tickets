@@ -18,6 +18,7 @@ import Fastify, {
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerWsRoute } from './routes/ws.js';
+import { startWsSubscriberRegistry } from './services/ws-subscriber-registry.js';
 import { shutdownTracing } from './instrumentation.js';
 
 const SERVICE_NAME = 'realtime-gateway';
@@ -52,6 +53,7 @@ export async function start(): Promise<void> {
 
   const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
   const queueTokenSecret = createQueueTokenSecret(requireEnv('QUEUE_TOKEN_SECRET'));
+  const wsSubscribers = await startWsSubscriberRegistry(redis);
 
   registerHealthRoutes(app);
   registerMetricsRoutes(app, registry);
@@ -65,7 +67,7 @@ export async function start(): Promise<void> {
       reply.elapsedTime / 1000,
     );
   });
-  registerWsRoute(app, { redis, queueTokenSecret });
+  registerWsRoute(app, { redis, wsSubscribers, queueTokenSecret });
 
   const port = Number(process.env['REALTIME_GATEWAY_PORT'] ?? 3001);
   await app.listen({ port, host: '0.0.0.0' });
@@ -74,6 +76,7 @@ export async function start(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down gracefully');
     await app.close();
+    await wsSubscribers.close();
     await closeRedisClient(redis);
     await shutdownTracing();
     process.exit(0);

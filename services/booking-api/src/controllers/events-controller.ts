@@ -4,7 +4,7 @@
  * happens before anyone joins the waiting room.
  */
 import { ValidationError } from '@tickets/domain';
-import { eventIdParamSchema } from '@tickets/schemas';
+import { eventIdParamSchema, listEventsQuerySchema } from '@tickets/schemas';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   getEvent,
@@ -15,8 +15,15 @@ import {
 export type { EventsServiceDeps };
 
 export function createListEventsHandler(deps: EventsServiceDeps) {
-  return async (_request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    const events = await listAllEvents(deps);
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const parsed = listEventsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new ValidationError('query params are invalid', { issues: parsed.error.issues });
+    }
+    const events = await listAllEvents(deps, {
+      category: parsed.data.category,
+      search: parsed.data.q,
+    });
     reply.send({ events });
   };
 }

@@ -10,12 +10,13 @@
  * appservern") — annars kan poddar med olika klockskev fatta olika
  * beslut om exakt samma event precis vid fönsterkanten.
  */
+import type { EventCategory } from '@tickets/schemas';
 import { NotFoundError } from '@tickets/domain';
 import type { Pool } from 'pg';
-import type { EventRow } from '../types/event.js';
+import type { EventRow, EventsFilter } from '../types/event.js';
 import type { EventSalesWindow } from '../types/queue.js';
 
-const EVENT_ROW_SELECT = `SELECT id, venue_id, title, artist, starts_at, sales_open_at, sales_close_at,
+const EVENT_ROW_SELECT = `SELECT id, venue_id, title, artist, category, starts_at, sales_open_at, sales_close_at,
             status, now() < sales_open_at AS is_before_open, now() > sales_close_at AS is_after_close
      FROM events`;
 
@@ -24,6 +25,7 @@ interface RawEventRow {
   venue_id: string;
   title: string;
   artist: string;
+  category: EventCategory;
   starts_at: Date;
   sales_open_at: Date;
   sales_close_at: Date;
@@ -38,6 +40,7 @@ function toEventRow(row: RawEventRow): EventRow {
     venueId: row.venue_id,
     title: row.title,
     artist: row.artist,
+    category: row.category,
     startsAt: row.starts_at,
     salesOpenAt: row.sales_open_at,
     salesCloseAt: row.sales_close_at,
@@ -54,9 +57,31 @@ function toEventRow(row: RawEventRow): EventRow {
  * docs/plan.md "Databas"): a LISTING endpoint has no single event to
  * scope to by definition. The caller queries this once per shard and
  * merges, never joins across shards.
+ *
+ * `filter` (Fas 6: kategori/sök) builds its WHERE clause from a fixed
+ * set of optional conditions, each still parameterized — docs/rules.md
+ * §4 ("All SQL parameteriserad") applies just as much to an optional
+ * filter as to a required one; only the SQL TEXT branches, never a
+ * value gets string-interpolated in.
  */
-export async function listEvents(pool: Pool): Promise<EventRow[]> {
-  const { rows } = await pool.query<RawEventRow>(`${EVENT_ROW_SELECT} ORDER BY starts_at ASC`);
+export async function listEvents(pool: Pool, filter: EventsFilter = {}): Promise<EventRow[]> {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (filter.category !== undefined) {
+    params.push(filter.category);
+    conditions.push(`category = $${String(params.length)}`);
+  }
+  if (filter.search !== undefined) {
+    params.push(`%${filter.search}%`);
+    conditions.push(
+      `(title ILIKE $${String(params.length)} OR artist ILIKE $${String(params.length)})`,
+    );
+  }
+  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+  const { rows } = await pool.query<RawEventRow>(
+    `${EVENT_ROW_SELECT}${where} ORDER BY starts_at ASC`,
+    params,
+  );
   return rows.map(toEventRow);
 }
 

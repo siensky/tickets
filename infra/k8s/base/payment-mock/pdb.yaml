@@ -1,0 +1,12 @@
+# Se infra/k8s/base/scheduler-worker/pdb.yaml för resonemanget —
+# payment-mock vilar på 1 podd (docs/plan.md "Kubernetes — arbetslaster").
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-mock
+  namespace: ticketing
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: payment-mock

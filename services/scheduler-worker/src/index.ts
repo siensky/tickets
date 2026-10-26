@@ -10,6 +10,7 @@
  */
 import { closeShardPools, createShardPools, type ShardPools } from '@tickets/db';
 import {
+  createBusinessMetrics,
   createHttpMetrics,
   createLogger,
   createRegistry,
@@ -29,6 +30,10 @@ import Fastify, {
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { shutdownTracing } from './instrumentation.js';
+import {
+  startBusinessMetricsJob,
+  type BusinessMetricsJob,
+} from './services/business-metrics-service.js';
 import { startHeartbeat } from './services/heartbeat.js';
 import { startOutboxRelay, type OutboxRelay } from './services/outbox-relay-service.js';
 import {
@@ -76,6 +81,7 @@ function createShutdownHandler(
     reservationRelease: ReservationReleaseJob;
     outboxRelay: OutboxRelay;
     queueAdmission: QueueAdmissionJob;
+    businessMetrics: BusinessMetricsJob;
     shardPools: ShardPools;
     redis: RedisClient;
   },
@@ -87,6 +93,7 @@ function createShutdownHandler(
     await resources.reservationRelease.stop();
     await resources.outboxRelay.stop();
     await resources.queueAdmission.stop();
+    await resources.businessMetrics.stop();
     await closeShardPools(resources.shardPools);
     await closeRedisClient(resources.redis);
     await shutdownTracing();
@@ -108,6 +115,7 @@ export async function start(): Promise<void> {
   const logger = createLogger({ serviceName: SERVICE_NAME });
   const registry = createRegistry(SERVICE_NAME);
   const httpMetrics = createHttpMetrics(registry);
+  const businessMetrics = createBusinessMetrics(registry);
 
   const app = Fastify<
     RawServerDefault,
@@ -141,7 +149,8 @@ export async function start(): Promise<void> {
     logger,
   );
   const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
-  const queueAdmission = startQueueAdmissionJob(shardPools, redis, logger);
+  const queueAdmission = startQueueAdmissionJob(shardPools, redis, logger, businessMetrics);
+  const businessMetricsJob = startBusinessMetricsJob(shardPools, businessMetrics, logger);
 
   const shutdownOrCrash = createShutdownHandler(logger, {
     app,
@@ -149,6 +158,7 @@ export async function start(): Promise<void> {
     reservationRelease,
     outboxRelay,
     queueAdmission,
+    businessMetrics: businessMetricsJob,
     shardPools,
     redis,
   });

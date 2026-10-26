@@ -1,0 +1,39 @@
+/**
+ * Designtoken (Fas 6, docs/plan.md: "Färgschema röd/vit/svart + blå
+ * accent — proffsigt, 'clean', dyr känsla, inte en lekstuga"). Tailwind
+ * v4 läser `@theme`-blocket och genererar matchande utility-klasser
+ * (`bg-brand-red`, `text-ink`, osv) — en enda plats för paletten i
+ * stället för hårdkodade hex-koder spridda över komponenterna.
+ *
+ * `--color-accent-blue` återanvänder EXAKT samma blått som PWA-manifestets
+ * `theme_color` (vite.config.ts) — appens "ikon-blå" och webbens accentblå
+ * ska vara samma färg, inte två nära men olika blåtoner.
+ *
+ * `theme`+`utilities`, INTE `@import 'tailwindcss'` (som även drar in
+ * Preflight): Fas 6 byggde bara om startsidan/navbaren, inte
+ * EventPage/SeatmapPage/ReservationPage/MyTicketsPage — de är
+ * fortfarande omedvetet beroende av webbläsarens DEFAULT-stilar för
+ * rubriker, listor och knappar (upptäckt i Fas 6-reviewn: Preflight
+ * hade gjort just de sidorna, hela resten av bokningsflödet som visas
+ * på försvaret, visuellt trasiga utan att de själva ändrats).
+ */
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@theme {
+  --color-ink: #0a0a0a;
+  --color-paper: #ffffff;
+  --color-brand-red: #c8102e;
+  --color-brand-red-dark: #9c0d24;
+  --color-accent-blue: #1565c0;
+  --color-muted: #6b7280;
+  --color-muted-light: #e5e7eb;
+
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}

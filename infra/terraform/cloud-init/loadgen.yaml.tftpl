@@ -1,0 +1,45 @@
+#cloud-config
+# Lasttestgenerator (docs/plan.md "Lasttest"): en ren VM, INTE med i k3s-
+# klustret — den kör k6 mot klustrets publika IP precis som en extern
+# klient, inget privat nätverk eller Tailscale behövs här.
+package_update: true
+packages:
+  - curl
+  - gnupg
+
+runcmd:
+  # Samma motivering som cloud-init/k3s-server.yaml.tftpl (docs/plan.md
+  # "Lasttest": "Höj ip_local_port_range, somaxconn och fd-gränser på
+  # BÅDA generatorer och noder"). `limits.d` höjer dessutom taket för
+  # den INTERAKTIVA SSH-sessionen k6 faktiskt körs ifrån (docs/plan.md
+  # säger körningen sker manuellt) — `DefaultLimitNOFILE` i system.conf.d
+  # träffar bara systemd-tjänster, inte ett inloggat PAM-skal.
+  - |
+    cat > /etc/sysctl.d/99-tickets-loadtest.conf <<SYSCTL
+    net.ipv4.ip_local_port_range = 1024 65535
+    net.core.somaxconn = 65535
+    net.ipv4.tcp_max_syn_backlog = 65535
+    fs.file-max = 2097152
+    SYSCTL
+    sysctl --system
+    mkdir -p /etc/systemd/system.conf.d
+    cat > /etc/systemd/system.conf.d/99-tickets-nofile.conf <<CONF
+    [Manager]
+    DefaultLimitNOFILE=1048576
+    CONF
+    systemctl daemon-reexec
+    cat > /etc/security/limits.d/99-tickets-loadtest.conf <<LIMITS
+    * soft nofile 1048576
+    * hard nofile 1048576
+    LIMITS
+  # Officiella k6-paketkällan (docs.k6.io) — en pinnad, signerad apt-
+  # källa i stället för ett curl|sh-skript, samma säkerhetsnivå som
+  # resten av infran (gitleaks, pinnade versioner, docs/rules.md §12).
+  - |
+    gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+      --keyserver hkp://keyserver.ubuntu.com:80 \
+      --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+    echo 'deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main' \
+      > /etc/apt/sources.list.d/k6.list
+    apt-get update
+    apt-get install -y k6

@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import { createQueueTokenSecret } from '@tickets/auth';
 import { ActiveReservationExistsError, QueueTokenNotAdmittedError } from '@tickets/domain';
-import type { Logger } from '@tickets/observability';
+import { createBusinessMetrics, createRegistry, type Logger } from '@tickets/observability';
 import { admitNextBatch } from '@tickets/redis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { authenticateQueueToken } from '../../src/services/queue-auth-service.js';
@@ -28,6 +28,7 @@ import {
 } from './test-helpers.js';
 
 const SECRET = createQueueTokenSecret('integration-test-secret-at-least-32-bytes!!');
+const BUSINESS_METRICS = createBusinessMetrics(createRegistry('test'));
 // test-helpers.ts:s SILENT_LOGGER är typad löst (node-pg-migrate:s egen
 // loggertyp) — authenticateQueueToken kräver pino:s striktare `Logger`.
 const QUEUE_AUTH_LOGGER = SILENT_LOGGER as unknown as Logger;
@@ -53,6 +54,7 @@ describe('queue → reservation flow', () => {
       redis: redis.client,
       queueTokenSecret: SECRET,
       logger: QUEUE_AUTH_LOGGER,
+      businessMetrics: BUSINESS_METRICS,
     };
 
     const joined = await joinQueue(deps, { eventId });
@@ -81,7 +83,7 @@ describe('queue → reservation flow', () => {
       status: 'waiting',
     });
 
-    const admission = await admitNextBatch(redis.client, eventId, 10, 600);
+    const admission = await admitNextBatch(redis.client, eventId, 10, 600, 15);
     expect(admission.admittedQueueTokenIds).toContain(auth.queueTokenId);
     expect(await getQueueStatus(deps, eventId, auth.queueTokenId)).toEqual({
       status: 'admitted',

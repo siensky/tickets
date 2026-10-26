@@ -54,7 +54,7 @@ test.afterEach(async ({ page }, testInfo) => {
 async function admitTheOnlyWaitingToken(): Promise<void> {
   const redis = createRedisClient(process.env['E2E_REDIS_URL'] ?? 'redis://localhost:6379');
   try {
-    await admitNextBatch(redis, E2E_EVENT_ID, 10, 600);
+    await admitNextBatch(redis, E2E_EVENT_ID, 10, 600, 15);
   } finally {
     await redis.quit();
   }

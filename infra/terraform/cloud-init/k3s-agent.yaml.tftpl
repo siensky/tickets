@@ -6,6 +6,23 @@ packages:
   - curl
 
 runcmd:
+  # Se cloud-init/k3s-server.yaml.tftpl för motiveringen (docs/plan.md
+  # "Lasttest") — samma tuning, agentnoderna kör ingress-nginx (DaemonSet)
+  # precis som control-plane-noden.
+  - |
+    cat > /etc/sysctl.d/99-tickets-loadtest.conf <<SYSCTL
+    net.ipv4.ip_local_port_range = 1024 65535
+    net.core.somaxconn = 65535
+    net.ipv4.tcp_max_syn_backlog = 65535
+    fs.file-max = 2097152
+    SYSCTL
+    sysctl --system
+    mkdir -p /etc/systemd/system.conf.d
+    cat > /etc/systemd/system.conf.d/99-tickets-nofile.conf <<CONF
+    [Manager]
+    DefaultLimitNOFILE=1048576
+    CONF
+    systemctl daemon-reexec
   # Samma uppsättning av Hetzners privata nätverk som på control-plane-
   # noden: Hetzners cloud-init konfigurerar bara det publika interfacet,
   # och utan det privata kan agenten varken nå api-servern eller sätta

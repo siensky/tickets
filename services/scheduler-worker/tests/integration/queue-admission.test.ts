@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { admittedKey, joinWaitingRoom, subscribeToChannel, wsChannel } from '@tickets/redis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createLogger } from '@tickets/observability';
+import { createBusinessMetrics, createLogger, createRegistry } from '@tickets/observability';
 import { startQueueAdmissionJob } from '../../src/services/queue-admission-service.js';
 import {
   seedEvent,
@@ -22,6 +22,7 @@ import {
 } from './test-helpers.js';
 
 const logger = createLogger({ serviceName: 'test' });
+const businessMetrics = createBusinessMetrics(createRegistry('test'));
 
 async function seedQueueConfig(
   infra: TestInfra,
@@ -80,7 +81,13 @@ describe('queue admission job', () => {
       },
     );
 
-    const job = startQueueAdmissionJob(infra.shardPools, redis.client, logger, 200);
+    const job = startQueueAdmissionJob(
+      infra.shardPools,
+      redis.client,
+      logger,
+      businessMetrics,
+      200,
+    );
     try {
       await waitFor(
         async () => (await redis.client.exists(admittedKey(eventId, 'first'))) === 1,
@@ -122,7 +129,13 @@ describe('queue admission job', () => {
       },
     );
 
-    const job = startQueueAdmissionJob(infra.shardPools, redis.client, logger, 200);
+    const job = startQueueAdmissionJob(
+      infra.shardPools,
+      redis.client,
+      logger,
+      businessMetrics,
+      200,
+    );
     try {
       await waitFor(() => Promise.resolve(notified.length > 0), {
         timeoutMs: 5000,

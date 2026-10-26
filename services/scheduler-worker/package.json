@@ -10,7 +10,10 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir tests/unit",
-    "test:integration": "vitest run --dir tests/integration --no-file-parallelism"
+    "test:integration": "vitest run --dir tests/integration --no-file-parallelism",
+    "reset-sale": "tsx src/scripts/reset-sale.ts",
+    "generate-sale-report": "tsx src/scripts/generate-sale-report.ts",
+    "seed-demo-events": "tsx src/scripts/seed-demo-events.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "1.10.0",

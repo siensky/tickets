@@ -106,3 +106,26 @@ resource "hcloud_server" "demo_workers" {
 
   depends_on = [hcloud_server.control_plane]
 }
+
+# Lastgenerator-VM:er (docs/plan.md "Lasttest") — INTE med i k3s-klustret
+# och INTE på det privata nätverket: de anropar klustrets PUBLIKA IP
+# precis som en riktig extern klient ska mätas göra, samma skäl som
+# huvudkörningen går direkt mot ingress i stället för via Cloudflare
+# (se firewall.tf/dns.tf). cloud-init/loadgen.yaml.tftpl installerar k6
+# och höjer fd-/sysctl-gränserna (docs/plan.md "Höj ... på BÅDA
+# generatorer och noder").
+resource "hcloud_server" "loadgen" {
+  count       = var.loadgen_node_count
+  name        = "tickets-loadgen-${count.index + 1}"
+  server_type = var.loadgen_server_type
+  image       = "ubuntu-24.04"
+  location    = var.hcloud_location
+  ssh_keys    = [hcloud_ssh_key.admin.id]
+  # EGEN brandvägg (firewall.tf: hcloud_firewall.loadgen), inte
+  # hcloud_firewall.cluster — den refererar loadgen-servrarnas IP:er för
+  # 443-allowlistningen, och en firewall_ids hit tillbaka till samma
+  # resurs hade gett en beroendecykel. Se firewall.tf:s kommentar.
+  firewall_ids = [hcloud_firewall.loadgen.id]
+
+  user_data = templatefile("${path.module}/cloud-init/loadgen.yaml.tftpl", {})
+}

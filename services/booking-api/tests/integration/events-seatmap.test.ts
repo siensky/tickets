@@ -9,7 +9,10 @@
 import { randomUUID } from 'node:crypto';
 import { NotFoundError } from '@tickets/domain';
 import type { Logger } from '@tickets/observability';
+import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { registerErrorHandler } from '../../src/routes/error-handler.js';
+import { registerEventRoutes } from '../../src/routes/events.js';
 import { getEvent, listAllEvents } from '../../src/services/events-service.js';
 import {
   getSectionGeometry,
@@ -69,6 +72,55 @@ describe('events + seatmap', () => {
       getEvent({ shardPools: db.shardPools, logger: LOGGER }, randomUUID()),
     ).rejects.toBeInstanceOf(NotFoundError);
   }, 60_000);
+
+  it('filters the listing by category and by a free-text search term (Fas 6)', async () => {
+    const venueId = randomUUID();
+    const sectionId = randomUUID();
+    const musicEventId = randomUUID();
+    const sportsEventId = randomUUID();
+    const pool = db.shardPools.pools[0];
+    await seedVenueWithSection(pool, {
+      venueId,
+      venueName: 'Filter Arena',
+      sectionId,
+      sectionName: 'A',
+    });
+    await seedEventForVenue(pool, {
+      eventId: musicEventId,
+      venueId,
+      title: 'Coldplay Live',
+      artist: 'Coldplay',
+      category: 'music',
+    });
+    await seedEventForVenue(pool, {
+      eventId: sportsEventId,
+      venueId,
+      title: 'Cup Final',
+      artist: 'Home Team',
+      category: 'sports',
+    });
+
+    const deps = { shardPools: db.shardPools, logger: LOGGER };
+    const musicOnly = await listAllEvents(deps, { category: 'music' });
+    expect(musicOnly.map((event) => event.id)).toContain(musicEventId);
+    expect(musicOnly.map((event) => event.id)).not.toContain(sportsEventId);
+
+    const searchResults = await listAllEvents(deps, { search: 'coldplay' });
+    expect(searchResults.map((event) => event.id)).toContain(musicEventId);
+    expect(searchResults.map((event) => event.id)).not.toContain(sportsEventId);
+  }, 60_000);
+
+  it('GET /events: 200 for a valid category query param, 400 for an unknown one (docs/rules.md §8)', async () => {
+    const app = Fastify();
+    registerErrorHandler(app);
+    registerEventRoutes(app, { shardPools: db.shardPools, logger: LOGGER });
+
+    const ok = await app.inject({ method: 'GET', url: '/events?category=music' });
+    expect(ok.statusCode).toBe(200);
+
+    const bad = await app.inject({ method: 'GET', url: '/events?category=cooking' });
+    expect(bad.statusCode).toBe(400);
+  }, 30_000);
 
   it('lists a venue section and its seat geometry, and rejects a section from another venue', async () => {
     const venueId = randomUUID();
