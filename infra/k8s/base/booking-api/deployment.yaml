@@ -47,10 +47,15 @@ spec:
           labelSelector:
             matchLabels:
               app: booking-api
-      # ghcr.io-paket pushade med GITHUB_TOKEN är privata som default —
-      # secreten skapas/uppdateras av deploy.yml vid varje körning.
-      imagePullSecrets:
-        - name: ghcr-pull-secret
+      # GHCR-paketen gjordes PUBLIKA (hittat live: `ghcr-pull-secret` byggdes
+      # på `secrets.GITHUB_TOKEN`, som upphör strax efter att workflow-
+      # körningen som skapade den avslutas — varje senare omschemaläggning,
+      # t.ex. HPA som skalar upp under ett lasttest, fick då `403 Forbidden`
+      # på en redan existerande men utgången token, trots att bilden var
+      # publik: en NÄRVARANDE men ogiltig credential blockerar anonym
+      # åtkomst i stället för att falla tillbaka till den). Ingen
+      # imagePullSecrets behövs längre — ta inte tillbaka den här utan att
+      # också lösa secret-rotationen (t.ex. en längre levande PAT) först.
       containers:
         - name: booking-api
           image: ghcr.io/siensky/tickets/booking-api:latest

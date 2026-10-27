@@ -17,10 +17,6 @@ spec:
   template:
     spec:
       restartPolicy: Never
-      # Se infra/k8s/base/booking-api/deployment.yaml: samma GHCR-secret,
-      # skapad i båda namnrymderna av deploy.yml.
-      imagePullSecrets:
-        - name: ghcr-pull-secret
       containers:
         - name: migrate
           image: ghcr.io/siensky/tickets/migrations:latest

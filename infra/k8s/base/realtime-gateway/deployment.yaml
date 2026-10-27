@@ -33,8 +33,6 @@ spec:
           labelSelector:
             matchLabels:
               app: realtime-gateway
-      imagePullSecrets:
-        - name: ghcr-pull-secret
       containers:
         - name: realtime-gateway
           image: ghcr.io/siensky/tickets/realtime-gateway:latest

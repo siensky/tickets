@@ -26,8 +26,6 @@ spec:
         app: notification-worker
     spec:
       terminationGracePeriodSeconds: 30
-      imagePullSecrets:
-        - name: ghcr-pull-secret
       containers:
         - name: notification-worker
           image: ghcr.io/siensky/tickets/notification-worker:latest

@@ -24,8 +24,6 @@ spec:
         app: scheduler-worker
     spec:
       terminationGracePeriodSeconds: 30
-      imagePullSecrets:
-        - name: ghcr-pull-secret
       containers:
         - name: scheduler-worker
           image: ghcr.io/siensky/tickets/scheduler-worker:latest

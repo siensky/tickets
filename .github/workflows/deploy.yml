@@ -212,22 +212,14 @@ jobs:
       - name: Create namespaces
         run: kubectl apply -f infra/k8s/base/namespaces/namespaces.yaml
 
-      # GHCR-paket pushade med GITHUB_TOKEN är PRIVATA som default — repots
-      # synlighet smittar inte av sig på paketet (verifiera under repots
-      # Packages-flik om det är oväntat). Pull-secreten byggs om och
-      # skrivs över i BÅDA namnrymderna vid varje körning, inte bara vid
-      # frånvaro som Postgres-lösenorden: GITHUB_TOKEN är giltigt bara
-      # under den här körningen, så en gammal secret pekar snart på ett
-      # utgånget token.
-      - name: Create GHCR pull secret
-        run: |
-          for ns in ticketing data; do
-            kubectl create secret docker-registry ghcr-pull-secret -n "$ns" \
-              --docker-server=ghcr.io \
-              --docker-username="${{ github.actor }}" \
-              --docker-password="${{ secrets.GITHUB_TOKEN }}" \
-              --dry-run=client -o yaml | kubectl apply -f -
-          done
+      # GHCR-paketen är PUBLIKA (hittat live under ett lasttest: en
+      # ghcr-pull-secret byggd på GITHUB_TOKEN upphör strax efter att DEN
+      # körningen avslutas — HPA som skalade upp långt senare fick `403
+      # Forbidden` på en redan utgången token, trots att paketet var
+      # publikt, eftersom en NÄRVARANDE men ogiltig credential blockerar
+      # anonym åtkomst i stället för att falla tillbaka till den). Ingen
+      # pull-secret skapas längre — se infra/k8s/base/booking-api/
+      # deployment.yaml för samma motivering.
 
       # Lösenorden genereras EN gång och lever bara i klustret — ingen
       # GitHub secret för dem. Rör aldrig en redan existerande secret
