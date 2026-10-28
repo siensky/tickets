@@ -1,11 +1,23 @@
 # docs/plan.md "Autoscaling": mål 70 % CPU, min 2, max 10.
-# `scaleDown.stabilizationWindowSeconds: 60` (standard 300) — kön töms
-# och poddarna ska skala ner inom demons tidsram, inte fem minuter
-# senare. Målet räknas mot `requests` (250m), inte `limits` (500m) —
-# just därför är de satt till 2× varandra i deployment.yaml: med ett
-# för lågt request hade en podd som drar 350m redan visat 350 %
-# utnyttjande och hoppat rakt till max, en kurva istället för ett
-# språng (se kommentaren i deployment.yaml).
+# `scaleDown.stabilizationWindowSeconds: 300` (Kubernetes standard) —
+# ett kortare fönster (t.ex. 60) provades men visade sig farligt under
+# en sammanhängande lasttestkörning: en enda kort dipp i CPU-metriken
+# (helt normalt i en ojämn men kontinuerlig trafikkurva, inte bara i
+# toppar) fick HPA:n att skala ner flera repliker SAMTIDIGT mitt i
+# pågående köpförsök, vilket dödade dem och orsakade en våg av
+# "connection reset"-fel hos riktiga användare (hittat live i Fas 6:s
+# lasttest). 300 är trögare men stabilt under riktig belastning, vilket
+# väger tyngre än att se autoskalningen reagera snabbt i en demo — sänk
+# den TILLFÄLLIGT (`kubectl patch hpa booking-api -n ticketing
+# --type='json' -p='[{"op":"replace","path":"/spec/behavior/scaleDown/stabilizationWindowSeconds","value":60}]'`)
+# strax före en live-demo om du vill se snabb nedskalning där, och sätt
+# tillbaka den efteråt.
+#
+# Målet räknas mot `requests` (250m), inte `limits` (500m) — just därför
+# är de satt till 2× varandra i deployment.yaml: med ett för lågt
+# request hade en podd som drar 350m redan visat 350 % utnyttjande och
+# hoppat rakt till max, en kurva istället för ett språng (se
+# kommentaren i deployment.yaml).
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
