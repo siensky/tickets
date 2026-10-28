@@ -62,10 +62,20 @@ function at(value: unknown, index: number): unknown {
  * Plockar ut en percentil/räknare ur k6:s `--summary-export`-JSON utan
  * att anta en fast typ på hela filen — exakta nyckelnamn varierar
  * mellan k6-versioner, `null` hellre än en krasch om en nyckel saknas.
+ *
+ * k6 0.5x/äldre nästlade dessa under en `values`-nyckel
+ * (`metrics[metric].values[value]`) — k6 2.3.0 (hittat live, en riktig
+ * körning gav bara `null` överallt annars) lägger dem direkt på metriken
+ * (`metrics[metric][value]`). Provar båda formerna.
  */
 function readK6Metric(summary: unknown, metric: string, value: string): number | null {
-  const raw = prop(prop(prop(prop(summary, 'metrics'), metric), 'values'), value);
-  return typeof raw === 'number' ? raw : null;
+  const metricEntry = prop(prop(summary, 'metrics'), metric);
+  const direct = prop(metricEntry, value);
+  if (typeof direct === 'number') {
+    return direct;
+  }
+  const nested = prop(prop(metricEntry, 'values'), value);
+  return typeof nested === 'number' ? nested : null;
 }
 
 async function queryOversellPreventedDuringRun(
@@ -115,7 +125,7 @@ async function generateReport(
     k6: {
       totalRequests: readK6Metric(summary, 'http_reqs', 'count'),
       requestsPerSecond: readK6Metric(summary, 'http_reqs', 'rate'),
-      requestsFailedRate: readK6Metric(summary, 'http_req_failed', 'rate'),
+      requestsFailedRate: readK6Metric(summary, 'http_req_failed', 'value'),
       latencyMsP50: readK6Metric(summary, 'http_req_duration', 'p(50)'),
       latencyMsP95: readK6Metric(summary, 'http_req_duration', 'p(95)'),
       latencyMsP99: readK6Metric(summary, 'http_req_duration', 'p(99)'),
