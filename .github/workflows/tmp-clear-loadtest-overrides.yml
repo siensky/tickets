@@ -1,0 +1,51 @@
+# TILLFÄLLIG — ta bort filen efter att den körts en gång (git rm + push).
+# Rensar lasttestets överskrivningar på booking-api i klustret. Körs av CI eftersom
+# CI-maskinen når klustret via Tailscale. Skriver aldrig ut hemliga värden.
+name: tmp-clear-loadtest-overrides
+
+on:
+  push:
+    branches: [hotfixes]
+    paths: ['.github/workflows/tmp-clear-loadtest-overrides.yml']
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          tags: tag:ci
+
+      - uses: azure/setup-kubectl@v4
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > "$HOME/.kube/config"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Clear load-test overrides on booking-api
+        run: |
+          set -euo pipefail
+          IDX=$(kubectl get deploy booking-api -n ticketing -o json \
+            | jq '.spec.template.spec.containers[0].env | map(.name) | index("STRIPE_WEBHOOK_SECRET")')
+          HAS_VALUE=$(kubectl get deploy booking-api -n ticketing -o json \
+            | jq ".spec.template.spec.containers[0].env[$IDX].value != null")
+          echo "STRIPE_WEBHOOK_SECRET index=$IDX har literal value=$HAS_VALUE"
+          if [ "$HAS_VALUE" = "true" ]; then
+            kubectl patch deploy booking-api -n ticketing --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/$IDX\",\"value\":{\"name\":\"STRIPE_WEBHOOK_SECRET\",\"valueFrom\":{\"secretKeyRef\":{\"name\":\"tickets-app-secrets\",\"key\":\"stripe-webhook-secret\"}}}}]"
+          fi
+          kubectl set env deployment/booking-api -n ticketing STRIPE_HOST- STRIPE_PORT- RATE_LIMIT_ALLOWLISTED_IPS-
+          kubectl scale deployment/payment-mock -n ticketing --replicas=1
+          kubectl rollout status deployment/booking-api -n ticketing --timeout=180s
+
+      - name: Show result (names only, no values)
+        run: |
+          kubectl get deploy booking-api -n ticketing -o json \
+            | jq -c '.spec.template.spec.containers[0].env[] | select(.name|test("STRIPE|RATE_LIMIT")) | {name, fromSecret: (.valueFrom.secretKeyRef != null), literal: (.value != null)}'
+
+      - uses: actions/checkout@v5
+
+      - name: Verify manifests now apply cleanly
+        run: kubectl kustomize infra/k8s/overlays/production | kubectl apply --dry-run=server -f -

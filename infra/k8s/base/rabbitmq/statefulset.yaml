@@ -47,6 +47,28 @@ spec:
       # skriva Mnesia-data (eller .erlang.cookie) till /var/lib/rabbitmq.
       securityContext:
         fsGroup: 999
+      # fsGroup chown:ar om volymen vid VARJE ommontering (t.ex. pod
+      # omschemalagd till en ny nod efter en statefulset-uppdatering),
+      # vilket gör .erlang.cookie grupp-läsbar — RabbitMQ 4 vägrar starta
+      # då ("must be accessible by owner only"). Sätts tillbaka till 400
+      # innan huvudcontainern startar.
+      initContainers:
+        - name: fix-cookie-perms
+          image: rabbitmq:4-management-alpine
+          command:
+            [
+              'sh',
+              '-c',
+              'touch /var/lib/rabbitmq/.erlang.cookie && chmod 400 /var/lib/rabbitmq/.erlang.cookie',
+            ]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+          securityContext:
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
       containers:
         - name: rabbitmq
           image: rabbitmq:4-management-alpine
@@ -73,11 +95,11 @@ spec:
               subPath: enabled_plugins
           resources:
             requests:
-              cpu: 100m
+              cpu: 200m
               memory: 256Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 1500m
+              memory: 768Mi
           # B15-liknande resonemang som postgres-shard-0: Mnesia-återuppspelning
           # efter en hård nedstängning kan ta längre än en vanlig
           # liveness-cykel tillåter.
