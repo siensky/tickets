@@ -1799,7 +1799,7 @@ hela gruppen är klar. En merge till `main` startar deployen.
 | Branch | Steg | Mergas |
 |---|---|---|
 | A1 `fas7-ci` | 1a (7.10) | först, gör alla senare steg snabbare |
-| A2 `fas7-drift` | 1b (7.1 + 7.2), 2–3 | före försvaret |
+| A2 `fas7-drift` | 1b (7.1 + 7.2), 2–3 (steg 2 byggdes i `fas7-matbarhet`) | före försvaret |
 | A3 `fas7-cdn` | 1c (7.19) | före B:s seed (steg 6), helst direkt efter A2 |
 | B `fas7-backend` | 4–6 | före C |
 | C `fas7-ui` | 7 | före försvaret |
@@ -1822,8 +1822,8 @@ telefon), samt en genomgång av UI:t i prod efter C. För övriga steg räcker g
 | 1a | **[G]** Snabbare CI (branch A1) | 7.10 | 0 | CI ≤ ~6 min. *Status: byggt och granskat, väntar på merge + mätning av andra deploy-körningen* |
 | 1b | **[G]** Drift (branch A2) | 7.1 (permanenta ändringar + `loadtest-mode.sh`), 7.2 Loki | 0 | Loki visar loggar i Grafana. `loadtest-mode on/off` provkört. *Status: byggt och granskat, väntar på merge, `terraform apply` och provkörning* |
 | 1c | **[G]** cdn (branch A3) | 7.19 | 0 | `cdn.tikknet.se/brand/tikknet-icon.svg` svarar 200. *Status: byggt och granskat, väntar på merge, `terraform apply` och `curl`-verifiering* |
-| 2 | **[VG]** Mätbarhet | ingress-nginx-metrics, 7.4 Grafana-paneler, 7.5 återställningsövning | 1b | Panelerna visar data. RPO/RTO ifyllt i runbook |
-| 3 | **[VG]** Bevis | 7.3 deploy utan nertid. *Obs: `loadtest-mode on` lämnar `STRIPE_WEBHOOK_SECRET` som literal, vilket failar `kubectl apply` i en riktig deploy. Måste lösas före steg 3 (se 1b-rapporten).* | 2 | `http_req_failed rate==0` under minst en riktig deploy. Bevis i `docs/evidence/zero-downtime.md` |
+| 2 | **[VG]** Mätbarhet | ingress-nginx-metrics, 7.4 Grafana-paneler, 7.5 återställningsövning | 1b | Panelerna visar data. RPO/RTO ifyllt i runbook. *Status: byggt och granskat (`feature/fas7-matbarhet`). Väntar på merge, `terraform apply -target=helm_release.ingress_nginx`, att användaren verifierar panelerna i Grafana och kör övningen i runbooken (RPO/RTO-tabellen är ofylld).* |
+| 3 | **[VG]** Bevis | 7.3 deploy utan nertid. *Obs: `loadtest-mode on` lämnar `STRIPE_WEBHOOK_SECRET` som literal, vilket failar `kubectl apply` i en riktig deploy. Måste lösas före steg 3 (se 1b-rapporten).* *Obs från steg 2:* ingress-5xx-panelen ser inte de första 5xx-svaren (en ny `status`-serie startar på 1 och `rate()` räknar inte det första hoppet). `k6 http_req_failed` är det primära beviset. Läs dessutom råräknaren `nginx_ingress_controller_requests{status=~"5.."}` före/efter körningen och dokumentera det i `docs/evidence/zero-downtime.md`. | 2 | `http_req_failed rate==0` under minst en riktig deploy. Bevis i `docs/evidence/zero-downtime.md` |
 | 4 | Säkerhetsnät | 7.14 systemtester F1–F6 mot *nuvarande* API (inga nya fält) + Pact-infrastruktur och kontrakten för befintliga endpoints (7.9) | 1a | Gröna i CI. Byggs *före* API-ändringarna, så de skyddar dagens beteende när allt byggs om |
 | 5 | Backend | E1–E6 + E8 + E9, migrationerna, Pact-kontrakten för dem, systemtesterna utökade med de nya fälten | 4 | Allt grönt. Nya fält syns i prod. Gamla frontenden fungerar oförändrad |
 | 6 | Seed | 7.6 CSV + bilder (bilderna godkänns av användaren först) + layout (E3) | 5, 1c (cdn) | 20 events syns i prod-API:t med `imageUrl`. Kartöversikt-data finns |
