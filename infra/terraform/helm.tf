@@ -158,12 +158,12 @@ resource "helm_release" "ingress_nginx" {
       }
       resources = {
         requests = {
-          cpu    = "100m"
-          memory = "128Mi"
+          cpu    = "200m"
+          memory = "256Mi"
         }
         limits = {
-          cpu    = "500m"
-          memory = "256Mi"
+          cpu    = "1000m"
+          memory = "512Mi"
         }
       }
     }
