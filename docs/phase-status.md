@@ -9,6 +9,7 @@ Läs båda innan en ny fas påbörjas.
 - Deployen under beviset är `kubectl rollout restart deployment/booking-api` ×2, inte en merge genom pipelinen (literal `STRIPE_WEBHOOK_SECRET` under `loadtest-mode on` failar `kubectl apply`). Beslut av användaren, motivering i `docs/forsvar.md`. `loadtest-mode.sh` är oförändrat.
 - Körordning i `docs/runbook.md` "Bevis: deploy utan nertid". Serverbeviset läses som rå `sum(nginx_ingress_controller_requests{status=~"5..", service!="metrics-blackhole"})` före/efter.
 - `docs/evidence/zero-downtime.md` är en mall: resultatrutorna fylls i av användaren efter körningen. Beviset är ALDRIG körd än.
+- **PÅMINNELSE:** beviset körs senare, när branch C (`fas7-ui`, steg 7) är klar och före försvaret 4/11. Steg 3 är [VG] och är inte klart förrän `docs/evidence/zero-downtime.md` är ifylld. Branch B får inte mergas före beviset (plan 7.16).
 
 ## Fas 7, steg 2 — mätbarhet (`feature/fas7-matbarhet`)
 
