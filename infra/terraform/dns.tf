@@ -1,7 +1,5 @@
-# Endast api.<domän> skapas i Fas 1 — det är vad Fas 1 faktiskt levererar
-# (booking-api med health+metrics). cdn.<domän> och apex-domänen pekar mot
-# resurser som inte finns förrän Fas 5 (PWA-deploy till R2/B2) och läggs
-# till då, inte här.
+# Endast api.<domän> skapas här. Apex-domänen och cdn.<domän> pekar mot Workers
+# och skapas i cloudflare-frontend.tf (de skapar sina egna DNS-poster).
 data "cloudflare_zone" "this" {
   filter = {
     name = var.domain_name

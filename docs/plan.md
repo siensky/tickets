@@ -1821,7 +1821,7 @@ telefon), samt en genomgång av UI:t i prod efter C. För övriga steg räcker g
 | 0 | Förberedelser | commit av `hotfixes`-branchen (rabbitmq, helm.tf, LASTTEST-NOTES, planen). Användarens manuella steg i 7.17 påbörjas (kan pågå parallellt med steg 1–5) | — | `main` innehåller allt från lasttestet |
 | 1a | **[G]** Snabbare CI (branch A1) | 7.10 | 0 | CI ≤ ~6 min. *Status: byggt och granskat, väntar på merge + mätning av andra deploy-körningen* |
 | 1b | **[G]** Drift (branch A2) | 7.1 (permanenta ändringar + `loadtest-mode.sh`), 7.2 Loki | 0 | Loki visar loggar i Grafana. `loadtest-mode on/off` provkört. *Status: byggt och granskat, väntar på merge, `terraform apply` och provkörning* |
-| 1c | **[G]** cdn (branch A3) | 7.19 | 0 | `cdn.tikknet.se/brand/tikknet-icon.svg` svarar 200 |
+| 1c | **[G]** cdn (branch A3) | 7.19 | 0 | `cdn.tikknet.se/brand/tikknet-icon.svg` svarar 200. *Status: byggt och granskat, väntar på merge, `terraform apply` och `curl`-verifiering* |
 | 2 | **[VG]** Mätbarhet | ingress-nginx-metrics, 7.4 Grafana-paneler, 7.5 återställningsövning | 1b | Panelerna visar data. RPO/RTO ifyllt i runbook |
 | 3 | **[VG]** Bevis | 7.3 deploy utan nertid. *Obs: `loadtest-mode on` lämnar `STRIPE_WEBHOOK_SECRET` som literal, vilket failar `kubectl apply` i en riktig deploy. Måste lösas före steg 3 (se 1b-rapporten).* | 2 | `http_req_failed rate==0` under minst en riktig deploy. Bevis i `docs/evidence/zero-downtime.md` |
 | 4 | Säkerhetsnät | 7.14 systemtester F1–F6 mot *nuvarande* API (inga nya fält) + Pact-infrastruktur och kontrakten för befintliga endpoints (7.9) | 1a | Gröna i CI. Byggs *före* API-ändringarna, så de skyddar dagens beteende när allt byggs om |
@@ -1956,6 +1956,9 @@ förutsättningar är klara:
 - *Medvetet inte flyttat:* JS- och CSS-bundlen ligger kvar på apex. Att flytta den
   skulle kräva cross-origin-precache i service workern (PWA:n), en onödig risk. Eventbilder
   och varumärkesfiler på cdn uppfyller kravet "statiska filer på cdn.<domän>".
+- *Notering till steg 6/7:* Workern svarar inte 304 på `If-None-Match` och cachar inte vid
+  kanten, så varje bildvisning är en R2-läsning och allt hämtas om efter 24 h. Räcker för
+  demon; om eventkorten blir märkbart långsamma, lägg till `get(key, { onlyIf })` + 304.
 - *Verifiering:* `curl -I https://cdn.tikknet.se/brand/tikknet-icon.svg` → 200 +
   cache-header. Eventkorten laddar bilder från `cdn.tikknet.se`.
 

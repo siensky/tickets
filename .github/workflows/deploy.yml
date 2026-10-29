@@ -136,6 +136,22 @@ jobs:
             -e RCLONE_CONFIG_R2_ENDPOINT="${{ secrets.R2_ENDPOINT }}" \
             rclone/rclone:1.75.2 sync /data "r2:${{ secrets.R2_BUCKET }}/frontend/"
 
+      # docs/plan.md 7.19: varumärkesfiler serveras även från cdn.<domän> (Workern
+      # cdn-proxy läser bara prefixen brand/ och images/). Egen mapp som källa, så
+      # `sync` bara kan radera inom brand/.
+      - name: Upload brand files to R2 (cdn)
+        run: |
+          # Saknas mappen skapar docker -v en tom katalog och sync tömmer brand/ tyst.
+          test -d apps/web/public/brand
+          docker run --rm -v "$PWD/apps/web/public/brand:/data" \
+            -e RCLONE_CONFIG_R2_TYPE=s3 \
+            -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+            -e RCLONE_CONFIG_R2_ENV_AUTH=false \
+            -e RCLONE_CONFIG_R2_ACCESS_KEY_ID="${{ secrets.R2_ACCESS_KEY_ID }}" \
+            -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="${{ secrets.R2_SECRET_ACCESS_KEY }}" \
+            -e RCLONE_CONFIG_R2_ENDPOINT="${{ secrets.R2_ENDPOINT }}" \
+            rclone/rclone:1.75.2 sync /data "r2:${{ secrets.R2_BUCKET }}/brand/"
+
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
