@@ -3,11 +3,20 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Fas 7, steg 3 — bevis (`feature/fas7-zero-downtime`)
+
+- `tests/load/deploy-under-load.js`: egen profil (10 iterationer/s i 5 min, 1 stol per försök så eventet inte säljer slut), 409 räknas som korrekt svar. Thresholds: `http_req_failed rate==0`, `dropped_iterations count==0`, `checks rate==1`, `completed_bookings count>0` (de två sista utöver planen, mot falskt "0 fel").
+- Deployen under beviset är `kubectl rollout restart deployment/booking-api` ×2, inte en merge genom pipelinen (literal `STRIPE_WEBHOOK_SECRET` under `loadtest-mode on` failar `kubectl apply`). Beslut av användaren, motivering i `docs/forsvar.md`. `loadtest-mode.sh` är oförändrat.
+- Körordning i `docs/runbook.md` "Bevis: deploy utan nertid". Serverbeviset läses som rå `sum(nginx_ingress_controller_requests{status=~"5..", service!="metrics-blackhole"})` före/efter.
+- `docs/evidence/zero-downtime.md` är en mall: resultatrutorna fylls i av användaren efter körningen. Beviset är ALDRIG körd än.
+- **PÅMINNELSE:** beviset körs senare, när branch C (`fas7-ui`, steg 7) är klar och före försvaret 4/11. Steg 3 är [VG] och är inte klart förrän `docs/evidence/zero-downtime.md` är ifylld. Branch B får inte mergas före beviset (plan 7.16).
+
 ## Fas 7, steg 2 — mätbarhet (`feature/fas7-matbarhet`)
 
-- `helm.tf`: ingress-nginx `controller.metrics` + `serviceMonitor` på (+ `depends_on` kube_prometheus_stack, som äger ServiceMonitor-CRD:n). Applicera `-target=helm_release.ingress_nginx`.
+- `helm.tf`: ingress-nginx `controller.metrics` + `serviceMonitor` på. Applicera `-target=helm_release.ingress_nginx`. Inget `depends_on` på kube_prometheus_stack: det drog med `kubernetes_secret.alertmanager_slack` (oväntad drift) i `-target`-planen. Vid en helt ny klusteruppsättning: applicera kube-prometheus-stack före ingress-nginx, annars saknas ServiceMonitor-CRD:n.
 - `dashboards.yaml` ("Autoscaling & lasttest"): demo-panel (repliker + CPU % av request + request rate), zero-downtime-rad (ingress-5xx/s, ready-repliker, ingress request rate), deploy-annotation. Ingress-5xx exkluderar `metrics-blackhole` (`/metrics` svarar medvetet 503) och visar 0 bara när måtten skrapas.
-- `runbook.md`: restore-övningen körs i en tillfällig podd i `data`. **RPO/RTO-tabellen är fortfarande ofylld**: användaren kör övningen och verifierar panelerna i Grafana.
+- `runbook.md`: restore-övningen körs i en tillfällig podd i `data`. RPO/RTO ifylld efter övningen (se nedan). Panelerna är verifierade i Grafana.
+- Återställningsövningen (7.5) körd 29/10: RTO ≈ 3 s (hämtning + restore, shard 1 med 2 695 biljetter), kronjuvel-kontrollen OK. RPO i drift är upp till 24 h. Övningen avslöjade att nattens backup aldrig nått R2 (rclone `CreateBucket` → 403); fixat med `--s3-no-check-bucket` i `cronjob.yaml`. Shard 0 var tom vid övningen: kör om efter seedet (steg 6) för ett starkare bevis.
 - Öppet: deploy-annotationen (planens uttryck) triggas även av HPA-skalning, se rapporten.
 
 ## Fas 7, steg 1c — cdn (`feature/fas7-cdn`)
@@ -160,8 +169,8 @@ baklänges).
 
 **Lasttest-infrastruktur byggd, ALDRIG körd** (ingen k6-binär eller kluster i
 byggmiljön): `tests/load/{smoke,queue-storm,normal-sale,spike-sale}.js` +
-`lib/{config,booking-flow}.js`, `deploy-under-load.js`/`shard-failure.js` återexporterar
-normal-sale. `queue-storm.js` använder en RIKTIG WebSocket (`k6/ws`) mot
+`lib/{config,booking-flow}.js`, `shard-failure.js` återexporterar
+normal-sale (`deploy-under-load.js` har egen profil sedan Fas 7 steg 3). `queue-storm.js` använder en RIKTIG WebSocket (`k6/ws`) mot
 realtime-gateway — särskilt overifierad, smoke-testa den specifikt först.
 `queue_admission_rate_per_minute` MÅSTE höjas live (config-tabellen) innan
 normal-sale/spike-sale körs på riktigt, annars växer kön obegränsat (se kommentaren i

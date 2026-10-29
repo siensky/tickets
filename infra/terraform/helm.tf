@@ -127,9 +127,7 @@ resource "helm_release" "ingress_nginx" {
   version    = "4.15.1"
   namespace  = kubernetes_namespace.ingress_nginx.metadata[0].name
 
-  # kube_prometheus_stack installerar ServiceMonitor-CRD:n som
-  # controller.metrics.serviceMonitor nedan kräver.
-  depends_on = [helm_release.hcloud_ccm, helm_release.kube_prometheus_stack]
+  depends_on = [helm_release.hcloud_ccm]
 
   values = [yamlencode({
     controller = {

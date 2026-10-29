@@ -147,12 +147,22 @@ kubectl -n data delete pod restore-test
 rm ./restore-test.dump
 ```
 
-**Tidtagning (RPO/RTO) — fyll i vid faktisk körning:**
+**Tidtagning (RPO/RTO) — körd 29/10 2026, shard 1 (1 event, 911 ordrar, 2 695 biljetter):**
 
 | Steg | Tid |
 |---|---|
-| Hitta + hämta senaste dumpen (RPO-underlag — hur gammal är den?) | _ej körd än_ |
-| `pg_restore` + verifiering (RTO-underlag) | _ej körd än_ |
+| Hitta + hämta senaste dumpen (RPO-underlag) | 1,3 s. Dumpen var några minuter gammal (manuellt startat jobb), så det är **inte** det verkliga RPO-värdet, se nedan |
+| `pg_restore` | 1,3 s |
+| Verifiering | Antal 1 / 911 / 2 695 = live. Giltiga biljetter 2 695 = distinkta stolar 2 695 |
+
+**RTO ≈ 3 sekunder** för den här datamängden (hämtning + restore), plus det manuella arbetet
+(starta testdatabas, `kubectl cp`, köra kommandona): några minuter totalt. Med en större
+databas växer tiden med dumpens storlek. Shard 0 var tom vid övningen (återställde utan fel).
+Övningen kördes mot en tillfällig podd, aldrig mot en shard i drift.
+
+Första försöket hittade att nattens backup aldrig nått R2: `rclone` försökte skapa
+bucketen och R2-nyckeln saknar den rättigheten (403). Fixat med `--s3-no-check-bucket` i
+`infra/k8s/base/backup/cronjob.yaml`.
 
 RPO är i praktiken **upp till 24 timmar** (nattlig dump, inget kontinuerligt WAL-arkiv)
 — ett medvetet val, inte en brist: `docs/plan.md` kräver inte point-in-time recovery
@@ -233,6 +243,43 @@ when `value` is not empty").
 
 Scriptet rör inte terraform: sätt `loadgen_node_count` tillbaka till 0 och kör
 `terraform apply` själv efteråt, så loadgen-VM:erna inte kostar pengar.
+
+## Bevis: deploy utan nertid (Fas 7, steg 3)
+
+Mål: noll misslyckade requests medan `booking-api` rullas ut. Resultatet sparas i
+`docs/evidence/zero-downtime.md`. Förutsätter `loadtest-mode`-läget och minst en
+loadgen-VM (`loadgen_node_count` ≥ 1).
+
+Deployen är `kubectl rollout restart` (två gånger), inte en merge genom pipelinen: under
+`loadtest-mode on` ligger `STRIPE_WEBHOOK_SECRET` som literal, och då failar pipelinens
+`kubectl apply`. Rollouten använder samma strategi som en riktig deploy (`maxUnavailable: 0`,
+probes, preStop). Se `docs/forsvar.md`.
+
+1. **Slå på läget:** `scripts/loadtest-mode.sh on`. Kör `smoke.js` enligt utskriften.
+2. **Nollställ eventet** (efter smoke, så beviset startar rent): `pnpm run reset-sale -- <eventId>`
+   i `services/scheduler-worker`. Kräver port-forward och miljövariabler, se
+   `infra/LASTTEST-NOTES.md` "Lokal DB-åtkomst för scheduler-worker-script".
+3. **Läs räknaren FÖRE** i Grafana → Explore (Prometheus):
+   `sum(nginx_ingress_controller_requests{status=~"5..", service!="metrics-blackhole"})` (visar "No data" om inga 5xx
+   någonsin setts: skriv då 0). `metrics-blackhole` utesluts eftersom `/metrics` medvetet
+   svarar 503 (samma filter som dashboardpanelen). Anteckna värdet.
+4. **Starta k6** på loadgen-VM:en:
+   ```sh
+   k6 run --summary-export=/tmp/zero-downtime-summary.json \
+     -e BASE_URL=https://loadtest.tikknet.se -e EVENT_ID=<uuid> -e AUTH_TOKENS=<tok1,tok2,...> \
+     tests/load/deploy-under-load.js
+   ```
+5. **Deploya under körningen** (efter ca 1 min, och igen efter ca 3 min):
+   `kubectl rollout restart deployment/booking-api -n ticketing` och vänta på
+   `kubectl rollout status deployment/booking-api -n ticketing` mellan gångerna.
+   Starta **inte** om några ingress-poddar (DNS round-robin mot nod-IP:erna, ingen
+   hälsokontroll: klienter får "connection refused").
+6. **Läs resultatet:** k6-summaryn ska visa `http_req_failed` 0,00 %, `dropped_iterations` 0
+   och inga röda thresholds (k6 avslutar med felkod annars). Läs räknaren **EFTER** med
+   samma fråga som i steg 3: samma värde = inga 5xx. Ta en Grafana-skärmdump av
+   "Autoscaling & lasttest" → zero-downtime-raden med tidsintervallet för körningen.
+7. **Städa:** `scripts/loadtest-mode.sh off`, `loadgen_node_count` tillbaka till 0 och
+   `terraform apply`.
 
 ## Lasttest: allowlista generatorernas IP:n i rate limitern (Fas 6)
 
