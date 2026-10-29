@@ -81,7 +81,9 @@ spec:
               args:
                 - |
                   set -eu
-                  rclone copy /dumps "r2:${R2_BUCKET}/postgres/" --no-traverse
+                  # --s3-no-check-bucket: R2-nyckeln får skriva objekt men inte
+                  # skapa buckets, och rclone försöker annars CreateBucket → 403.
+                  rclone copy /dumps "r2:${R2_BUCKET}/postgres/" --no-traverse --s3-no-check-bucket
                   # 7 dagars rullande historik (docs/plan.md "Backups").
                   rclone delete "r2:${R2_BUCKET}/postgres/" --min-age 7d
               env:
