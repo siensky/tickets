@@ -995,7 +995,9 @@ Dokumenteras i runbooken.
 default (multi-tenant), Alloy skickar ingen `X-Scope-OrgID` → 401 på varje loggbatch,
 noll loggar sparade. Vi har en tenant, så: `loki.auth_enabled = false` i
 `helm_release.loki` (`infra/terraform/observability.tf`). Ingen ändring i Alloy eller i
-Grafanas datakälla. Applicera med `terraform apply -target=helm_release.loki`.
+Grafanas datakälla. Applicera med `terraform apply -target=helm_release.loki -target=helm_release.alloy`
+(Alloy behöver en ServiceMonitor, `alloy.serviceMonitor.enabled`, annars skrapas dess mått inte och larmet nedan
+kan aldrig utlösas).
 Verifiering: (1) inga nya 401 i Alloys logg, (2) Grafana Explore `{namespace="ticketing"}`
 visar rader, (3) Lokis labels-API returnerar `namespace`/`pod`. Plus ett larm i
 `prometheusrule.yaml` på Alloys dropped-entries-mått (exakt namn verifieras i Alloys
@@ -1818,10 +1820,10 @@ telefon), samt en genomgång av UI:t i prod efter C. För övriga steg räcker g
 |---|---|---|---|---|
 | 0 | Förberedelser | commit av `hotfixes`-branchen (rabbitmq, helm.tf, LASTTEST-NOTES, planen). Användarens manuella steg i 7.17 påbörjas (kan pågå parallellt med steg 1–5) | — | `main` innehåller allt från lasttestet |
 | 1a | **[G]** Snabbare CI (branch A1) | 7.10 | 0 | CI ≤ ~6 min. *Status: byggt och granskat, väntar på merge + mätning av andra deploy-körningen* |
-| 1b | **[G]** Drift (branch A2) | 7.1 (permanenta ändringar + `loadtest-mode.sh`), 7.2 Loki | 0 | Loki visar loggar i Grafana. `loadtest-mode on/off` provkört |
+| 1b | **[G]** Drift (branch A2) | 7.1 (permanenta ändringar + `loadtest-mode.sh`), 7.2 Loki | 0 | Loki visar loggar i Grafana. `loadtest-mode on/off` provkört. *Status: byggt och granskat, väntar på merge, `terraform apply` och provkörning* |
 | 1c | **[G]** cdn (branch A3) | 7.19 | 0 | `cdn.tikknet.se/brand/tikknet-icon.svg` svarar 200 |
 | 2 | **[VG]** Mätbarhet | ingress-nginx-metrics, 7.4 Grafana-paneler, 7.5 återställningsövning | 1b | Panelerna visar data. RPO/RTO ifyllt i runbook |
-| 3 | **[VG]** Bevis | 7.3 deploy utan nertid | 2 | `http_req_failed rate==0` under minst en riktig deploy. Bevis i `docs/evidence/zero-downtime.md` |
+| 3 | **[VG]** Bevis | 7.3 deploy utan nertid. *Obs: `loadtest-mode on` lämnar `STRIPE_WEBHOOK_SECRET` som literal, vilket failar `kubectl apply` i en riktig deploy. Måste lösas före steg 3 (se 1b-rapporten).* | 2 | `http_req_failed rate==0` under minst en riktig deploy. Bevis i `docs/evidence/zero-downtime.md` |
 | 4 | Säkerhetsnät | 7.14 systemtester F1–F6 mot *nuvarande* API (inga nya fält) + Pact-infrastruktur och kontrakten för befintliga endpoints (7.9) | 1a | Gröna i CI. Byggs *före* API-ändringarna, så de skyddar dagens beteende när allt byggs om |
 | 5 | Backend | E1–E6 + E8 + E9, migrationerna, Pact-kontrakten för dem, systemtesterna utökade med de nya fälten | 4 | Allt grönt. Nya fält syns i prod. Gamla frontenden fungerar oförändrad |
 | 6 | Seed | 7.6 CSV + bilder (bilderna godkänns av användaren först) + layout (E3) | 5, 1c (cdn) | 20 events syns i prod-API:t med `imageUrl`. Kartöversikt-data finns |

@@ -175,7 +175,36 @@ fungera obrutet, kör mot två olika `EVENT_ID` (ett per shard — se vilken
 shard ett givet id hashar till via `shared/db/src/shard-router.ts`s
 `hashEventIdToShardIndex`) och jämför rapporterna för de två.
 
+## Lasttest: `loadtest-mode` (Fas 7)
+
+`scripts/loadtest-mode.sh on|off` växlar allt som medvetet **inte** är permanent i git
+(docs/plan.md 7.1), så inget manuellt steg kan glömmas. Kräver `kubectl` mot klustret
+(Tailscale), `jq` och terraform initierat i `infra/terraform`.
+
+```sh
+scripts/loadtest-mode.sh on [admission_rate_per_minute]   # default 3600 (spike-sale: minst 24000)
+scripts/loadtest-mode.sh off
+```
+
+`on` sätter: loadgen-IP:erna i `RATE_LIMIT_ALLOWLISTED_IPS`, `STRIPE_HOST`/`STRIPE_PORT`
+mot payment-mock och `STRIPE_WEBHOOK_SECRET` till mockens secret (via stdin, aldrig som
+argument), `queue_admission_rate_per_minute` i config-tabellen på shard 0, och 4
+payment-mock-repliker. Det skriver sedan ut smoke-kommandot och DB-kontrollen (ordrarna ska
+bli `paid`, inte bara 201 från checkout). Kör alltid smoke innan en stor körning.
+
+`off` tar bort överskrivningarna, återställer `STRIPE_WEBHOOK_SECRET` till sin
+`secretKeyRef` (JSON-patch på env-indexet), sätter insläppet till 300 och payment-mock
+till 1 replik, och avslutar med samma server-dry-run som CI:s `k8s-dry-run`. Lämnas en
+literal `STRIPE_WEBHOOK_SECRET` kvar failar nästa deploy ("valueFrom may not be specified
+when `value` is not empty").
+
+Scriptet rör inte terraform: sätt `loadgen_node_count` tillbaka till 0 och kör
+`terraform apply` själv efteråt, så loadgen-VM:erna inte kostar pengar.
+
 ## Lasttest: allowlista generatorernas IP:n i rate limitern (Fas 6)
+
+> Sedan Fas 7 görs detta av `scripts/loadtest-mode.sh` (se ovan). Stegen nedan är kvar som
+> bakgrund till motiveringen.
 
 `services/booking-api/src/routes/rate-limit.ts`s `RATE_LIMIT_ALLOWLISTED_IPS`
 (docs/plan.md "Lasttest": "Lastgeneratorernas CF-verifierade adresser

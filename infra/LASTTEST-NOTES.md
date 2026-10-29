@@ -1,5 +1,11 @@
 # Lasttest & infra — lärdomar (2026-10-28)
 
+> **Fas 7 (feature/fas7-drift):** punkt 1 (Loki), 3 (webhook-secret) och 4 (cloud-init) nedan är
+> åtgärdade i kod. Lasttestläget växlas nu med `scripts/loadtest-mode.sh on|off` (se
+> `docs/runbook.md` "Lasttest: `loadtest-mode`"), som ersätter checklistans punkt 0, 2 och 3.
+> Punkt 4 i cloud-init-avsnittet (den manuella kommandoraden) behålls som reserv om en ny
+> loadgen-VM ändå saknar k6.
+
 Snabb checklista + kända fallgropar. Läs detta INNAN nästa lasttestkörning.
 
 ## Förbättringar som måste göras (prioritetsordning)

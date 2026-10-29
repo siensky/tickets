@@ -201,6 +201,10 @@ resource "helm_release" "loki" {
   values = [yamlencode({
     deploymentMode = "Monolithic"
     loki = {
+      # Chartet har auth_enabled=true (multi-tenant) som default, och Alloy
+      # skickar ingen X-Scope-OrgID → 401 på varje loggbatch, noll loggar
+      # sparade. Vi har en tenant (docs/plan.md 7.2).
+      auth_enabled = false
       commonConfig = { replication_factor = 1 }
       storage      = { type = "filesystem" }
       limits_config = {
@@ -268,7 +272,8 @@ resource "helm_release" "alloy" {
   version    = "1.14.2"
   namespace  = kubernetes_namespace.observability.metadata[0].name
 
-  depends_on = [helm_release.loki]
+  # kube_prometheus_stack: serviceMonitor nedan kräver att CRD:n redan finns.
+  depends_on = [helm_release.loki, helm_release.kube_prometheus_stack]
 
   values = [yamlencode({
     alloy = {
@@ -299,5 +304,9 @@ resource "helm_release" "alloy" {
         },
       ]
     }
+    # Alloys egna mått (loki_write_dropped_entries_total) skrapas av
+    # Prometheus via en ServiceMonitor — utan den kan larmet i
+    # infra/k8s/base/monitoring/prometheusrule.yaml aldrig utlösas.
+    serviceMonitor = { enabled = true }
   })]
 }

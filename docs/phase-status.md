@@ -3,6 +3,16 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Fas 7, steg 1b — drift (`feature/fas7-drift`)
+
+- Cloud-init (loadgen): eget `GNUPGHOME`, `dirmngr` startas, retry-loop, `command -v k6 || exit 1`.
+- payment-mock CPU-gräns 500m (övriga 7.1-värden fanns redan från hotfixes).
+- `scripts/loadtest-mode.sh on [rate]|off` (se runbook). Insläppsvärdet återställs alltid till 300.
+- Loki `auth_enabled = false`. Beslut utöver planen: Alloy-chartets `serviceMonitor` på (+ `depends_on`
+  kube_prometheus_stack), annars skrapas inte `loki_write_dropped_entries_total` och larmet
+  `AlloyLogEntriesDropped` kan inte utlösas. Applicera loki + alloy; verifiera måttnamnet i Prometheus.
+- Känt för steg 3: `on` lämnar en literal `STRIPE_WEBHOOK_SECRET`; en riktig deploy under `on` failar.
+
 ## Fas 7, steg 1a — snabbare CI (`feature/fas7-ci`)
 
 Fas 7:s steg 1 är delat i 1a (CI), 1b (drift: 7.1 + 7.2) och 1c (cdn, 7.19), en branch

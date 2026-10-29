@@ -48,3 +48,14 @@ spec:
           annotations:
             summary: '{{ $labels.namespace }}/{{ $labels.pod }} startar om upprepat'
             description: '{{ $value }} omstarter av {{ $labels.container }} på 15 minuter.'
+
+        # docs/plan.md 7.2: Loki gav 401 på varje batch utan att något larmade, och
+        # noll loggar sparades i flera dagar. Mäter Alloys egna förlorade rader.
+        - alert: AlloyLogEntriesDropped
+          expr: sum(increase(loki_write_dropped_entries_total[10m])) by (pod) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Alloy tappar loggrader'
+            description: '{{ $labels.pod }} har tappat {{ $value }} loggrader mot Loki på 10 minuter — loggar sparas inte.'
