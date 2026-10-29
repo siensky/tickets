@@ -982,12 +982,14 @@ så inget manuellt steg kan glömmas:
 `on` läser `terraform output loadgen_ipv4s`, sätter allt ovan och skriver ut
 smoke-kommandot + DB-kontrollen (ordrar ska bli `paid`). `off` återställer genom att
 ta bort överskrivningarna med `kubectl set env … STRIPE_HOST- STRIPE_PORT-
-RATE_LIMIT_ALLOWLISTED_IPS-` och återställa `STRIPE_WEBHOOK_SECRET` till sin
-secretKeyRef med `kubectl set env … --from=secret/tickets-app-secrets
---keys=stripe-webhook-secret`. Den applicerar *inte* base-filen direkt: den har
-`image: …:latest` (CI sätter den pinnade taggen via kustomize). Dessutom kan en env som
-skrivits över med ett värde krocka med base-filens `valueFrom`. Dokumenteras i
-runbooken.
+RATE_LIMIT_ALLOWLISTED_IPS-` och ersätta `STRIPE_WEBHOOK_SECRET`-posten med dess
+secretKeyRef via en JSON-patch (`op: replace` på env-indexet, hittat med `jq`). **Inte**
+`kubectl set env --from=secret/…`: det namnger variabeln efter nyckeln. Den applicerar
+*inte* base-filen direkt: den har `image: …:latest` (CI sätter den pinnade taggen via
+kustomize). **Verifierat 29/10:** lämnas en överskrivning med ett literalt värde kvar
+failar CI:s `k8s-dry-run` (och därmed deployen) med "valueFrom may not be specified when
+`value` is not empty". `loadtest-mode off` ska därför avslutas med samma dry-run.
+Dokumenteras i runbooken.
 
 **7.2 Loki-fix (G-krav: logging).** Orsak: Loki-chartet har `auth_enabled: true` som
 default (multi-tenant), Alloy skickar ingen `X-Scope-OrgID` → 401 på varje loggbatch,
@@ -1780,9 +1782,29 @@ vara grönt innan UI-steget räknas som klart:
   "Godkänn" finns PostHogs cookie.
 - **CI:** e2e-jobbet bygger och startar även `apps/scanner`.
 
-**7.16 Byggordning.** Varje steg byggs på en egen branch från `main`, enligt
-fas-arbetsflödet (plan → bygg → test → review → fix → rapport). Användaren committar och
-mergar. Ett steg börjar inte förrän föregående är deployat och verifierat i prod.
+**7.16 Byggordning.** Stegen byggs enligt fas-arbetsflödet (plan → bygg → test →
+review → fix → rapport). Användaren committar, pushar och mergar.
+
+*Brancher:* fyra, plus `hotfixes` (steg 0) som mergas först. Inom en branch pushas efter
+**varje** steg och CI måste vara grön innan nästa steg börjar. Mergen sker först när
+hela gruppen är klar. En merge till `main` startar deployen.
+
+| Branch | Steg | Mergas |
+|---|---|---|
+| A `fas7-drift` | 1–3 | först, före försvaret |
+| B `fas7-backend` | 4–6 | före C |
+| C `fas7-ui` | 7 | före försvaret |
+| D `fas7-extra` | 8–10 | före inlämningen. Scanner (9) delas ut som egen branch om D växer |
+
+**B måste ligga i prod före C mergas.** `deploy-frontend` laddar upp den nya webbappen
+innan den nya backenden har rullat ut (några minuter), så en ny frontend mot gammal
+backend går sönder under den tiden. Därför får B och C aldrig slås ihop. C är en enda
+release eftersom Tailwinds Preflight annars bryter sidor som inte är omgjorda.
+
+*Prod-verifiering* görs bara där resultatet inte syns annars: steg 1 (Loki, cdn), 2
+(Grafana), 3 (beviset), 6 (seedade events i prod-API:t), 9 (scannern på en riktig
+telefon), samt en genomgång av UI:t i prod efter C. För övriga steg räcker grön CI.
+
 **[G/VG]** = får aldrig skäras.
 
 | # | Steg | Innehåll | Beroenden | Klart när |
@@ -1837,9 +1859,10 @@ förutsättningar är klara:
      **innan** review. Review av en fristående subagent enligt fas-arbetsflödet.
   4. Ett nytt designbeslut som inte står här → stoppa och fråga, gissa aldrig.
   5. Inga secrets i kod eller loggar.
-  6. Varje steg deployas och verifieras i prod innan nästa börjar. Går något sönder i
-     prod: revert av stegets merge (migrationerna är additiva, så gammal kod fungerar
-     mot ny databas).
+  6. Varje steg pushas och CI måste vara grön innan nästa steg börjar. Varje *branch*
+     deployas och verifieras (där 7.16 kräver det) innan nästa branch mergas. Går något
+     sönder i prod: revert av branchens merge (migrationerna är additiva, så gammal kod
+     fungerar mot ny databas).
 - *Genomgångna luckor som nu är lösta i planen:*
   - **QR-formatet** kan inte avkodas → uppslag på `qr_token` per event (7.8, E7).
   - **Ordrar är shardade** → `eventId` i order-URL:en och i `success_url` (E6).

@@ -44,10 +44,18 @@ Snabb checklista + kända fallgropar. Läs detta INNAN nästa lasttestkörning.
    ```
    Verifiera ALLTID med `smoke.js` efteråt (ska ge `checks: 100.00%` OCH
    riktiga `paid`-ordrar i DB, inte bara k6:s "checkout: 201") innan en
-   stor körning. **Återställ efteråt:**
-   `kubectl set env deployment/booking-api -n ticketing STRIPE_HOST- STRIPE_PORT- RATE_LIMIT_ALLOWLISTED_IPS- && kubectl set env deployment/booking-api -n ticketing --from=secret/tickets-app-secrets --keys=stripe-webhook-secret`
-   (INTE `kubectl apply -f` på base-filen — den har `image: …:latest` och skulle byta
-   bort den pinnade imagen, och kan krocka med den överskrivna env-variabeln.)
+   stor körning. **Återställ efteråt** (ersätter `STRIPE_WEBHOOK_SECRET` med dess secretKeyRef och tar bort
+   resten; körbar version i `.github/workflows/tmp-clear-loadtest-overrides.yml`):
+   ```sh
+IDX=$(kubectl get deploy booking-api -n ticketing -o json | jq '.spec.template.spec.containers[0].env | map(.name) | index("STRIPE_WEBHOOK_SECRET")')
+kubectl patch deploy booking-api -n ticketing --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/$IDX\",\"value\":{\"name\":\"STRIPE_WEBHOOK_SECRET\",\"valueFrom\":{\"secretKeyRef\":{\"name\":\"tickets-app-secrets\",\"key\":\"stripe-webhook-secret\"}}}}]"
+kubectl set env deployment/booking-api -n ticketing STRIPE_HOST- STRIPE_PORT- RATE_LIMIT_ALLOWLISTED_IPS-
+   ```
+   INTE `kubectl apply -f` på base-filen (den har `image: …:latest`). Och INTE
+   `kubectl set env --from=secret/…`: det namnger variabeln efter nyckeln
+   (`stripe-webhook-secret`) i stället för `STRIPE_WEBHOOK_SECRET`.
+   **Lämnas överskrivningen kvar failar nästa deploy** (CI:s `k8s-dry-run` ger
+   "valueFrom may not be specified when value is not empty").
 1. **`terraform.tfvars`**: `demo_node_count` och `loadgen_node_count` måste stå
    för vad som FAKTISKT finns i molnet, annars tar nästa `terraform apply`
    (även med `-target` för något helt annat) bort dem för att stämma av mot
@@ -202,8 +210,9 @@ MOCK_SECRET=$(kubectl get secret tickets-generated-secrets -n ticketing -o jsonp
 kubectl set env deployment/booking-api -n ticketing STRIPE_WEBHOOK_SECRET="$MOCK_SECRET"
 # ... kör lasttestet ...
 # återställ efteråt (inte kubectl apply -f på base-filen, se checklistan överst):
+IDX=$(kubectl get deploy booking-api -n ticketing -o json | jq '.spec.template.spec.containers[0].env | map(.name) | index("STRIPE_WEBHOOK_SECRET")')
+kubectl patch deploy booking-api -n ticketing --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/$IDX\",\"value\":{\"name\":\"STRIPE_WEBHOOK_SECRET\",\"valueFrom\":{\"secretKeyRef\":{\"name\":\"tickets-app-secrets\",\"key\":\"stripe-webhook-secret\"}}}}]"
 kubectl set env deployment/booking-api -n ticketing STRIPE_HOST- STRIPE_PORT- RATE_LIMIT_ALLOWLISTED_IPS-
-kubectl set env deployment/booking-api -n ticketing --from=secret/tickets-app-secrets --keys=stripe-webhook-secret
 ```
 
 **Verifierat med `smoke.js` efter fixen:** 9 av 10 checkouts blev
