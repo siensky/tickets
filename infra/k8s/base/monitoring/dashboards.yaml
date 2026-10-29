@@ -214,6 +214,17 @@ data:
       "schemaVersion": 39,
       "refresh": "10s",
       "time": { "from": "now-30m", "to": "now" },
+      "annotations": {
+        "list": [
+          {
+            "name": "Deploy (booking-api)",
+            "enable": true,
+            "iconColor": "blue",
+            "expr": "changes(kube_deployment_status_observed_generation{namespace=\"ticketing\", deployment=\"booking-api\"}[1m]) > 0",
+            "titleFormat": "Deploy av booking-api"
+          }
+        ]
+      },
       "panels": [
         {
           "id": 1,
@@ -334,6 +345,90 @@ data:
             }
           ],
           "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] }
+        },
+        {
+          "id": 9,
+          "title": "Demo: last upp → poddar upp → last ner → poddar ner efter 300 s (booking-api)",
+          "description": "docs/plan.md 7.4. Repliker (vänster axel), CPU i % av request (höger axel, HPA skalar vid 70 %) och request rate (dold axel, värdet syns vid hovring) på samma tidsaxel.",
+          "type": "timeseries",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 41 },
+          "targets": [
+            {
+              "expr": "kube_deployment_status_replicas{namespace=\"ticketing\", deployment=\"booking-api\"}",
+              "legendFormat": "repliker"
+            },
+            {
+              "expr": "100 * sum(rate(container_cpu_usage_seconds_total{namespace=\"ticketing\", pod=~\"booking-api-.*\", container=\"booking-api\"}[2m])) / sum(kube_pod_container_resource_requests{namespace=\"ticketing\", pod=~\"booking-api-.*\", container=\"booking-api\", resource=\"cpu\"})",
+              "legendFormat": "CPU % av request"
+            },
+            {
+              "expr": "vector(70)",
+              "legendFormat": "HPA-mål 70 %"
+            },
+            {
+              "expr": "sum(rate(http_requests_total{service=\"booking-api\"}[1m]))",
+              "legendFormat": "request rate (req/s)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "min": 0 },
+            "overrides": [
+              {
+                "matcher": { "id": "byRegexp", "options": "CPU % av request|HPA-mål 70 %" },
+                "properties": [
+                  { "id": "unit", "value": "percent" },
+                  { "id": "custom.axisPlacement", "value": "right" }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "request rate (req/s)" },
+                "properties": [
+                  { "id": "unit", "value": "reqps" },
+                  { "id": "custom.axisPlacement", "value": "hidden" }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 10,
+          "title": "Zero-downtime: ingress-5xx/s",
+          "description": "docs/plan.md 7.3/7.4. Alla 5xx som lämnar ingress-nginx, oavsett tjänst. Ska ligga på 0 under en deploy. /metrics routas medvetet till metrics-blackhole (503, ingress.yaml) och räknas därför bort. Nollan visas bara när ingress-måtten faktiskt skrapas, så den går att skilja från 'ingen data'.",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 51 },
+          "targets": [
+            {
+              "expr": "sum(rate(nginx_ingress_controller_requests{status=~\"5..\", service!=\"metrics-blackhole\"}[1m])) or (0 * sum(rate(nginx_ingress_controller_requests[1m])))",
+              "legendFormat": "5xx/s"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] }
+        },
+        {
+          "id": 11,
+          "title": "Zero-downtime: booking-api ready-repliker",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 51 },
+          "targets": [
+            {
+              "expr": "kube_deployment_status_replicas_ready{namespace=\"ticketing\", deployment=\"booking-api\"}",
+              "legendFormat": "ready"
+            }
+          ],
+          "fieldConfig": { "defaults": { "min": 0 }, "overrides": [] }
+        },
+        {
+          "id": 12,
+          "title": "Zero-downtime: request rate (ingress)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 51 },
+          "targets": [
+            {
+              "expr": "sum(rate(nginx_ingress_controller_requests[1m]))",
+              "legendFormat": "req/s"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] }
         }
       ]
     }

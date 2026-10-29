@@ -127,7 +127,9 @@ resource "helm_release" "ingress_nginx" {
   version    = "4.15.1"
   namespace  = kubernetes_namespace.ingress_nginx.metadata[0].name
 
-  depends_on = [helm_release.hcloud_ccm]
+  # kube_prometheus_stack installerar ServiceMonitor-CRD:n som
+  # controller.metrics.serviceMonitor nedan kräver.
+  depends_on = [helm_release.hcloud_ccm, helm_release.kube_prometheus_stack]
 
   values = [yamlencode({
     controller = {
@@ -141,6 +143,15 @@ resource "helm_release" "ingress_nginx" {
       }
       service = {
         type = "ClusterIP"
+      }
+      # docs/plan.md 7.4: nginx_ingress_controller_requests (ingress-5xx
+      # och request rate i Grafana). Prometheus hittar ServiceMonitorn i
+      # alla namnrymder (observability.tf).
+      metrics = {
+        enabled = true
+        serviceMonitor = {
+          enabled = true
+        }
       }
       # docs/plan.md "Botskydd": CF-Connecting-IP litas på endast från
       # Cloudflares intervall — docs/forsvar.md "Varför måste rate

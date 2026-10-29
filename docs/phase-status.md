@@ -3,6 +3,13 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Fas 7, steg 2 — mätbarhet (`feature/fas7-matbarhet`)
+
+- `helm.tf`: ingress-nginx `controller.metrics` + `serviceMonitor` på (+ `depends_on` kube_prometheus_stack, som äger ServiceMonitor-CRD:n). Applicera `-target=helm_release.ingress_nginx`.
+- `dashboards.yaml` ("Autoscaling & lasttest"): demo-panel (repliker + CPU % av request + request rate), zero-downtime-rad (ingress-5xx/s, ready-repliker, ingress request rate), deploy-annotation. Ingress-5xx exkluderar `metrics-blackhole` (`/metrics` svarar medvetet 503) och visar 0 bara när måtten skrapas.
+- `runbook.md`: restore-övningen körs i en tillfällig podd i `data`. **RPO/RTO-tabellen är fortfarande ofylld**: användaren kör övningen och verifierar panelerna i Grafana.
+- Öppet: deploy-annotationen (planens uttryck) triggas även av HPA-skalning, se rapporten.
+
 ## Fas 7, steg 1c — cdn (`feature/fas7-cdn`)
 
 - `workers/cdn-proxy.js` (vitlista `images/` + `brand/`, 404 för allt annat inkl. `..` och URL-kodade

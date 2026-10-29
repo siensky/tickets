@@ -109,31 +109,42 @@ Slack inom ~1 minut; eller tillfälligt skala en deployment till 0 repliker → 
 `postgres/shard-<N>-<ISO8601-tidsstämpel>.dump` i R2-bucketen, `pg_dump -Fc`
 (komprimerat, egen binärformat — `pg_restore`, inte `psql`, återställer dem).
 
-**Genomför övningen mot en separat testdatabas, ALDRIG mot en shard i drift** —
+**Genomför övningen i en tillfällig Postgres-podd, ALDRIG mot en shard i drift** —
 `docs/rules.md §12` förbjuder att köra migrations mot produktion, samma princip
-gäller en restore som skriver över data.
+gäller en restore som skriver över data. Podden ligger i namnrymden `data`, har ingen
+Service och ingen PVC, och tas bort efteråt. Ta tid på varje steg (`time` eller klockan).
 
 ```bash
-# 1. Hämta senaste dumpen för shard 0 (kör lokalt, med R2-krediterna som env-vars):
+# 1. Starta en TOM, tillfällig Postgres (egen podd, inte en riktig shard):
+kubectl -n data run restore-test --image=postgres:17-alpine --restart=Never \
+  --env=POSTGRES_PASSWORD=test -- postgres
+kubectl -n data wait --for=condition=Ready pod/restore-test --timeout=120s
+until kubectl -n data exec restore-test -- pg_isready -h 127.0.0.1; do sleep 2; done  # TCP = riktiga servern, inte initdb
+
+# 2. Hämta senaste dumpen för shard 0 från R2 (lokalt, med R2-nycklarna som env-vars):
 export AWS_ACCESS_KEY_ID=<R2 access key>
 export AWS_SECRET_ACCESS_KEY=<R2 secret key>
 latest=$(aws s3 --endpoint-url https://<account-id>.r2.cloudflarestorage.com \
   ls s3://<bucket>/postgres/ | grep shard-0 | sort | tail -1 | awk '{print $4}')
+echo "$latest"   # tidsstämpeln i namnet = RPO-underlaget (hur gammal är dumpen?)
 aws s3 --endpoint-url https://<account-id>.r2.cloudflarestorage.com \
   cp "s3://<bucket>/postgres/$latest" ./restore-test.dump
 
-# 2. Starta en TOM, separat Postgres (lokalt eller en engångspodd — inte en
-#    riktig shard):
-docker run --rm -d --name restore-test -e POSTGRES_PASSWORD=test -p 5433:5432 postgres:17-alpine
+# 3. Återställ i podden:
+kubectl -n data cp ./restore-test.dump restore-test:/tmp/restore-test.dump
+kubectl -n data exec restore-test -- pg_restore -U postgres -d postgres --create --clean \
+  --if-exists /tmp/restore-test.dump
 
-# 3. Återställ:
-pg_restore -h localhost -p 5433 -U postgres -d postgres --create --clean \
-  --if-exists restore-test.dump
+# 4. Verifiera. Antal events/ordrar/biljetter, samt kronjuvel-queryn (docs/plan.md "Tester"):
+kubectl -n data exec restore-test -- psql -U postgres -d tickets -c \
+  "SELECT (SELECT count(*) FROM events) AS events, (SELECT count(*) FROM orders) AS orders, (SELECT count(*) FROM tickets) AS tickets;"
+kubectl -n data exec restore-test -- psql -U postgres -d tickets -c \
+  "SELECT count(*) FROM tickets WHERE status='valid'; SELECT count(DISTINCT seat_id) FROM tickets WHERE status='valid';"
+# De två sista talen ska vara lika — ingen stol har mer än en giltig biljett.
 
-# 4. Verifiera (samma invariant som kronjuveltestet, docs/plan.md "Tester"):
-psql -h localhost -p 5433 -U postgres -d tickets -c \
-  "SELECT count(*) FROM tickets; SELECT count(DISTINCT seat_id) FROM tickets WHERE status='valid';"
-# De två talen ska vara lika — ingen stol har mer än en giltig biljett.
+# 5. Städa bort den tillfälliga podden och dumpen:
+kubectl -n data delete pod restore-test
+rm ./restore-test.dump
 ```
 
 **Tidtagning (RPO/RTO) — fyll i vid faktisk körning:**
