@@ -3,6 +3,15 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Fas 7, steg 1c — cdn (`feature/fas7-cdn`)
+
+- `workers/cdn-proxy.js` (vitlista `images/` + `brand/`, 404 för allt annat inkl. `..` och URL-kodade
+  varianter, cache `max-age=86400`, CORS från apex och `scan.` via bindingen `ALLOWED_ORIGINS`) och
+  `cdn-proxy.test.js`, som körs av ett eget steg i `test.yml` (ligger utanför turbo-paketen).
+- `cloudflare-frontend.tf`: ny Worker + `cloudflare_workers_custom_domain` för `cdn.<domän>`.
+- `deploy-frontend` laddar bara upp `brand/`. `images/` byggs i steg 6 (7.6).
+- Efter merge: `terraform apply`, en deploy (laddar upp `brand/`), sedan `curl`-listan i runbooken.
+
 ## Fas 7, steg 1b — drift (`feature/fas7-drift`)
 
 - Cloud-init (loadgen): eget `GNUPGHOME`, `dirmngr` startas, retry-loop, `command -v k6 || exit 1`.

@@ -42,3 +42,38 @@ resource "cloudflare_workers_custom_domain" "frontend" {
   hostname   = var.domain_name
   service    = cloudflare_workers_script.frontend_proxy.script_name
 }
+
+# cdn.<domän> (docs/plan.md 7.19): eventbilder och varumärkesfiler. Egen Worker i
+# stället för frontend-proxy, eftersom den har en vitlista (bara images/ och brand/)
+# — bucketen innehåller även databasbackuperna (docs/adr/0005-backup-storage-r2.md).
+# CORS-origins (apex och scan.) skickas in som binding så att Workern inte hårdkodar
+# domänen.
+resource "cloudflare_workers_script" "cdn_proxy" {
+  account_id     = var.cloudflare_account_id
+  script_name    = "tickets-cdn-proxy"
+  content_file   = "${path.module}/workers/cdn-proxy.js"
+  content_sha256 = filesha256("${path.module}/workers/cdn-proxy.js")
+  main_module    = "cdn-proxy.js"
+
+  compatibility_date = "2026-01-01"
+
+  bindings = [
+    {
+      name        = "CDN_BUCKET"
+      type        = "r2_bucket"
+      bucket_name = var.r2_bucket_name
+    },
+    {
+      name = "ALLOWED_ORIGINS"
+      type = "plain_text"
+      text = "https://${var.domain_name},https://scan.${var.domain_name}"
+    },
+  ]
+}
+
+resource "cloudflare_workers_custom_domain" "cdn" {
+  account_id = var.cloudflare_account_id
+  zone_id    = data.cloudflare_zone.this.zone_id
+  hostname   = "cdn.${var.domain_name}"
+  service    = cloudflare_workers_script.cdn_proxy.script_name
+}

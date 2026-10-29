@@ -47,6 +47,28 @@ hittat live efter den första riktiga deployen. En vanlig R2 "Custom Domain" dö
    att även lägga till `Account | Workers R2 Storage | Edit` på samma token — det är
    overifierat om Workers Scripts-behörigheten ensam räcker för en R2-binding.
 
+## cdn-Workern: `cdn.<domän>` (Fas 7)
+
+`cdn.<domän>` serveras av en egen Worker (`infra/terraform/workers/cdn-proxy.js`) som läser
+samma R2-bucket som frontenden, men **bara** nycklar under `images/` och `brand/` — allt
+annat ger 404. Bucketen innehåller även databas-backuperna, så vitlistan är en
+säkerhetsgräns (testas av `infra/terraform/workers/cdn-proxy.test.js` i CI). Lägg aldrig
+till ett prefix utan att kolla vad mer som ligger under det.
+
+Samma Cloudflare-token-behörigheter som frontend-proxy-Workern räcker. `deploy-frontend`
+laddar upp `apps/web/public/brand/` till `brand/`; eventbilderna (`images/`) laddas upp av
+seed-steget (docs/plan.md 7.6). Filnamnen är inte versionerade, så cachen är
+`max-age=86400` och inte `immutable`: en ändrad fil kan ta upp till ett dygn att nå ut.
+
+**Verifiering efter `terraform apply` och en deploy:**
+
+```sh
+curl -I https://cdn.tikknet.se/brand/tikknet-icon.svg   # 200 + cache-control: public, max-age=86400
+curl -I https://cdn.tikknet.se/backups/                 # 404
+curl -I https://cdn.tikknet.se/frontend/index.html      # 404
+curl -I --path-as-is https://cdn.tikknet.se/brand/../backups/x   # 404
+```
+
 ## Grafana-inloggning via Auth0 (Fas 4)
 
 Grafana (`https://grafana.<domän>`, se `infra/terraform/observability.tf`) loggas in

@@ -50,6 +50,11 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      # cdn-Workerns vitlista är en säkerhetsgräns (bucketen innehåller backuper).
+      # Ligger utanför turbo-paketen, därför ett eget steg (docs/plan.md 7.19).
+      - name: cdn Worker tests
+        run: pnpm exec vitest run infra/terraform/workers
+
       - name: Integration tests
         # Testcontainers kräver Docker, som finns förinstallerat på
         # GitHub-hostade ubuntu-körare — inget extra steg behövs.
