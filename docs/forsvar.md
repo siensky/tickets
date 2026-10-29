@@ -196,6 +196,28 @@ TypeScript-typer i båda ändar, och formulärvalidering i React via react-hook-
 Femte delen för WebSockets: klienterna måste återansluta automatiskt med backoff, annars
 tappar 20 000 användare sin köplats vid varje deploy.
 
+## Varför bevisas zero-downtime med `kubectl rollout restart` och inte en merge?
+
+Beviset körs med `loadtest-mode on`, som styr betalningar till payment-mock genom att
+lägga `STRIPE_WEBHOOK_SECRET` som en literal i Deployment:en. Pipelinens `kubectl apply`
+lägger basfilens `valueFrom` ovanpå och failar med "valueFrom may not be specified when
+`value` is not empty". En merge genom pipelinen går alltså inte att köra mitt i mätningen.
+
+Vi valde `kubectl rollout restart deployment/booking-api` (två gånger) eftersom:
+- Det är exakt samma mekanism som en deploy: nya poddar startas, `readinessProbe` släpper in
+  dem, `maxUnavailable: 0` håller de gamla kvar tills de nya är redo, `preStop` och
+  graceful shutdown dränerar de gamla. Det som bevisas är rollout-strategin, och den är
+  identisk. Det enda som skiljer är vad som startar rollouten.
+- Alternativet (bygga om `loadtest-mode.sh` så att en pipeline-apply tål överskrivningen)
+  är en designändring med egen risk: pipelinen skulle skriva över läget mitt i testet och
+  vi skulle mäta mot fel konfiguration.
+- Bevisar vi utan `loadtest-mode` mäter vi inget, eftersom 10 försök/s mot riktig Stripe
+  inte är något vi vill skicka.
+
+Medveten begränsning att nämna om någon frågar: pipelinens egna steg (migrations-Job,
+`kubectl apply`, `rollout status`) ingår inte i mätningen. De ändrar inte hur trafiken
+dräneras.
+
 ## Varför måste `scaleDown.stabilizationWindowSeconds` sänkas till 60?
 
 HPA:s standardvärde är **300 sekunder**. Det betyder att poddarna inte skalar *ned* förrän

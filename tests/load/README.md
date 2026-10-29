@@ -9,7 +9,7 @@ separat från CI-pipelinen — inte vid varje merge.
 | `queue-storm.js`       | 50 000 VU ansluter inom 60 s — bara väntrummet                         |
 | `normal-sale.js`       | **Betygsgrundande.** 50 000 bokningsförsök jämnt över 15 min           |
 | `spike-sale.js`        | **Betygsgrundande.** ~50 000 bokningsförsök över 6 min, medvetet ojämn |
-| `deploy-under-load.js` | normal-sale, kör en deploy manuellt under tiden                        |
+| `deploy-under-load.js` | **VG-bevis.** 10 försök/s i 5 min, 0 fel, deploy under tiden           |
 | `shard-failure.js`     | normal-sale, döda shard-1-podden manuellt under tiden                  |
 
 `lib/booking-flow.js` delar byggstenarna (join/väntrum/karta/reservation/
