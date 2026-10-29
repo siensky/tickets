@@ -34,6 +34,7 @@ import {
 } from './test-helpers.js';
 
 const LOGGER = SILENT_LOGGER as unknown as Logger;
+const ASSET_BASE_URL = 'https://cdn.example.test/';
 
 describe('events + seatmap', () => {
   let db: TestDatabase;
@@ -60,16 +61,26 @@ describe('events + seatmap', () => {
     });
     await seedEventForVenue(pool, { eventId, venueId, title: 'Test Concert' });
 
-    const events = await listAllEvents({ shardPools: db.shardPools, logger: LOGGER });
+    const events = await listAllEvents({
+      shardPools: db.shardPools,
+      logger: LOGGER,
+      assetBaseUrl: ASSET_BASE_URL,
+    });
     expect(events.map((event) => event.id)).toContain(eventId);
     const found = events.find((event) => event.id === eventId);
     expect(found).toMatchObject({ title: 'Test Concert', venueName: 'Test Arena' });
 
-    const detail = await getEvent({ shardPools: db.shardPools, logger: LOGGER }, eventId);
+    const detail = await getEvent(
+      { shardPools: db.shardPools, logger: LOGGER, assetBaseUrl: ASSET_BASE_URL },
+      eventId,
+    );
     expect(detail).toMatchObject({ id: eventId, venueCity: 'Test City' });
 
     await expect(
-      getEvent({ shardPools: db.shardPools, logger: LOGGER }, randomUUID()),
+      getEvent(
+        { shardPools: db.shardPools, logger: LOGGER, assetBaseUrl: ASSET_BASE_URL },
+        randomUUID(),
+      ),
     ).rejects.toBeInstanceOf(NotFoundError);
   }, 60_000);
 
@@ -100,7 +111,7 @@ describe('events + seatmap', () => {
       category: 'sports',
     });
 
-    const deps = { shardPools: db.shardPools, logger: LOGGER };
+    const deps = { shardPools: db.shardPools, logger: LOGGER, assetBaseUrl: ASSET_BASE_URL };
     const musicOnly = await listAllEvents(deps, { category: 'music' });
     expect(musicOnly.map((event) => event.id)).toContain(musicEventId);
     expect(musicOnly.map((event) => event.id)).not.toContain(sportsEventId);
@@ -113,7 +124,11 @@ describe('events + seatmap', () => {
   it('GET /events: 200 for a valid category query param, 400 for an unknown one (docs/rules.md §8)', async () => {
     const app = Fastify();
     registerErrorHandler(app);
-    registerEventRoutes(app, { shardPools: db.shardPools, logger: LOGGER });
+    registerEventRoutes(app, {
+      shardPools: db.shardPools,
+      logger: LOGGER,
+      assetBaseUrl: ASSET_BASE_URL,
+    });
 
     const ok = await app.inject({ method: 'GET', url: '/events?category=music' });
     expect(ok.statusCode).toBe(200);
@@ -197,12 +212,12 @@ describe('events + seatmap', () => {
 
     const deps = { shardPools: db.shardPools, redis: redis.client, logger: LOGGER };
     const firstRead = await getSectionSeatStatus(deps, eventId, sectionId);
-    expect(firstRead).toEqual([{ seatId, venueSeatId, status: 'held' }]);
+    expect(firstRead).toEqual([{ seatId, venueSeatId, status: 'held', priceCents: 1000 }]);
 
     // Flip the row directly — if the second read still returns 'held',
     // it proves the value came from the Redis cache, not a fresh query.
     await pool.query(`UPDATE seats SET status = 'sold' WHERE id = $1`, [seatId]);
     const secondRead = await getSectionSeatStatus(deps, eventId, sectionId);
-    expect(secondRead).toEqual([{ seatId, venueSeatId, status: 'held' }]);
+    expect(secondRead).toEqual([{ seatId, venueSeatId, status: 'held', priceCents: 1000 }]);
   }, 60_000);
 });

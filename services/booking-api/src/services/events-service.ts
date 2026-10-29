@@ -9,12 +9,15 @@ import { InternalError, NotFoundError } from '@tickets/domain';
 import type { Logger } from '@tickets/observability';
 import { getEventById, listEvents } from '../repositories/events-repository.js';
 import { getVenueById, getVenuesByIds } from '../repositories/venues-repository.js';
+import { computeAvailability } from './event-availability.js';
 import { toEventSummary } from '../mappers/event-mapper.js';
 import type { EventRow, EventsFilter, EventSummary } from '../types/event.js';
 
 export interface EventsServiceDeps {
   readonly shardPools: ShardPools;
   readonly logger: Logger;
+  /** `PUBLIC_ASSET_BASE_URL` (cdn): eventbildernas relativa nycklar blir absoluta URL:er mot den. */
+  readonly assetBaseUrl: string;
 }
 
 /**
@@ -62,7 +65,9 @@ async function mergeRowsWithVenues(
   // scatter-gather result.
   return rows.flatMap((row) => {
     const venue = venues.get(row.venueId);
-    return venue === undefined ? [] : [toEventSummary(row, venue)];
+    return venue === undefined
+      ? []
+      : [toEventSummary(row, venue, deps.assetBaseUrl, computeAvailability(row))];
   });
 }
 
@@ -85,5 +90,5 @@ export async function getEvent(
       venueId: row.venueId,
     });
   }
-  return toEventSummary(row, venue);
+  return toEventSummary(row, venue, deps.assetBaseUrl, computeAvailability(row));
 }

@@ -3,6 +3,7 @@ packages:
   - 'services/*'
   - 'apps/*'
   - 'tests/e2e'
+  - 'tests/system'
 allowBuilds:
   esbuild: true
   # Kör bara napi-postinstall (välja rätt förkompilerad binär för

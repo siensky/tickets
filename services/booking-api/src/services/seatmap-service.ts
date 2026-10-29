@@ -12,14 +12,26 @@ import { getGlobalPool, getPoolForEvent, type ShardPools } from '@tickets/db';
 import { NotFoundError } from '@tickets/domain';
 import type { Logger } from '@tickets/observability';
 import { seatmapStatusKey, type RedisClient } from '@tickets/redis';
-import { listSeatStatusesForSection } from '../repositories/seats-repository.js';
+import { getEventById } from '../repositories/events-repository.js';
 import {
+  aggregateSeatsBySection,
+  listSeatStatusesForSection,
+} from '../repositories/seats-repository.js';
+import {
+  getVenueStage,
   listSeatGeometryForSection,
   listSectionsForVenue,
+  listSectionsWithLayout,
   sectionBelongsToVenue,
 } from '../repositories/venues-repository.js';
-import { parseCachedSeatStatuses, toSeatStatusEntries } from '../mappers/seatmap-mapper.js';
-import type { SeatStatusEntry } from '../types/seatmap.js';
+import {
+  parseCachedSeatStatuses,
+  toSeatStatusEntries,
+  toSectionSummary,
+  toSectionSummaryEntry,
+} from '../mappers/seatmap-mapper.js';
+import { computeSeatAvailability } from './event-availability.js';
+import type { SeatStatusEntry, SectionSummary } from '../types/seatmap.js';
 import type { VenueSeatGeometryRow, VenueSectionRow } from '../types/venue.js';
 
 export interface SeatmapServiceDeps {
@@ -104,4 +116,40 @@ export async function getSectionSeatStatus(
   const entries = toSeatStatusEntries(rows);
   await writeCachedSeatStatus(deps, key, entries);
   return entries;
+}
+
+/**
+ * Arenakartans översikt (docs/plan.md 7.13 E2): sektionernas layout och
+ * scen från global-poolen slås ihop med aggregaten från eventets shard.
+ * Sektioner utan stolar för just det här eventet utelämnas.
+ */
+export async function getSectionSummary(
+  deps: SeatmapServiceDeps,
+  eventId: string,
+): Promise<SectionSummary> {
+  const pool = getPoolForEvent(deps.shardPools, eventId);
+  const event = await getEventById(pool, eventId);
+  if (event === undefined) {
+    throw new NotFoundError(`Event ${eventId} not found`, { eventId });
+  }
+  const globalPool = getGlobalPool(deps.shardPools);
+  const [sections, stage, aggregates] = await Promise.all([
+    listSectionsWithLayout(globalPool, event.venueId),
+    getVenueStage(globalPool, event.venueId),
+    aggregateSeatsBySection(pool, eventId),
+  ]);
+  const aggregateBySection = new Map(aggregates.map((row) => [row.sectionId, row]));
+  const entries = sections.flatMap((section) => {
+    const aggregate = aggregateBySection.get(section.id);
+    return aggregate === undefined
+      ? []
+      : [
+          toSectionSummaryEntry(
+            section,
+            aggregate,
+            computeSeatAvailability(aggregate.availableCount, aggregate.totalCount),
+          ),
+        ];
+  });
+  return toSectionSummary(stage, entries);
 }

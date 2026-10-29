@@ -36,6 +36,7 @@ import {
 } from '../repositories/reservation-repository.js';
 import { ensureUser } from '../repositories/users-repository.js';
 import { parseReplayedCheckoutResult } from '../mappers/payment-mapper.js';
+import { sumSeatPrices } from './pricing.js';
 import { computeCheckoutRequestHash, deriveOrderId } from './request-hash.js';
 import type { CreateCheckoutInput, CreateCheckoutResult } from '../types/payment.js';
 
@@ -86,6 +87,22 @@ export async function createCheckout(
 }
 
 /**
+ * Lägger id:n som query-parametrar på retur-URL:en (docs/plan.md 7.13 E6).
+ * `searchParams.set` bevarar en befintlig query, och id:n är deterministiska
+ * per reservation, så Stripes idempotens (samma parametrar vid retry) håller.
+ * OBS: `searchParams.set` serialiserar om hela queryn, så Stripes
+ * `{CHECKOUT_SESSION_ID}`-platshållare i bas-URL:ens query stöds inte (den
+ * skulle kodas om till %7B…%7D).
+ */
+function buildReturnUrl(base: string, params: Readonly<Record<string, string>>): string {
+  const url = new URL(base);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  return url.toString();
+}
+
+/**
  * Genereras deterministiskt av reservationId (inte randomUUID()):
  * annars skickar en retry av SAMMA checkout (efter ett transient fel)
  * ett annat metadata.orderId med den oförändrade Stripe-idempotencyKey:en,
@@ -124,8 +141,14 @@ async function createStripeCheckoutSession(
         },
       ],
       customer_email: input.email,
-      success_url: deps.successUrl,
-      cancel_url: deps.cancelUrl,
+      success_url: buildReturnUrl(deps.successUrl, {
+        event_id: input.eventId,
+        order_id: orderId,
+      }),
+      cancel_url: buildReturnUrl(deps.cancelUrl, {
+        event_id: input.eventId,
+        reservation_id: input.reservationId,
+      }),
       expires_at: sessionExpiresAtSeconds,
       metadata: { orderId, eventId: input.eventId, reservationId: input.reservationId },
     },
@@ -157,7 +180,7 @@ async function runCheckout(
     input.eventId,
     input.reservationId,
   );
-  const totalCents = seatPrices.reduce((sum, seat) => sum + seat.priceCents, 0);
+  const totalCents = sumSeatPrices(seatPrices);
   const user = await ensureUser(getGlobalPool(deps.shardPools), {
     auth0Sub: input.auth0Sub,
     email: input.email,

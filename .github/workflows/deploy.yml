@@ -152,6 +152,21 @@ jobs:
             -e RCLONE_CONFIG_R2_ENDPOINT="${{ secrets.R2_ENDPOINT }}" \
             rclone/rclone:1.75.2 sync /data "r2:${{ secrets.R2_BUCKET }}/brand/"
 
+      # docs/plan.md 7.6: eventbilderna från seed/images/ serveras från cdn.<domän>/images/.
+      # Bara .webp laddas upp (CREDITS.md ska inte bli publikt), och `sync` rör bara images/.
+      - name: Upload event images to R2 (cdn)
+        run: |
+          # Saknas mappen skapar docker -v en tom katalog och sync tömmer images/ tyst.
+          test -d seed/images
+          docker run --rm -v "$PWD/seed/images:/data" \
+            -e RCLONE_CONFIG_R2_TYPE=s3 \
+            -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+            -e RCLONE_CONFIG_R2_ENV_AUTH=false \
+            -e RCLONE_CONFIG_R2_ACCESS_KEY_ID="${{ secrets.R2_ACCESS_KEY_ID }}" \
+            -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="${{ secrets.R2_SECRET_ACCESS_KEY }}" \
+            -e RCLONE_CONFIG_R2_ENDPOINT="${{ secrets.R2_ENDPOINT }}" \
+            rclone/rclone:1.75.2 sync /data "r2:${{ secrets.R2_BUCKET }}/images/" --include "*.webp"
+
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest

@@ -107,6 +107,10 @@ spec:
               value: 'https://tikknet.se/checkout/success'
             - name: CHECKOUT_CANCEL_URL
               value: 'https://tikknet.se/checkout/cancel'
+            # docs/plan.md 7.13 E1: eventbildernas relativa nycklar (images/x.webp)
+            # blir absoluta URL:er mot cdn (7.19).
+            - name: PUBLIC_ASSET_BASE_URL
+              value: 'https://cdn.tikknet.se/'
             # docs/plan.md "Secrets": GitHub Actions secrets → Kubernetes
             # Secret vid deploy. `tickets-app-secrets` kommer från RIKTIGA
             # externa konton (Auth0/Stripe) — skrivs över vid VARJE deploy

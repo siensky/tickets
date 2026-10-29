@@ -35,6 +35,7 @@ export interface Dependencies {
   readonly rateLimitPerSecond: number;
   readonly rateLimitAllowlistedIps: ReadonlySet<string>;
   readonly businessMetrics: BusinessMetrics;
+  readonly publicAssetBaseUrl: string;
 }
 
 /**
@@ -55,6 +56,15 @@ export function createStripeClientFromEnv(
     protocol: host === undefined ? undefined : 'http',
     port: port === undefined ? undefined : Number(port),
   });
+}
+
+/** Valideras vid start: en ogiltig bas skulle annars ge 500 på varje GET /events. Måste sluta på `/`, annars tappar `new URL` bas-pathen. */
+function readAssetBaseUrl(): string {
+  const value = process.env['PUBLIC_ASSET_BASE_URL'] ?? 'https://cdn.example.test/';
+  if (!URL.canParse(value) || !value.endsWith('/')) {
+    throw new Error('PUBLIC_ASSET_BASE_URL must be an absolute URL ending with "/"');
+  }
+  return value;
 }
 
 export function loadDependencies(
@@ -90,5 +100,6 @@ export function loadDependencies(
         .filter((ip) => ip.length > 0),
     ),
     businessMetrics,
+    publicAssetBaseUrl: readAssetBaseUrl(),
   };
 }

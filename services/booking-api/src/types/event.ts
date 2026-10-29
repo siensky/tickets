@@ -19,7 +19,19 @@ export interface EventRow {
   readonly status: string;
   readonly isBeforeOpen: boolean;
   readonly isAfterClose: boolean;
+  /** Relativ nyckel i bucketen (`images/x.webp`), inte en URL — mappern bygger den. */
+  readonly imageKey: string | null;
+  readonly description: string | null;
+  readonly featured: boolean;
+  /** Prisintervall och stolsantal över eventets stolar; null/0 om eventet saknar stolar. */
+  readonly minPriceCents: number | null;
+  readonly maxPriceCents: number | null;
+  readonly availableSeats: number;
+  readonly totalSeats: number;
 }
+
+/** Säljstatus för eventkort och eventsida (docs/plan.md 7.13 E1). Regeln bor bara i backend. */
+export type EventAvailability = 'closed' | 'opens_soon' | 'sold_out' | 'few_left' | 'on_sale';
 
 export interface EventSummary {
   readonly id: string;
@@ -35,6 +47,14 @@ export interface EventSummary {
   readonly status: string;
   readonly isBeforeOpen: boolean;
   readonly isAfterClose: boolean;
+  readonly imageUrl: string | null;
+  readonly description: string | null;
+  readonly featured: boolean;
+  readonly minPriceCents: number | null;
+  readonly maxPriceCents: number | null;
+  readonly availableSeats: number;
+  readonly totalSeats: number;
+  readonly availability: EventAvailability;
 }
 
 /** Filter för "Bläddra per kategori"/sökfältet (docs/plan.md Fas 6). Båda valfria — ingen filtrering ger samma lista som tidigare. */

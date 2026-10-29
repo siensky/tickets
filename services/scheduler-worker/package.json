@@ -14,8 +14,10 @@
     "reset-sale": "tsx src/scripts/reset-sale.ts",
     "generate-sale-report": "tsx src/scripts/generate-sale-report.ts",
     "seed-demo-events": "tsx src/scripts/seed-demo-events.ts",
+    "seed-events-from-csv": "tsx src/scripts/seed-events-from-csv.ts",
     "import-tickets": "tsx src/scripts/import-tickets.ts",
-    "seed-real-venue": "tsx src/scripts/seed-real-venue.ts"
+    "seed-real-venue": "tsx src/scripts/seed-real-venue.ts",
+    "test:contract": "vitest run --dir tests/contract --no-file-parallelism"
   },
   "dependencies": {
     "@opentelemetry/api": "1.10.0",
@@ -37,6 +39,7 @@
     "prom-client": "15.1.3"
   },
   "devDependencies": {
+    "@pact-foundation/pact": "17.1.4",
     "@testcontainers/postgresql": "12.2.1",
     "@testcontainers/rabbitmq": "12.2.1",
     "@testcontainers/redis": "12.2.1",

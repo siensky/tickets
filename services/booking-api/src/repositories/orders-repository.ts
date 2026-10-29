@@ -17,6 +17,7 @@
 import type { Pool, PoolClient } from 'pg';
 import type { InsertedOrder, OrderForPayment } from '../types/payment.js';
 import type { OrderRow } from '../types/my-tickets.js';
+import type { OrderStatus, OrderStatusRow } from '../types/order.js';
 
 export async function insertPendingOrder(
   client: PoolClient,
@@ -108,4 +109,43 @@ export async function markOrderStatus(
     [eventId, orderId, fromStatus, toStatus],
   );
   return rowCount === 1;
+}
+
+/**
+ * En orders status och antal biljetter för bekräftelsesidan (docs/plan.md
+ * 7.13 E6). Scopad på `user_id` (docs/rules.md §6: IDOR): en annans order
+ * ger samma `undefined` som en som inte finns. `event_id` i båda frågorna.
+ */
+export async function getOrderForUser(
+  pool: Pool,
+  eventId: string,
+  orderId: string,
+  userId: string,
+): Promise<OrderStatusRow | undefined> {
+  const { rows } = await pool.query<{
+    id: string;
+    event_id: string;
+    status: OrderStatus;
+    total_cents: number;
+    ticket_count: string;
+  }>(
+    `SELECT o.id, o.event_id, o.status, o.total_cents,
+            (SELECT COUNT(*) FROM tickets t
+              WHERE t.event_id = o.event_id AND t.order_id = o.id) AS ticket_count
+     FROM orders o
+     WHERE o.event_id = $1 AND o.id = $2 AND o.user_id = $3`,
+    [eventId, orderId, userId],
+  );
+  const row = rows[0];
+  if (row === undefined) {
+    return undefined;
+  }
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    status: row.status,
+    totalCents: row.total_cents,
+    // COUNT() kommer som bigint, alltså sträng från pg.
+    ticketCount: Number(row.ticket_count),
+  };
 }

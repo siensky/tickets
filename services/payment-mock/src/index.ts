@@ -22,6 +22,7 @@ import Fastify, {
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerCheckoutSessionsRoutes } from './routes/checkout-sessions.js';
+import { registerMockCheckoutRoutes } from './routes/mock-checkout.js';
 import { registerRefundsRoutes } from './routes/refunds.js';
 import { shutdownTracing } from './instrumentation.js';
 import { loadChaosConfig } from './services/chaos-config.js';
@@ -47,8 +48,9 @@ export async function start(): Promise<void> {
 
   registerHealthRoutes(app);
   registerMetricsRoutes(app, registry);
+  const sessionStore = createSessionStore();
   registerCheckoutSessionsRoutes(app, {
-    sessionStore: createSessionStore(),
+    sessionStore,
     chaosConfig: loadChaosConfig(),
     webhookUrl:
       process.env['BOOKING_API_WEBHOOK_URL'] ?? 'http://localhost:3000/webhooks/stripe',
@@ -57,6 +59,7 @@ export async function start(): Promise<void> {
       process.env['PAYMENT_MOCK_CHECKOUT_BASE_URL'] ?? 'http://localhost:3002/mock-checkout',
     logger,
   });
+  registerMockCheckoutRoutes(app, sessionStore);
   registerRefundsRoutes(app);
 
   app.addHook('onResponse', async (request, reply) => {

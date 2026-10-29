@@ -18,3 +18,4 @@ export * from './event-id-param.js';
 export * from './events-query.js';
 export * from './reservation.js';
 export * from './seatmap-params.js';
+export * from './order-params.js';

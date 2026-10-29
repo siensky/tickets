@@ -5,6 +5,7 @@
  */
 import type {
   ReservationResult,
+  ReservationSeatView,
   ReservationView,
   ReservationWithSeatsRow,
 } from '../types/reservation.js';
@@ -38,7 +39,11 @@ export function parseReplayedReservationResult(responseBody: unknown): Reservati
   return responseBody as ReservationResult;
 }
 
-export function toReservationView(row: ReservationWithSeatsRow): ReservationView {
+export function toReservationView(
+  row: ReservationWithSeatsRow,
+  seats: readonly ReservationSeatView[],
+  totalCents: number,
+): ReservationView {
   return {
     reservationId: row.id,
     eventId: row.eventId,
@@ -46,5 +51,8 @@ export function toReservationView(row: ReservationWithSeatsRow): ReservationView
     status: row.status,
     expiresAt: row.expiresAt.toISOString(),
     seatIds: row.seatIds,
+    seats,
+    totalCents,
+    currency: 'SEK',
   };
 }

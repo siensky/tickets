@@ -80,10 +80,13 @@ describe('my tickets', () => {
     const matching = orders.filter((order) => order.orderId === orderId);
 
     expect(matching.length).toBeGreaterThan(0);
+    expect(matching[0]?.eventStartsAt).toEqual(expect.any(String));
     expect(matching[0]).toMatchObject({
       orderId,
       eventId,
       eventTitle: 'My Tickets Concert',
+      venueName: 'Arena',
+      venueCity: 'Test City',
       status: 'paid',
     });
     expect(matching[0]?.tickets).toEqual([
@@ -91,6 +94,7 @@ describe('my tickets', () => {
         ticketId,
         seatId,
         sectionId,
+        sectionName: 'A',
         row: 'A',
         number: 7,
         status: 'valid',

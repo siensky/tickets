@@ -34,9 +34,11 @@ import {
   completeIdempotencyKey,
   deleteIdempotencyKey,
 } from '../repositories/idempotency-repository.js';
+import { getSectionNames } from '../repositories/venues-repository.js';
 import { insertOutboxEvent } from '../repositories/outbox-repository.js';
 import {
   attachSeatsToReservation,
+  getReservationSeatDetails,
   getReservationWithSeats,
   insertReservation,
   lockSeats,
@@ -47,6 +49,7 @@ import {
   toReservationResult,
   toReservationView,
 } from '../mappers/reservation-mapper.js';
+import { sumSeatPrices } from './pricing.js';
 import { computeRequestHash } from './request-hash.js';
 import { findUnavailableSeatIds, validateSeatCount } from './seat-availability.js';
 import type {
@@ -140,7 +143,22 @@ export async function getReservationForQueueToken(
   if (row === undefined || row.queueTokenId !== callerQueueTokenId) {
     throw new NotFoundError(`Reservation ${reservationId} not found`, { reservationId });
   }
-  return toReservationView(row);
+  const seatDetails = await getReservationSeatDetails(pool, eventId, reservationId);
+  const sections = await getSectionNames(getGlobalPool(shardPools), [
+    ...new Set(seatDetails.map((seat) => seat.sectionId)),
+  ]);
+  const displayOrder = (sectionId: string): number =>
+    sections.get(sectionId)?.displayOrder ?? 0;
+  const seats = [...seatDetails]
+    .sort(
+      (a, b) =>
+        displayOrder(a.sectionId) - displayOrder(b.sectionId) ||
+        a.row.localeCompare(b.row, 'sv', { numeric: true }) ||
+        a.number - b.number,
+    )
+    .map((seat) => ({ ...seat, sectionName: sections.get(seat.sectionId)?.name ?? '' }));
+  // Samma funktion som checkout (services/pricing.ts): summan som visas är summan som debiteras.
+  return toReservationView(row, seats, sumSeatPrices(seatDetails));
 }
 
 async function completeIdempotencyKeyWithRetries(

@@ -1,0 +1,14 @@
+venue,city,section,rows,seats_per_row,section_x,section_y,section_w,section_h,section_rotation,stage_x,stage_y,stage_w,stage_h
+Klubb Nordlys,Malmö,Allmän,6,20,150,160,700,420,0,300,30,400,70
+Teater Vesper,Göteborg,Parkett,9,20,150,160,700,440,0,250,30,500,80
+Lilla Scenen,Uppsala,Salong,8,10,200,170,600,400,0,300,40,400,70
+Nordic Arena,Stockholm,Golv,20,30,300,120,400,260,0,350,20,300,60
+Nordic Arena,Stockholm,Parkett Väst,12,25,60,140,210,240,0,350,20,300,60
+Nordic Arena,Stockholm,Parkett Öst,12,25,730,140,210,240,0,350,20,300,60
+Nordic Arena,Stockholm,Läktare Syd,16,30,200,420,600,170,0,350,20,300,60
+Nordic Arena,Stockholm,Balkong Väst,10,25,60,420,120,220,0,350,20,300,60
+Nordic Arena,Stockholm,Balkong Öst,10,25,820,420,120,220,0,350,20,300,60
+Stora Salen,Göteborg,Parkett,22,30,250,130,500,260,0,300,20,400,70
+Stora Salen,Göteborg,Loge Väst,10,20,60,130,160,260,0,300,20,400,70
+Stora Salen,Göteborg,Loge Öst,10,20,780,130,160,260,0,300,20,400,70
+Stora Salen,Göteborg,Balkong,16,30,200,430,600,200,0,300,20,400,70

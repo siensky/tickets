@@ -10,7 +10,7 @@ import {
   createCheckout,
   type CheckoutServiceDeps,
 } from '../../src/services/checkout-service.js';
-import { computeCheckoutRequestHash } from '../../src/services/request-hash.js';
+import { computeCheckoutRequestHash, deriveOrderId } from '../../src/services/request-hash.js';
 import type { CreateCheckoutInput } from '../../src/types/payment.js';
 
 function input(overrides: Partial<CreateCheckoutInput> = {}): CreateCheckoutInput {
@@ -154,6 +154,26 @@ describe('createCheckout', () => {
       { line_items: { price_data: { unit_amount: number } }[] },
     ];
     expect(sessionParams.line_items[0]?.price_data.unit_amount).toBe(2500);
+  });
+
+  it('lägger event_id och order_id på success_url och event_id och reservation_id på cancel_url', async () => {
+    const { deps, sessionsCreate } = fakeDeps({
+      reservationStatus: 'active',
+      reservationQueueTokenId: 'queue-1',
+    });
+
+    await createCheckout({ ...deps, successUrl: 'https://x.test/ok?lang=sv' }, input());
+
+    const [sessionParams] = sessionsCreate.mock.calls[0] as [
+      { success_url: string; cancel_url: string },
+    ];
+    const success = new URL(sessionParams.success_url);
+    expect(success.searchParams.get('lang')).toBe('sv');
+    expect(success.searchParams.get('event_id')).toBe('event-1');
+    expect(success.searchParams.get('order_id')).toBe(deriveOrderId('res-1'));
+    const cancel = new URL(sessionParams.cancel_url);
+    expect(cancel.searchParams.get('event_id')).toBe('event-1');
+    expect(cancel.searchParams.get('reservation_id')).toBe('res-1');
   });
 
   it('rejects when the reservation belongs to a different queue token (IDOR)', async () => {

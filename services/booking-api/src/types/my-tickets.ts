@@ -14,6 +14,13 @@ export interface OrderRow {
   readonly createdAt: Date;
 }
 
+/** Eventets tid och arena för biljettkorten (docs/plan.md 7.13 E9). */
+export interface EventTicketInfo {
+  readonly title: string;
+  readonly startsAt: Date | null;
+  readonly venueId: string;
+}
+
 export interface TicketWithSeatRow {
   readonly id: string;
   readonly orderId: string;
@@ -29,6 +36,7 @@ export interface MyTicket {
   readonly ticketId: string;
   readonly seatId: string;
   readonly sectionId: string;
+  readonly sectionName: string;
   readonly row: string;
   readonly number: number;
   readonly status: string;
@@ -39,6 +47,9 @@ export interface MyTicketOrder {
   readonly orderId: string;
   readonly eventId: string;
   readonly eventTitle: string;
+  readonly eventStartsAt: string | null;
+  readonly venueName: string;
+  readonly venueCity: string;
   readonly status: string;
   readonly totalCents: number;
   readonly createdAt: string;

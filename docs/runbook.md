@@ -69,6 +69,55 @@ curl -I https://cdn.tikknet.se/frontend/index.html      # 404
 curl -I --path-as-is https://cdn.tikknet.se/brand/../backups/x   # 404
 ```
 
+## Seed: events från CSV (Fas 7, steg 6)
+
+`seed/venues.csv` (5 arenor med sektioner, layout och scen) och `seed/events.csv` (20 events,
+5 per kategori, 4 `featured`) beskriver allt som seedas. Bilderna ligger i `seed/images/`
+(WebP, 1600×900) och laddas upp till `images/` på R2 av `deploy-frontend` (serveras från
+`cdn.<domän>`). Scriptet `seed-events-from-csv.ts` validerar HELA CSV:erna först (okänd venue,
+fel datumformat, saknad bild …) och avbryter med radnummer. Allt eller inget.
+
+Körs manuellt mot prod, efter att migrationerna (`add-event-presentation`, `add-venue-layout`)
+har körts av deployen:
+
+1. Port-forward båda shardarna och sätt miljön som för `reset-sale` (se "Bevis: deploy utan
+   nertid"): `DATABASE_URL_SHARD_0`, `DATABASE_URL_SHARD_1`.
+2. Från repo-roten: `pnpm --filter @tickets/scheduler-worker run seed-events-from-csv ../../seed`
+   (sökvägen är relativ till `services/scheduler-worker`; utan argument används `seed` i
+   nuvarande katalog).
+3. Verifiera: `curl -s https://api.tikknet.se/events | jq '.events | length'` ger minst 20 och
+   varje event har `imageUrl` som börjar med `https://cdn.tikknet.se/images/`. Kontrollera även
+   `curl -s https://api.tikknet.se/events/<id>/sections/summary` för ett event på Nordic Arena.
+4. Kör återställningsövningen (7.5) igen, nu när shard 0 har data.
+
+Idempotent: id:n härleds ur namn och slug. Arenor, sektioner och event uppdateras vid
+omkörning (en ändrad text, bild eller layout når fram), medan stolar bara läggs till. Ett pris
+som ändras i CSV:n efter att eventet skapats slår alltså **inte** igenom på befintliga stolar.
+Lasttestets 5 000-platsersarena och event, samt de gamla demo-eventen från
+`seed-demo-events.ts`, rörs inte.
+
+## Systemtester och kontraktstester (Fas 7, steg 4–5)
+
+**Systemtester** (`tests/system`, docs/plan.md 7.14) körs i CI-jobbet `e2e` efter e2e-sviten och
+lokalt enligt `tests/system/README.md`. De kräver en egen Auth0-applikation (skapas en gång):
+
+1. Auth0 → **Applications → Create Application → Regular Web Application**, namn
+   "CI System Tests". Under **Advanced Settings → Grant Types** slå på **Password**. Under
+   **APIs → <vårt API> → Machine to Machine/Application Access** ge appen åtkomst.
+2. **Tenant Settings → API Authorization Settings → Default Directory** måste vara satt till
+   databasen (`Username-Password-Authentication`), annars svarar `/oauth/token` med
+   `unauthorized_client`.
+3. Skapa ett **andra** testkonto i samma databas (F6 behöver en annan användare).
+4. GitHub-secrets: `AUTH0_CI_CLIENT_ID`, `AUTH0_CI_CLIENT_SECRET`, `SYSTEMTEST_USER2_EMAIL`,
+   `SYSTEMTEST_USER2_PASSWORD`. Samma testkonto som e2e (`AUTH0_TEST_USER_EMAIL/PASSWORD`)
+   används som användare 1.
+
+**Kontraktstester (Pact, utan broker)**: `pnpm test:contract` i repo-roten tömmer `pacts/`,
+kör konsumenttesterna (`web`, `payment-mock`, `notification-worker`, `realtime-gateway`) som
+skriver pact-filerna dit, och kör sedan providerverifieringen i `booking-api` (HTTP + meddelanden)
+och `scheduler-worker` (`ws:*`). Kräver Docker (Testcontainers). `pacts/` är genererat och
+gitignorerat. Kör även i CI (`test.yml`).
+
 ## Grafana-inloggning via Auth0 (Fas 4)
 
 Grafana (`https://grafana.<domän>`, se `infra/terraform/observability.tf`) loggas in

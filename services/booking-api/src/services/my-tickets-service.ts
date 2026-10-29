@@ -8,12 +8,24 @@
 import { getGlobalPool, type ShardPools } from '@tickets/db';
 import type { Logger } from '@tickets/observability';
 import type { Pool } from 'pg';
-import { getEventTitlesByIds } from '../repositories/events-repository.js';
+import { getEventTicketInfoByIds } from '../repositories/events-repository.js';
 import { getOrdersForUser } from '../repositories/orders-repository.js';
 import { getTicketsWithSeatsForOrders } from '../repositories/tickets-repository.js';
 import { getUserByAuth0Sub } from '../repositories/users-repository.js';
+import { getSectionNames, getVenuesByIds } from '../repositories/venues-repository.js';
 import { toMyTicket, toMyTicketOrder } from '../mappers/my-tickets-mapper.js';
-import type { MyTicketOrder, TicketWithSeatRow } from '../types/my-tickets.js';
+import type {
+  EventTicketInfo,
+  MyTicketOrder,
+  TicketWithSeatRow,
+} from '../types/my-tickets.js';
+
+const UNKNOWN_EVENT: EventTicketInfo = {
+  title: 'Unknown event',
+  startsAt: null,
+  venueId: '',
+};
+const UNKNOWN_VENUE = { name: '', city: '' };
 
 export interface MyTicketsServiceDeps {
   readonly shardPools: ShardPools;
@@ -49,7 +61,9 @@ export async function listMyTickets(
   userId: string,
 ): Promise<MyTicketOrder[]> {
   const outcomes = await Promise.allSettled(
-    deps.shardPools.pools.map((pool) => listOrdersWithTicketsOnShard(pool, userId)),
+    deps.shardPools.pools.map((pool) =>
+      listOrdersWithTicketsOnShard(pool, getGlobalPool(deps.shardPools), userId),
+    ),
   );
   return outcomes.flatMap((outcome, shardIndex) => {
     if (outcome.status === 'rejected') {
@@ -80,29 +94,43 @@ function groupTicketsByOrder(
 
 async function listOrdersWithTicketsOnShard(
   pool: Pool,
+  globalPool: Pool,
   userId: string,
 ): Promise<MyTicketOrder[]> {
   const orders = await getOrdersForUser(pool, userId);
   if (orders.length === 0) {
     return [];
   }
-  const [tickets, titles] = await Promise.all([
+  const [tickets, events] = await Promise.all([
     getTicketsWithSeatsForOrders(
       pool,
       orders.map((order) => order.id),
       orders.map((order) => order.eventId),
     ),
-    getEventTitlesByIds(
+    getEventTicketInfoByIds(
       pool,
       orders.map((order) => order.eventId),
     ),
   ]);
-  const ticketsByOrder = groupTicketsByOrder(tickets);
-  return orders.map((order) =>
-    toMyTicketOrder(
-      order,
-      titles.get(order.eventId) ?? 'Unknown event',
-      (ticketsByOrder.get(order.id) ?? []).map(toMyTicket),
+  // Venue och sektion bor i global-poolen (docs/plan.md "Databas"): ingen join över databaser.
+  const [venues, sections] = await Promise.all([
+    getVenuesByIds(
+      globalPool,
+      [...events.values()].map((event) => event.venueId),
     ),
-  );
+    getSectionNames(globalPool, [...new Set(tickets.map((ticket) => ticket.sectionId))]),
+  ]);
+  const ticketsByOrder = groupTicketsByOrder(tickets);
+  return orders.map((order) => {
+    const event = events.get(order.eventId) ?? UNKNOWN_EVENT;
+    const venue = venues.get(event.venueId) ?? UNKNOWN_VENUE;
+    return toMyTicketOrder(
+      order,
+      event,
+      venue,
+      (ticketsByOrder.get(order.id) ?? []).map((ticket) =>
+        toMyTicket(ticket, sections.get(ticket.sectionId)?.name ?? ''),
+      ),
+    );
+  });
 }

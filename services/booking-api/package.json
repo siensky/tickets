@@ -10,22 +10,23 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir tests/unit",
-    "test:integration": "vitest run --dir tests/integration --no-file-parallelism"
+    "test:integration": "vitest run --dir tests/integration --no-file-parallelism",
+    "test:contract": "vitest run --dir tests/contract --no-file-parallelism"
   },
   "dependencies": {
+    "@fastify/cors": "11.3.1",
     "@opentelemetry/api": "1.10.0",
     "@opentelemetry/auto-instrumentations-node": "0.82.0",
     "@opentelemetry/exporter-trace-otlp-http": "0.300.0",
     "@opentelemetry/resources": "3.0.0",
     "@opentelemetry/sdk-node": "0.300.0",
     "@opentelemetry/semantic-conventions": "1.43.0",
-    "@fastify/cors": "11.3.1",
     "@tickets/auth": "workspace:*",
     "@tickets/db": "workspace:*",
     "@tickets/domain": "workspace:*",
     "@tickets/observability": "workspace:*",
-    "@tickets/redis": "workspace:*",
     "@tickets/rabbit": "workspace:*",
+    "@tickets/redis": "workspace:*",
     "@tickets/schemas": "workspace:*",
     "amqplib": "2.2.0",
     "fastify": "5.12.7",
@@ -38,6 +39,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@pact-foundation/pact": "17.1.4",
     "@testcontainers/postgresql": "12.2.1",
     "@testcontainers/rabbitmq": "12.2.1",
     "@testcontainers/redis": "12.2.1",
