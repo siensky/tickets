@@ -139,14 +139,13 @@ test('bokar en plats, loggar in och betalar: hela flödet fram till biljetten', 
   await expect(payNowButton).toBeVisible({ timeout: 10_000 });
   await payNowButton.click();
 
-  // createCheckout lyckas → window.location.href navigerar till
-  // payment-mocks checkoutUrl, som inte serverar någon riktig sida (byggd
-  // för lasttestets trafik, inte webbläsarbesök) — själva "betalningen"
-  // är redan schemalagd server-sidan när sessionen skapades (payment-mock
-  // skickar sin webhook automatiskt, se services/payment-mock/src/
-  // services/webhook-delivery-service.ts). Väntar bara ut navigeringen,
-  // påstår inget om sidan den landar på.
-  await page.waitForURL((url) => url.origin !== APP_ORIGIN, { timeout: 10_000 });
+  // createCheckout lyckas → window.location.href navigerar till payment-mocks
+  // checkoutUrl, som svarar med 302 till success_url (docs/plan.md 7.13 E8) och
+  // därmed tillbaka till webbappens bekräftelsesida. Själva "betalningen" är
+  // redan schemalagd server-sidan när sessionen skapades (payment-mock skickar
+  // sin webhook automatiskt, se services/payment-mock/src/services/
+  // webhook-delivery-service.ts). Väntar bara ut returen, påstår inget om sidan.
+  await page.waitForURL((url) => url.pathname === '/checkout/success', { timeout: 10_000 });
 
   // Auth0-sessionen överlever navigeringen (localStorage-cachad, se
   // apps/web/src/lib/auth-provider.tsx) — ingen ny inloggning behövs.
