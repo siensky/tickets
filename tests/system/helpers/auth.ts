@@ -29,7 +29,13 @@ export async function getAccessToken(which: 1 | 2): Promise<string> {
     }),
   });
   if (!response.ok) {
-    throw new Error(`Auth0 password grant failed with ${String(response.status)}`);
+    // Auth0:s felkod och beskrivning (aldrig hemligheter) gör att en felkonfigurerad app syns direkt.
+    const body: unknown = await response.json().catch(() => ({}));
+    const fields = asRecord(body);
+    const detail = [fields['error'], fields['error_description']]
+      .filter((value) => typeof value === 'string')
+      .join(': ');
+    throw new Error(`Auth0 password grant failed with ${String(response.status)}: ${detail}`);
   }
   const token = str(asRecord(await response.json()), 'access_token');
   tokens.set(which, token);
