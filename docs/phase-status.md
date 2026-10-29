@@ -3,6 +3,18 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Fas 7, steg 1a — snabbare CI (`feature/fas7-ci`)
+
+Fas 7:s steg 1 är delat i 1a (CI), 1b (drift: 7.1 + 7.2) och 1c (cdn, 7.19), en branch
+vardera (docs/plan.md 7.16, docs/rules.md §10). 1a är byggt:
+- `e2e.yml`: Playwrights webbläsare cachas på Playwright-versionen (läses ur
+  `playwright --version`). Vid träff körs bara `install-deps`.
+- `deploy.yml`: `build-and-push` är en matris över sex images (inte fem: migrations
+  ingår), cache scopad per image. `sha`-outputen skrivs av alla ben (samma värde).
+- Matrisen körs bara på push till `main`; CI testar den inte. Första deployen går utan
+  cache, mät tiden på den andra. Cachekvoten (10 GB) kan fyllas av sex `mode=max`-cacher.
+- Beslut: 1c laddar bara upp `brand/`. Uppladdningen av `seed/images/` byggs i steg 6 (7.6).
+
 ## Riktig lasttestkörning, första försöket (efter Fas 6)
 
 `seed-real-venue.ts` (ny, samma mönster som seed-demo-events.ts/

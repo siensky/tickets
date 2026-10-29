@@ -34,11 +34,32 @@ jobs:
     uses: ./.github/workflows/e2e.yml
     secrets: inherit
 
+  # docs/plan.md 7.10: en matris bygger imagesen parallellt i stället för i
+  # sekvens (~4–5 min → ~1–1,5 min). Cache-nyckeln är scopad per image, så en
+  # cache-träff på en tjänst aldrig döljer en trasig build av en annan.
+  # Alla ben skriver samma `sha`-output (GITHUB_SHA är lika för alla), så
+  # "last one wins" på matrisoutputs är ofarligt här.
   build-and-push:
     needs: [test, e2e]
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.sha.outputs.short }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - image: booking-api
+            dockerfile: services/booking-api/Dockerfile
+          - image: realtime-gateway
+            dockerfile: services/realtime-gateway/Dockerfile
+          - image: scheduler-worker
+            dockerfile: services/scheduler-worker/Dockerfile
+          - image: notification-worker
+            dockerfile: services/notification-worker/Dockerfile
+          - image: payment-mock
+            dockerfile: services/payment-mock/Dockerfile
+          - image: migrations
+            dockerfile: shared/db/Dockerfile
     steps:
       - uses: actions/checkout@v5
 
@@ -53,82 +74,17 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build and push booking-api
+      - name: Build and push ${{ matrix.image }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: services/booking-api/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ env.IMAGE_BASE }}/booking-api:${{ steps.sha.outputs.short }}
-            ${{ env.IMAGE_BASE }}/booking-api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # docs/plan.md "Fasplan" Fas 3 — samma mönster som booking-api ovan,
-      # ett steg per tjänst (docker/build-push-action cachar per `file:`,
-      # inte per anrop, så fyra separata steg ger fyra separata
-      # cache-nycklar i stället för att en gemensam cache-träff döljer en
-      # trasig tjänst bakom en annans lyckade build).
-      - name: Build and push realtime-gateway
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/realtime-gateway/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}/realtime-gateway:${{ steps.sha.outputs.short }}
-            ${{ env.IMAGE_BASE }}/realtime-gateway:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push scheduler-worker
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/scheduler-worker/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}/scheduler-worker:${{ steps.sha.outputs.short }}
-            ${{ env.IMAGE_BASE }}/scheduler-worker:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push notification-worker
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/notification-worker/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}/notification-worker:${{ steps.sha.outputs.short }}
-            ${{ env.IMAGE_BASE }}/notification-worker:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push payment-mock
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/payment-mock/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}/payment-mock:${{ steps.sha.outputs.short }}
-            ${{ env.IMAGE_BASE }}/payment-mock:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push migrations
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: shared/db/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}/migrations:${{ steps.sha.outputs.short }}
-            ${{ env.IMAGE_BASE }}/migrations:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ env.IMAGE_BASE }}/${{ matrix.image }}:${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE_BASE }}/${{ matrix.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
   # docs/plan.md "Fas 5 — kända luckor": PWA:ns statiska filer delar
   # medvetet R2-bucketen med databas-backuperna (backup-r2-credentials,

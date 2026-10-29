@@ -118,8 +118,30 @@ jobs:
       - name: Seed e2e fixture data
         run: pnpm --filter @tickets/e2e-tests run seed
 
+      # docs/plan.md 7.10: Chromium laddades ner utan cache varje körning
+      # (22 s–9 min). Webbläsaren cachas på Playwright-versionen; systempaketen
+      # (apt) ligger utanför cachen och installeras därför alltid.
+      - name: Get Playwright version
+        id: playwright-version
+        run: |
+          version=$(pnpm --filter @tickets/e2e-tests exec playwright --version | awk '{print $2}')
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
       - name: Install Playwright's browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @tickets/e2e-tests exec playwright install --with-deps chromium
+
+      - name: Install Playwright's system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @tickets/e2e-tests exec playwright install-deps chromium
 
       - name: Build booking-api
         run: pnpm --filter @tickets/booking-api run build

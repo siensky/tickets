@@ -1059,7 +1059,8 @@ och RTO (hur lång tid återställningen tar) i `runbook.md`, där det idag stå
   slug, varje event skrivs bara till sin egen shard (samma regler som dagens seed-script).
 - Ny kolumn `events.image_url` (migration). Inget nytt S3 behövs: R2 är redan
   S3-kompatibelt och serverar frontenden. Bilderna ligger i `seed/images/`, laddas upp
-  till R2 under `images/` i `deploy-frontend` och serveras från `cdn.tikknet.se` (7.19).
+  till R2 under `images/` i `deploy-frontend` (uppladdningssteget byggs här i steg 6, inte
+  i 1c) och serveras från `cdn.tikknet.se` (7.19).
   Format WebP, 1600×900, ≤250 kB styck.
 - Körs manuellt mot prod (port-forward, som reset-sale) och dokumenteras i runbooken.
 
@@ -1187,8 +1188,12 @@ driftkonfiguration, inte kontraktsform. Det fångas av `loadtest-mode`s paid-kon
   gång. Fix: cacha `~/.cache/ms-playwright` på Playwright-versionen (kör bara
   `install-deps` vid cache-träff), eller kör jobbet i `mcr.microsoft.com/playwright`-
   containern.
-- build-and-push: de 5 imagesen byggs i sekvens i ett jobb (~4–5 min). En matrix bygger
+- build-and-push: de 6 imagesen byggs i sekvens i ett jobb (~4–5 min). En matrix bygger
   dem parallellt (~1–1,5 min). Förväntat totalt: ~5–6 min.
+- *Verifiering:* matrisen körs bara vid push till `main` (ci.yml bygger inga images), så
+  grön CI räcker inte. Granska första deploy-körningen efter merge: alla sex benen gröna,
+  `deploy` fick rätt SHA. Den körningen går utan cache (nya scope-namn), så mät tiden på
+  den **andra** körningen mot `main`.
 
 **7.11 UI/styling — designsystem och bokningsflöde.** Skriver inte om befintlig logik:
 hookarna (`use-queue-admission`, `use-queue-socket`, `use-seat-marking`), `api-client.ts`
@@ -1785,13 +1790,15 @@ vara grönt innan UI-steget räknas som klart:
 **7.16 Byggordning.** Stegen byggs enligt fas-arbetsflödet (plan → bygg → test →
 review → fix → rapport). Användaren committar, pushar och mergar.
 
-*Brancher:* fyra, plus `hotfixes` (steg 0) som mergas först. Inom en branch pushas efter
+*Brancher:* sex (A delas i A1–A3, en logisk ändring per PR, docs/rules.md §10), plus `hotfixes` (steg 0) som mergas först. Inom en branch pushas efter
 **varje** steg och CI måste vara grön innan nästa steg börjar. Mergen sker först när
 hela gruppen är klar. En merge till `main` startar deployen.
 
 | Branch | Steg | Mergas |
 |---|---|---|
-| A `fas7-drift` | 1–3 | först, före försvaret |
+| A1 `fas7-ci` | 1a (7.10) | först, gör alla senare steg snabbare |
+| A2 `fas7-drift` | 1b (7.1 + 7.2), 2–3 | före försvaret |
+| A3 `fas7-cdn` | 1c (7.19) | före B:s seed (steg 6), helst direkt efter A2 |
 | B `fas7-backend` | 4–6 | före C |
 | C `fas7-ui` | 7 | före försvaret |
 | D `fas7-extra` | 8–10 | före inlämningen. Scanner (9) delas ut som egen branch om D växer |
@@ -1801,7 +1808,7 @@ innan den nya backenden har rullat ut (några minuter), så en ny frontend mot g
 backend går sönder under den tiden. Därför får B och C aldrig slås ihop. C är en enda
 release eftersom Tailwinds Preflight annars bryter sidor som inte är omgjorda.
 
-*Prod-verifiering* görs bara där resultatet inte syns annars: steg 1 (Loki, cdn), 2
+*Prod-verifiering* görs bara där resultatet inte syns annars: steg 1b (Loki), 1c (cdn), 2
 (Grafana), 3 (beviset), 6 (seedade events i prod-API:t), 9 (scannern på en riktig
 telefon), samt en genomgång av UI:t i prod efter C. För övriga steg räcker grön CI.
 
@@ -1810,12 +1817,14 @@ telefon), samt en genomgång av UI:t i prod efter C. För övriga steg räcker g
 | # | Steg | Innehåll | Beroenden | Klart när |
 |---|---|---|---|---|
 | 0 | Förberedelser | commit av `hotfixes`-branchen (rabbitmq, helm.tf, LASTTEST-NOTES, planen). Användarens manuella steg i 7.17 påbörjas (kan pågå parallellt med steg 1–5) | — | `main` innehåller allt från lasttestet |
-| 1 | **[G]** Drift | 7.1 (permanenta ändringar + `loadtest-mode.sh`), 7.2 Loki, 7.19 cdn, 7.10 snabbare CI | 0 | Loki visar loggar i Grafana. `cdn.tikknet.se/brand/tikknet-icon.svg` svarar 200. CI ≤ ~6 min. `loadtest-mode on/off` provkört |
-| 2 | **[VG]** Mätbarhet | ingress-nginx-metrics, 7.4 Grafana-paneler, 7.5 återställningsövning | 1 | Panelerna visar data. RPO/RTO ifyllt i runbook |
+| 1a | **[G]** Snabbare CI (branch A1) | 7.10 | 0 | CI ≤ ~6 min. *Status: byggt och granskat, väntar på merge + mätning av andra deploy-körningen* |
+| 1b | **[G]** Drift (branch A2) | 7.1 (permanenta ändringar + `loadtest-mode.sh`), 7.2 Loki | 0 | Loki visar loggar i Grafana. `loadtest-mode on/off` provkört |
+| 1c | **[G]** cdn (branch A3) | 7.19 | 0 | `cdn.tikknet.se/brand/tikknet-icon.svg` svarar 200 |
+| 2 | **[VG]** Mätbarhet | ingress-nginx-metrics, 7.4 Grafana-paneler, 7.5 återställningsövning | 1b | Panelerna visar data. RPO/RTO ifyllt i runbook |
 | 3 | **[VG]** Bevis | 7.3 deploy utan nertid | 2 | `http_req_failed rate==0` under minst en riktig deploy. Bevis i `docs/evidence/zero-downtime.md` |
-| 4 | Säkerhetsnät | 7.14 systemtester F1–F6 mot *nuvarande* API (inga nya fält) + Pact-infrastruktur och kontrakten för befintliga endpoints (7.9) | 1 | Gröna i CI. Byggs *före* API-ändringarna, så de skyddar dagens beteende när allt byggs om |
+| 4 | Säkerhetsnät | 7.14 systemtester F1–F6 mot *nuvarande* API (inga nya fält) + Pact-infrastruktur och kontrakten för befintliga endpoints (7.9) | 1a | Gröna i CI. Byggs *före* API-ändringarna, så de skyddar dagens beteende när allt byggs om |
 | 5 | Backend | E1–E6 + E8 + E9, migrationerna, Pact-kontrakten för dem, systemtesterna utökade med de nya fälten | 4 | Allt grönt. Nya fält syns i prod. Gamla frontenden fungerar oförändrad |
-| 6 | Seed | 7.6 CSV + bilder (bilderna godkänns av användaren först) + layout (E3) | 5, 1 (cdn) | 20 events syns i prod-API:t med `imageUrl`. Kartöversikt-data finns |
+| 6 | Seed | 7.6 CSV + bilder (bilderna godkänns av användaren först) + layout (E3) | 5, 1c (cdn) | 20 events syns i prod-API:t med `imageUrl`. Kartöversikt-data finns |
 | 7 | UI | 7.11 steg 1–7 + 7.15 e2e + logga/favicon | 5, 6 | Hela "Klart när" i 7.11 uppfyllt, e2e grönt |
 | 8 | PostHog | 7.7 | 7 | Verifieringslistan i 7.7 klar |
 | 9 | Scanner | 7.8 + E7 + F7 + scanner-e2e | 5, 7 (tema) | Riktig telefon skannar en riktig biljett i prod: ok → redan skannad |
@@ -1827,8 +1836,9 @@ Före försvaret 4/11 behövs minst steg 0–7.
 **7.17 Manuella förutsättningar (användaren gör dessa, Claude kan inte).** De beskrivs
 steg för steg när respektive steg börjar. Inget steg i 7.16 startar innan dess
 förutsättningar är klara:
-- **Steg 1:** Terraform-variablerna exporterade (se `infra/LASTTEST-NOTES.md`).
-  `terraform apply` för Loki, ingress och cdn körs av användaren.
+- **Steg 1b/1c:** Terraform-variablerna exporterade (se `infra/LASTTEST-NOTES.md`).
+  `terraform apply` för Loki och ingress (1b) respektive cdn (1c) körs av användaren.
+  Steg 1a har inga manuella förutsättningar.
 - **Steg 4:**
   - En Auth0-applikation "CI System Tests" (Regular Web App, Password grant på,
     audience = API:t). Tenantens "Default Directory" måste vara satt, annars svarar
@@ -1939,8 +1949,8 @@ förutsättningar är klara:
     (`<slug>.webp`, `tikknet-logo.svg`) inte är versionerade och en ändrad bild annars
     aldrig skulle nå ut.
   - CORS `GET` från apex och `scan.`.
-  - `deploy-frontend` laddar upp `apps/web/public/brand/` och `seed/images/` till de
-    prefixen.
+  - `deploy-frontend` laddar upp `apps/web/public/brand/` till `brand/`. Uppladdningen av
+    `seed/images/` till `images/` byggs i steg 6 (7.6), när mappen finns.
 - *Medvetet inte flyttat:* JS- och CSS-bundlen ligger kvar på apex. Att flytta den
   skulle kräva cross-origin-precache i service workern (PWA:n), en onödig risk. Eventbilder
   och varumärkesfiler på cdn uppfyller kravet "statiska filer på cdn.<domän>".
