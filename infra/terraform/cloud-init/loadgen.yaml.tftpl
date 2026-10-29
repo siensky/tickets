@@ -40,11 +40,25 @@ runcmd:
   # Officiella k6-paketkällan (docs.k6.io) — en pinnad, signerad apt-
   # källa i stället för ett curl|sh-skript, samma säkerhetsnivå som
   # resten av infran (gitleaks, pinnade versioner, docs/rules.md §12).
+  #
+  # Exakt orsak till tidigare fel är inte bevisad (loggen visade att
+  # /root/.gnupg saknades och att dirmngr inte gick att nå, trots att paketet
+  # var installerat). Därför tas beroendet bort i stället för att gissas:
+  # eget GNUPGHOME, dirmngr startas uttryckligen, nyckelimporten görs om vid
+  # fel, och cloud-init failar synligt om k6 ändå saknas.
   - |
-    gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
-      --keyserver hkp://keyserver.ubuntu.com:80 \
-      --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+    export GNUPGHOME=$(mktemp -d)
+    chmod 700 "$GNUPGHOME"
+    gpgconf --launch dirmngr
+    for attempt in 1 2 3 4 5; do
+      gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+        --keyserver hkp://keyserver.ubuntu.com:80 \
+        --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69 && break
+      [ "$attempt" = 5 ] && break
+      sleep 5
+    done
     echo 'deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main' \
       > /etc/apt/sources.list.d/k6.list
     apt-get update
     apt-get install -y k6
+    command -v k6 || exit 1

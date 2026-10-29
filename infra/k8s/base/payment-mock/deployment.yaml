@@ -57,8 +57,10 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+            # 500m: under lasttest körs 4 repliker mot ~50 000 betalningsförsök
+            # (docs/plan.md 7.1) — 200m throttlade mocken.
             limits:
-              cpu: 200m
+              cpu: 500m
               memory: 128Mi
           readinessProbe:
             httpGet:
