@@ -17,14 +17,27 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: null,
+      includeAssets: ['brand/tikknet-logo.svg', 'brand/apple-touch-icon-180x180.png'],
       manifest: {
-        name: 'Tickets',
-        short_name: 'Tickets',
+        name: 'tikknet',
+        short_name: 'tikknet',
+        lang: 'sv',
         start_url: '/',
         display: 'standalone',
-        background_color: '#ffffff',
-        theme_color: '#1565c0',
-        icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+        // Ink (#161b24) och base-100 i temat `tikknet` (docs/plan.md 7.11).
+        background_color: '#f9fafb',
+        theme_color: '#161b24',
+        // PNG genereras ur brand/tikknet-icon.svg med `pnpm generate-pwa-assets`.
+        icons: [
+          { src: '/brand/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/brand/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+          {
+            src: '/brand/maskable-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
       },
       workbox: {
         runtimeCaching: [

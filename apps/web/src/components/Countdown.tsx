@@ -11,7 +11,7 @@ function remainingSeconds(expiresAt: string): number {
   return Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
 }
 
-export function Countdown({ expiresAt }: { expiresAt: string }): JSX.Element {
+export function useRemainingSeconds(expiresAt: string): number {
   const [seconds, setSeconds] = useState(() => remainingSeconds(expiresAt));
 
   useEffect(() => {
@@ -20,11 +20,20 @@ export function Countdown({ expiresAt }: { expiresAt: string }): JSX.Element {
     return () => clearInterval(timer);
   }, [expiresAt]);
 
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
+  return seconds;
+}
+
+export function formatClock(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  return `${minutes}:${(totalSeconds % 60).toString().padStart(2, '0')}`;
+}
+
+// `role="timer"` är tyst för skärmläsare som standard (implicit aria-live="off"), så en
+// uppdatering varje sekund läses inte upp. Varningen under 60 s ligger i ReservationTimer.
+export function Countdown({ expiresAt }: { expiresAt: string }): JSX.Element {
   return (
-    <span role="timer" aria-live="polite">
-      {minutes}:{secs.toString().padStart(2, '0')}
+    <span role="timer" className="tabular-nums">
+      {formatClock(useRemainingSeconds(expiresAt))}
     </span>
   );
 }

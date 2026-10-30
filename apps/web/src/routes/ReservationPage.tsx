@@ -1,161 +1,183 @@
 /**
- * Reservation med nedräkning + checkout (docs/plan.md "Betalning":
- * "Inloggning krävs först vid betalning, efter reservation" — login
- * only happens here, never for the queue/seatmap flow).
+ * Checkout (docs/plan.md 7.11 F, "Betalning": inloggning krävs först här, efter reservationen;
+ * köflödet är anonymt). Allt som visas kommer från serverns reservation. Går reservationen ut
+ * (serverns status eller nedräkningen) visas modalen och användaren skickas tillbaka till kartan.
  */
 import { useAuth0 } from '@auth0/auth0-react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { useRef, type JSX } from 'react';
-import { useParams } from 'react-router-dom';
-import { createCheckout, getReservation, type ReservationView } from '../lib/api-client.js';
-import { getStoredQueueToken } from '../lib/queue-token-storage.js';
+import { useQuery } from '@tanstack/react-query';
+import type { JSX } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { useRemainingSeconds } from '../components/Countdown.js';
+import { Alert } from '../components/ui/Alert.js';
+import { buttonClass } from '../components/ui/Button.js';
+import { Container } from '../components/ui/Container.js';
+import { ErrorState } from '../components/ui/ErrorState.js';
+import { Skeleton } from '../components/ui/Skeleton.js';
+import { CheckoutReview } from '../features/checkout/CheckoutReview.js';
+import { CheckoutSteps } from '../features/checkout/CheckoutSteps.js';
+import { ReservationExpiredModal } from '../features/checkout/ReservationExpiredModal.js';
+import { useReservationCheckout } from '../features/checkout/use-reservation-checkout.js';
+import { getEvent, type ReservationView } from '../lib/api-client.js';
 import { isAuth0Configured } from '../lib/auth-provider.js';
-import { Countdown } from '../components/Countdown.js';
+import { getStoredQueueToken } from '../lib/queue-token-storage.js';
 
-const RESERVATION_POLL_MS = 3000;
+function Page({ children }: { children: JSX.Element | JSX.Element[] }): JSX.Element {
+  return (
+    <Container className="flex flex-col gap-6 py-8">
+      <h1 className="text-2xl sm:text-3xl">Granska och betala</h1>
+      {children}
+    </Container>
+  );
+}
 
-function useReservationCheckout(
-  eventId: string,
-  reservationId: string,
-  queueToken: string | undefined,
-) {
-  const { getAccessTokenSilently } = useAuth0();
-  // One key per reservation, not per click — a retry of the SAME
-  // checkout attempt must replay, not collide with "en aktiv Checkout
-  // per kötoken" (docs/plan.md "Betalning").
-  const idempotencyKeyRef = useRef(crypto.randomUUID());
+function ReservationOutcome({ status }: { status: ReservationView['status'] }): JSX.Element {
+  if (status === 'pending_payment') {
+    return <Alert tone="info">Betalning pågår. Vi väntar på bekräftelsen från Stripe.</Alert>;
+  }
+  if (status === 'converted') {
+    return (
+      <Alert tone="success">
+        Köpet är klart.{' '}
+        <Link to="/my-tickets" className="link">
+          Se dina biljetter under Mina biljetter
+        </Link>
+        .
+      </Alert>
+    );
+  }
+  return <Alert tone="warning">Reservationen är inte längre aktiv.</Alert>;
+}
 
-  const reservationQuery = useQuery({
-    queryKey: ['reservation', eventId, reservationId],
-    queryFn: () => getReservation(eventId, reservationId, queueToken ?? ''),
-    enabled: eventId !== '' && reservationId !== '' && queueToken !== undefined,
-    refetchInterval: (query) =>
-      query.state.data?.status === 'active' ? RESERVATION_POLL_MS : false,
+function ActiveCheckout({
+  eventId,
+  reservation,
+  checkout,
+}: {
+  eventId: string;
+  reservation: ReservationView;
+  checkout: ReturnType<typeof useReservationCheckout>['checkoutMutation'];
+}): JSX.Element {
+  const { isAuthenticated, isLoading, loginWithRedirect } = useAuth0();
+  const eventQuery = useQuery({
+    queryKey: ['event', eventId],
+    queryFn: () => getEvent(eventId),
   });
+  const isExpired = useRemainingSeconds(reservation.expiresAt) === 0;
 
-  const checkoutMutation = useMutation({
-    mutationFn: async () => {
-      const accessToken = await getAccessTokenSilently();
-      if (accessToken === undefined) {
-        throw new Error('Could not get an access token');
-      }
-      return createCheckout(
-        eventId,
-        reservationId,
-        queueToken ?? '',
-        accessToken,
-        idempotencyKeyRef.current,
-      );
-    },
-    onSuccess: (result) => {
-      window.location.href = result.checkoutUrl;
-    },
-  });
+  function handlePay(): void {
+    if (!isAuthenticated) {
+      void loginWithRedirect({ appState: { returnTo: window.location.pathname } });
+      return;
+    }
+    checkout.mutate();
+  }
 
-  return { reservationQuery, checkoutMutation };
+  return (
+    <>
+      <CheckoutReview
+        reservation={reservation}
+        eventTitle={eventQuery.data?.title ?? ''}
+        payLabel={isAuthenticated ? 'Betala med Stripe' : 'Logga in och betala'}
+        isPaying={isLoading || checkout.isPending}
+        errorMessage={
+          checkout.isError
+            ? `Kunde inte starta betalningen: ${checkout.error.message}`
+            : undefined
+        }
+        onPay={handlePay}
+      />
+      <ReservationExpiredModal open={isExpired} eventId={eventId} />
+    </>
+  );
+}
+
+function MissingReservation({ eventId }: { eventId: string }): JSX.Element {
+  return (
+    <Page>
+      <Alert tone="warning">Ingen giltig reservation hittades.</Alert>
+      <Link to={`/events/${eventId}`} className={buttonClass('secondary')}>
+        Tillbaka till evenemanget
+      </Link>
+    </Page>
+  );
+}
+
+function ReservationContent({
+  eventId,
+  reservation,
+  checkout,
+}: {
+  eventId: string;
+  reservation: ReservationView;
+  checkout: ReturnType<typeof useReservationCheckout>['checkoutMutation'];
+}): JSX.Element {
+  if (reservation.status === 'active') {
+    return <ActiveCheckout eventId={eventId} reservation={reservation} checkout={checkout} />;
+  }
+  if (reservation.status === 'expired' || reservation.status === 'cancelled') {
+    return <ReservationExpiredModal open eventId={eventId} />;
+  }
+  return <ReservationOutcome status={reservation.status} />;
+}
+
+function ReservationLoadState({
+  isError,
+  onRetry,
+}: {
+  isError: boolean;
+  onRetry: () => void;
+}): JSX.Element {
+  return (
+    <Page>
+      {isError ? (
+        <ErrorState message="Kunde inte hämta reservationen." onRetry={onRetry} />
+      ) : (
+        <Skeleton className="h-96 w-full" />
+      )}
+    </Page>
+  );
 }
 
 export function ReservationPage(): JSX.Element {
-  const { eventId: rawEventId, reservationId: rawReservationId } = useParams<{
+  const { eventId = '', reservationId = '' } = useParams<{
     eventId: string;
     reservationId: string;
   }>();
-  const eventId = rawEventId ?? '';
-  const reservationId = rawReservationId ?? '';
   const queueToken = getStoredQueueToken(eventId);
-  const { isAuthenticated, isLoading, loginWithRedirect } = useAuth0();
   const { reservationQuery, checkoutMutation } = useReservationCheckout(
     eventId,
     reservationId,
     queueToken,
   );
 
-  if (rawEventId === undefined || rawReservationId === undefined || queueToken === undefined) {
-    return (
-      <p role="alert">Ingen giltig reservation hittades. Gå tillbaka till arenakartan.</p>
-    );
-  }
-  if (reservationQuery.isPending) {
-    return <p>Laddar reservation…</p>;
-  }
-  if (reservationQuery.isError) {
-    return <p role="alert">Kunde inte hämta reservationen.</p>;
-  }
-
-  const reservation = reservationQuery.data;
-  if (reservation.status !== 'active') {
-    return <ReservationOutcome status={reservation.status} />;
+  if (queueToken === undefined) {
+    return <MissingReservation eventId={eventId} />;
   }
   if (!isAuth0Configured) {
-    return <p role="alert">Inloggning är inte konfigurerad — kan inte gå till betalning.</p>;
+    return (
+      <Page>
+        <Alert tone="error">
+          Inloggning är inte konfigurerad, så betalning går inte att starta.
+        </Alert>
+      </Page>
+    );
   }
-
+  if (reservationQuery.data === undefined) {
+    return (
+      <ReservationLoadState
+        isError={reservationQuery.isError}
+        onRetry={() => void reservationQuery.refetch()}
+      />
+    );
+  }
   return (
-    <ActiveReservation
-      reservation={reservation}
-      isAuthenticated={isAuthenticated}
-      isLoading={isLoading}
-      loginWithRedirect={loginWithRedirect}
-      checkoutMutation={checkoutMutation}
-    />
+    <Page>
+      <CheckoutSteps current="Granska" />
+      <ReservationContent
+        eventId={eventId}
+        reservation={reservationQuery.data}
+        checkout={checkoutMutation}
+      />
+    </Page>
   );
-}
-
-interface ActiveReservationProps {
-  reservation: ReservationView;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  loginWithRedirect: (options?: { appState: { returnTo: string } }) => Promise<void>;
-  checkoutMutation: {
-    mutate: () => void;
-    isPending: boolean;
-    isError: boolean;
-    error: Error | null;
-  };
-}
-
-function ActiveReservation({
-  reservation,
-  isAuthenticated,
-  isLoading,
-  loginWithRedirect,
-  checkoutMutation,
-}: ActiveReservationProps): JSX.Element {
-  function handlePay(): void {
-    if (!isAuthenticated) {
-      void loginWithRedirect({ appState: { returnTo: window.location.pathname } });
-      return;
-    }
-    checkoutMutation.mutate();
-  }
-
-  return (
-    <section>
-      <h1>Din reservation</h1>
-      <p>{reservation.seatIds.length} stol(ar) reserverade.</p>
-      <p>
-        Tid kvar: <Countdown expiresAt={reservation.expiresAt} />
-      </p>
-      <button
-        type="button"
-        disabled={isLoading || checkoutMutation.isPending}
-        onClick={handlePay}
-      >
-        {isAuthenticated ? 'Gå till betalning' : 'Logga in och betala'}
-      </button>
-      {checkoutMutation.isError && checkoutMutation.error !== null ? (
-        <p role="alert">Kunde inte starta betalningen: {checkoutMutation.error.message}</p>
-      ) : null}
-    </section>
-  );
-}
-
-function ReservationOutcome({ status }: { status: string }): JSX.Element {
-  if (status === 'pending_payment') {
-    return <p>Betalning pågår…</p>;
-  }
-  if (status === 'converted') {
-    return <p>Köpet är klart! Se dina biljetter under &quot;Mina biljetter&quot;.</p>;
-  }
-  return <p role="alert">Reservationen är inte längre aktiv ({status}).</p>;
 }

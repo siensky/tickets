@@ -10,6 +10,9 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './specs',
   timeout: 30_000,
+  // En worker: reservation-expiry.spec.ts sätter hålltiden till en minut i `config` en stund, och
+  // alla specar delar databas och Redis. Sviten är liten.
+  workers: 1,
   retries: process.env['CI'] === undefined ? 0 : 1,
   use: {
     baseURL: process.env['E2E_BASE_URL'] ?? 'http://localhost:5173',

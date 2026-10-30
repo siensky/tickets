@@ -3,6 +3,16 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Fas 7, steg 7 — UI (`feature/fas7-ui`)
+
+- **Designsystem:** Tailwind 4 med Preflight + daisyUI 5, temat `tikknet` i `shared/ui-theme/theme.css` (bara ljust). `components/ui` (Button, Badge, Alert, Card, Modal på native `<dialog>`, …), `components/layout` (AppShell, Navbar med drawer, OfflineBanner). `lib/format.ts` är enda platsen för `Intl`. `success` (grön) klarar bara 3:1, så text läggs aldrig på grön yta: Badge/Alert använder prick/kant (kontrasttestet bevakar det).
+- **Flöde:** ny route `/events/:id/queue` (QueuePage/QueueScreen), arenaöversikt (`layout` från E2, kortrutnät utan layout) + sektionsvy med `react-zoom-pan-pinch`, `memo`-stolar, roving tabindex, 6 px-tröskel mot drag. Checkout visar serverns `seats`/`totalCents`; bekräftelsesidan pollar `GET /orders` (2 s, max 60 s) och visar "klart" först vid `paid`. Alla sidor utom startsidan är `React.lazy` (JS 716 → 321 kB; behövs för Lighthouse ≥90).
+- **Befintliga hooks orörda.** Notis "Rad A plats 1 togs av någon annan" byggs i `use-section-selection.ts` ur `onSeatTaken`-callbacken (hookens egen returnerade text används inte). Idempotency-nyckeln för reservation byts när stolsurvalet byts (annars konflikt mot gammal nyckel).
+- **PWA:** ikoner genereras med `pnpm generate-pwa-assets` ur `brand/tikknet-icon.svg` (committade i `public/brand/`), manifest uppdaterat, `public/icon.svg` borttagen.
+- **e2e:** seeden har ett event per spec och varje event ligger bara på sin shard (annars dubblerades de i `GET /events`). Hjälpare i `tests/e2e/helpers/`. `workers: 1` eftersom `reservation-expiry.spec` sätter `reservation_hold_minutes=1` tillfälligt. e2e-stacken kör inte realtime-gateway: `seat-taken.spec` testar pollingvägen, inte WebSocket.
+- **Direktinsläpp (efter användarens test av UI:t):** `joinQueue` släpper in direkt om kön är tom och färre än `queue_direct_admit_limit` (migration `global/…6000`, standard 1000) är insläppta för eventet; annars kö som förut. Se plan.md "Väntrum". e2e: `passTheQueue` tål båda vägarna; `queue-direct-admit.spec` och a11y-kön sätter gränsen (0/1000) via `helpers/queue.ts`. Migrationen måste ha körts före booking-api-koden (`getQueueConfig` kräver nyckeln).
+- **Kvar:** `booking-flow.spec` mot riktig Auth0 körs första gången i CI; UI-genomgång i prod; Lighthouse mot prod (lokal `vite preview` saknar komprimering).
+
 ## Fas 7, steg 4–6 — säkerhetsnät, backend, seed (`feature/fas7-backend`)
 
 - **Steg 4:** `tests/system` (`@tickets/system-tests`, script `test:system`, F1–F6 + invarianter i ett eget varv sist). Black-box: ESLint-regeln `no-restricted-imports` förbjuder import från `services/` och `shared/`. Kräver Auth0-appen "CI System Tests" + andra testkonto (runbook "Systemtester och kontraktstester"). e2e.yml: dubbla webhooks alltid, latens 50–200 ms, steget "Run system tests". Pact utan broker: `pnpm test:contract` (rensar `pacts/`, kör konsumenttester, sedan providrarna). `pacts/` är genererat/gitignorerat.

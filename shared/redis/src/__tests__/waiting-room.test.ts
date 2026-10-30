@@ -42,12 +42,14 @@ describe('admitNextBatch', () => {
     const now = Date.now();
     const set = vi.fn().mockResolvedValue('OK');
     const srem = vi.fn();
+    const zadd = vi.fn().mockResolvedValue(1);
     const zpopmin = vi
       .fn()
       .mockResolvedValue(['token-a', String(now), 'token-b', String(now)]);
     const redis = {
       zpopmin,
       set,
+      zadd,
       zcard: vi.fn().mockResolvedValue(3),
       srem,
     } as unknown as Redis;
@@ -61,6 +63,7 @@ describe('admitNextBatch', () => {
     });
     expect(set).toHaveBeenCalledWith('admitted:event-1:token-a', '1', 'EX', 600);
     expect(set).toHaveBeenCalledWith('admitted:event-1:token-b', '1', 'EX', 600);
+    expect(zadd).toHaveBeenCalledWith('admitted-index:event-1', expect.any(Number), 'token-a');
     expect(srem).not.toHaveBeenCalled();
     expect(zpopmin).toHaveBeenCalledTimes(1);
   });
@@ -70,6 +73,7 @@ describe('admitNextBatch', () => {
     const redis = {
       zpopmin: vi.fn().mockResolvedValue(['token-a', String(Date.now())]),
       set: vi.fn().mockResolvedValue('OK'),
+      zadd: vi.fn().mockResolvedValue(1),
       zcard: vi.fn().mockResolvedValue(0),
       srem,
     } as unknown as Redis;
@@ -91,6 +95,7 @@ describe('admitNextBatch', () => {
     const redis = {
       zpopmin,
       set,
+      zadd: vi.fn().mockResolvedValue(1),
       zcard: vi.fn().mockResolvedValue(0),
       srem: vi.fn(),
     } as unknown as Redis;
@@ -116,6 +121,7 @@ describe('admitNextBatch', () => {
     const redis = {
       zpopmin,
       set,
+      zadd: vi.fn().mockResolvedValue(1),
       zcard: vi.fn().mockResolvedValue(0),
       srem: vi.fn(),
     } as unknown as Redis;

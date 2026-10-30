@@ -1,85 +1,123 @@
 /**
- * Event detail + väntrum (docs/plan.md "Väntrum"). Joins the queue on
- * mount and polls admission; once admitted, links on to the seatmap.
+ * Eventsidan (docs/plan.md 7.11 B): hero, infoblock, "Boka biljetter" (sticky på mobil) och
+ * viktig information. Knappen leder till kön (`/events/:id/queue`); sidan ställer inte själv
+ * användaren i kön längre.
  */
 import { useQuery } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { getEvent } from '../lib/api-client.js';
-import { useQueueAdmission } from '../hooks/use-queue-admission.js';
+import { Button, buttonClass } from '../components/ui/Button.js';
+import { Card } from '../components/ui/Card.js';
+import { Container } from '../components/ui/Container.js';
+import { ErrorState } from '../components/ui/ErrorState.js';
+import { Skeleton } from '../components/ui/Skeleton.js';
+import { isBookable } from '../features/events/AvailabilityBadge.js';
+import { EventHero } from '../features/events/EventHero.js';
+import { EventInfo } from '../features/events/EventInfo.js';
+import { getEvent, type EventSummary } from '../lib/api-client.js';
 
-export function EventPage(): JSX.Element {
-  const { eventId: rawEventId } = useParams<{ eventId: string }>();
-  const eventId = rawEventId ?? '';
-
-  const eventQuery = useQuery({
-    queryKey: ['event', eventId],
-    queryFn: () => getEvent(eventId),
-    enabled: eventId !== '',
-  });
-  const { status, isJoining, error } = useQueueAdmission(eventId);
-
-  if (rawEventId === undefined) {
-    return <p role="alert">Okänt evenemang.</p>;
+function BookButton({
+  event,
+  className = '',
+}: {
+  event: EventSummary;
+  className?: string;
+}): JSX.Element {
+  if (isBookable(event.availability)) {
+    return (
+      <Link
+        to={`/events/${event.id}/queue`}
+        className={buttonClass('primary', 'lg', className)}
+      >
+        Boka biljetter
+      </Link>
+    );
   }
-  if (eventQuery.isPending) {
-    return <p>Laddar evenemang…</p>;
-  }
-  if (eventQuery.isError) {
-    return <p role="alert">Kunde inte hämta evenemanget.</p>;
-  }
-
   return (
-    <section>
-      <h1>{eventQuery.data.title}</h1>
-      <p>
-        {eventQuery.data.artist} — {eventQuery.data.venueName}, {eventQuery.data.venueCity}
-      </p>
-      <WaitingRoomStatus
-        eventId={eventId}
-        isJoining={isJoining}
-        status={status}
-        error={error}
-      />
+    <Button size="lg" disabled className={className}>
+      {event.availability === 'opens_soon'
+        ? 'Försäljningen har inte öppnat'
+        : 'Inte till salu'}
+    </Button>
+  );
+}
+
+function ImportantInfo({ description }: { description: string | null }): JSX.Element {
+  return (
+    <section className="flex flex-col gap-4">
+      {description === null ? null : (
+        <div>
+          <h2 className="mb-2">Om evenemanget</h2>
+          <p className="max-w-prose whitespace-pre-line">{description}</p>
+        </div>
+      )}
+      <Card>
+        <h2 className="mb-3 text-lg">Bra att veta</h2>
+        <ul className="list-disc space-y-1 pl-5">
+          <li>Max 5 biljetter per köp.</li>
+          <li>Dina platser hålls i 5 minuter medan du betalar.</li>
+          <li>Biljetterna visas med QR-kod under Mina biljetter.</li>
+        </ul>
+      </Card>
     </section>
   );
 }
 
-function WaitingRoomStatus({
-  eventId,
-  isJoining,
-  status,
-  error,
-}: {
-  eventId: string;
-  isJoining: boolean;
-  status: ReturnType<typeof useQueueAdmission>['status'];
-  error: Error | undefined;
-}): JSX.Element {
-  if (error !== undefined) {
-    return <p role="alert">Något gick fel i väntrummet: {error.message}</p>;
-  }
-  if (isJoining || status === undefined) {
-    return <p>Ansluter till väntrummet…</p>;
-  }
-  if (status.status === 'waiting') {
-    return (
-      <p>
-        Din plats i kön: {status.position} av {status.queueDepth}
-      </p>
-    );
-  }
-  if (status.status === 'admitted') {
-    return (
-      <p>
-        Du är insläppt! <Link to={`/events/${eventId}/seatmap`}>Välj dina platser</Link>
-      </p>
-    );
-  }
-  if (status.status === 'sales_closed') {
-    return <p>Försäljningen för det här evenemanget är stängd.</p>;
-  }
+function EventPageSkeleton(): JSX.Element {
   return (
-    <p role="alert">Din kösession hittades inte längre. Ladda om sidan för att gå med igen.</p>
+    <>
+      <Skeleton className="aspect-[4/3] w-full sm:aspect-[16/7]" />
+      <Container className="flex flex-col gap-4 py-8">
+        <Skeleton className="h-6 w-64" />
+        <Skeleton className="h-6 w-48" />
+      </Container>
+    </>
+  );
+}
+
+export function EventPage(): JSX.Element {
+  const { eventId = '' } = useParams<{ eventId: string }>();
+  const eventQuery = useQuery({
+    queryKey: ['event', eventId],
+    queryFn: () => getEvent(eventId),
+    enabled: eventId !== '',
+    // Försäljningen kan öppna medan sidan är öppen: hämta om tills eventet inte längre är "snart".
+    refetchInterval: (query) =>
+      query.state.data?.availability === 'opens_soon' ? 5000 : false,
+  });
+
+  if (eventQuery.isError) {
+    return (
+      <Container>
+        <ErrorState
+          message="Kunde inte hämta evenemanget."
+          onRetry={() => void eventQuery.refetch()}
+        />
+      </Container>
+    );
+  }
+  if (eventQuery.isPending) {
+    return <EventPageSkeleton />;
+  }
+  const event = eventQuery.data;
+  return (
+    <>
+      <EventHero event={event} />
+      <Container className="grid gap-8 py-8 pb-28 lg:grid-cols-[1fr_360px] lg:pb-12">
+        <div className="flex flex-col gap-8">
+          <EventInfo event={event} />
+          <ImportantInfo description={event.description} />
+        </div>
+        <aside className="hidden self-start lg:sticky lg:top-24 lg:block">
+          <Card className="flex flex-col gap-4 shadow-lg">
+            <h2 className="text-lg">Biljetter</h2>
+            <BookButton event={event} className="w-full" />
+          </Card>
+        </aside>
+      </Container>
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-base-300 bg-base-100 p-3 shadow-lg lg:hidden">
+        <BookButton event={event} className="w-full" />
+      </div>
+    </>
   );
 }

@@ -1,239 +1,129 @@
 /**
- * Arenakarta, sektionsvy (docs/plan.md "Domän och användarflöde":
- * "Större arena → sektionsvy, och man klickar på en sektion för att se
- * dess stolar"). Geometry is fetched once (static venue layout);
- * status polls every 2 s (docs/plan.md "Realtid").
+ * Arenakarta (docs/plan.md 7.11 D): översikt över sektionerna, därefter sektionsvyn med
+ * stolarna. Köhanteringen bor på `/events/:id/queue`; den som inte är insläppt skickas dit.
+ * Bara `useQueueAdmission` avgör om användaren släpps in.
  */
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { useRef, useState, type JSX } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import {
-  createReservation,
-  getEvent,
-  getSectionGeometry,
-  getSectionSeatStatus,
-  listVenueSections,
-  type SeatGeometry,
-  type SeatStatusEntry,
-} from '../lib/api-client.js';
+import { useQuery } from '@tanstack/react-query';
+import { ArrowLeft } from 'lucide-react';
+import { useEffect, useState, type JSX } from 'react';
+import { Navigate, useParams } from 'react-router-dom';
+import { Button } from '../components/ui/Button.js';
+import { Container } from '../components/ui/Container.js';
+import { ErrorState } from '../components/ui/ErrorState.js';
+import { Skeleton } from '../components/ui/Skeleton.js';
+import { SectionSeats } from '../features/seatmap/SectionSeats.js';
+import { VenueOverview } from '../features/seatmap/VenueOverview.js';
 import { useQueueAdmission } from '../hooks/use-queue-admission.js';
 import {
-  buildSeatLookups,
-  useSeatMarkToggle,
-  useSeatTakenNotifications,
-} from '../hooks/use-seat-marking.js';
-import { SeatGrid } from '../components/SeatGrid.js';
+  getEvent,
+  getSectionSummary,
+  type EventSummary,
+  type SectionSummary,
+} from '../lib/api-client.js';
 
-const MAX_SEATS_PER_RESERVATION = 5;
-const SEAT_STATUS_POLL_MS = 2000;
+/** Escape går tillbaka till översikten, men aldrig medan en dialog är öppen. */
+function useEscapeToGoBack(isActive: boolean, onBack: () => void): void {
+  useEffect(() => {
+    if (!isActive) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape' && document.querySelector('dialog[open]') === null) {
+        onBack();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isActive, onBack]);
+}
+
+function MapSkeleton(): JSX.Element {
+  return (
+    <Container className="flex flex-col gap-4 py-8">
+      <Skeleton className="h-10 w-80" />
+      <Skeleton className="h-96 w-full" />
+    </Container>
+  );
+}
+
+function SeatmapContent({
+  event,
+  summary,
+  queueToken,
+}: {
+  event: EventSummary;
+  summary: SectionSummary;
+  queueToken: string | undefined;
+}): JSX.Element {
+  const [sectionId, setSectionId] = useState<string | undefined>();
+  useEscapeToGoBack(sectionId !== undefined, () => setSectionId(undefined));
+  const section = summary.sections.find((entry) => entry.id === sectionId);
+  return (
+    <Container className="flex flex-col gap-6 py-8">
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {section === undefined ? null : (
+          <Button variant="secondary" size="sm" onClick={() => setSectionId(undefined)}>
+            <ArrowLeft size={16} strokeWidth={1.75} aria-hidden="true" />
+            Alla sektioner
+          </Button>
+        )}
+        <div>
+          <h1 className="text-2xl sm:text-3xl">{section?.name ?? 'Välj sektion'}</h1>
+          <p className="text-sm text-muted">{event.title}</p>
+        </div>
+      </header>
+      {section === undefined ? (
+        <VenueOverview summary={summary} onSelect={setSectionId} />
+      ) : (
+        <SectionSeats
+          eventId={event.id}
+          eventTitle={event.title}
+          venueId={event.venueId}
+          sectionId={section.id}
+          sectionName={section.name}
+          queueToken={queueToken}
+        />
+      )}
+    </Container>
+  );
+}
 
 export function SeatmapPage(): JSX.Element {
-  const { eventId: rawEventId } = useParams<{ eventId: string }>();
-  const eventId = rawEventId ?? '';
-  const [sectionId, setSectionId] = useState<string | undefined>();
-
+  const { eventId = '' } = useParams<{ eventId: string }>();
   const eventQuery = useQuery({
     queryKey: ['event', eventId],
     queryFn: () => getEvent(eventId),
     enabled: eventId !== '',
   });
-  const { token, status } = useQueueAdmission(eventId);
+  const summaryQuery = useQuery({
+    queryKey: ['section-summary', eventId],
+    queryFn: () => getSectionSummary(eventId),
+    enabled: eventId !== '',
+    refetchInterval: 10_000,
+  });
+  const { token, status, error: queueError } = useQueueAdmission(eventId);
 
-  if (rawEventId === undefined || eventQuery.isPending) {
-    return <p>Laddar…</p>;
+  // Misslyckad kö (utgången token, stängd försäljning) hanteras av kösidan.
+  if (queueError !== undefined || (status !== undefined && status.status !== 'admitted')) {
+    return <Navigate to={`/events/${eventId}/queue`} replace />;
   }
-  if (eventQuery.isError) {
-    return <p role="alert">Kunde inte hämta evenemanget.</p>;
-  }
-  if (status !== undefined && status.status !== 'admitted') {
-    return <p role="alert">Du måste vara insläppt från väntrummet för att välja platser.</p>;
-  }
-
-  return (
-    <section>
-      <h1>{eventQuery.data.title} — välj platser</h1>
-      {sectionId === undefined ? (
-        <SectionList venueId={eventQuery.data.venueId} onSelectSection={setSectionId} />
-      ) : (
-        <SectionSeats
-          eventId={eventId}
-          venueId={eventQuery.data.venueId}
-          sectionId={sectionId}
-          queueToken={token}
-          onBack={() => setSectionId(undefined)}
+  if (eventQuery.isError || summaryQuery.isError) {
+    return (
+      <Container>
+        <ErrorState
+          message="Kunde inte hämta arenakartan."
+          onRetry={() => {
+            void eventQuery.refetch();
+            void summaryQuery.refetch();
+          }}
         />
-      )}
-    </section>
-  );
-}
-
-function SectionList({
-  venueId,
-  onSelectSection,
-}: {
-  venueId: string;
-  onSelectSection: (sectionId: string) => void;
-}): JSX.Element {
-  const sectionsQuery = useQuery({
-    queryKey: ['venue-sections', venueId],
-    queryFn: () => listVenueSections(venueId),
-    staleTime: Number.POSITIVE_INFINITY,
-  });
-
-  if (sectionsQuery.isPending) {
-    return <p>Laddar sektioner…</p>;
+      </Container>
+    );
   }
-  if (sectionsQuery.isError) {
-    return <p role="alert">Kunde inte hämta sektionerna.</p>;
+  if (eventQuery.isPending || summaryQuery.isPending || status === undefined) {
+    return <MapSkeleton />;
   }
   return (
-    <ul>
-      {sectionsQuery.data.sections.map((section) => (
-        <li key={section.id}>
-          <button type="button" onClick={() => onSelectSection(section.id)}>
-            {section.name}
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function SectionSeats({
-  eventId,
-  venueId,
-  sectionId,
-  queueToken,
-  onBack,
-}: {
-  eventId: string;
-  venueId: string;
-  sectionId: string;
-  queueToken: string | undefined;
-  onBack: () => void;
-}): JSX.Element {
-  const geometryQuery = useQuery({
-    queryKey: ['section-geometry', venueId, sectionId],
-    queryFn: () => getSectionGeometry(venueId, sectionId),
-    staleTime: Number.POSITIVE_INFINITY,
-  });
-  const statusQuery = useQuery({
-    queryKey: ['section-status', eventId, sectionId],
-    queryFn: () => getSectionSeatStatus(eventId, sectionId),
-    refetchInterval: SEAT_STATUS_POLL_MS,
-  });
-
-  if (geometryQuery.isPending || statusQuery.isPending) {
-    return <p>Laddar stolar…</p>;
-  }
-  if (geometryQuery.isError || statusQuery.isError) {
-    return <p role="alert">Kunde inte hämta stolarna för den sektionen.</p>;
-  }
-
-  return (
-    <div>
-      <button type="button" onClick={onBack}>
-        ← Tillbaka till sektioner
-      </button>
-      <SeatSelector
-        eventId={eventId}
-        geometry={geometryQuery.data.seats}
-        seatStatuses={statusQuery.data.seats}
-        queueToken={queueToken}
-      />
-    </div>
-  );
-}
-
-function resolveSelectedSeatIds(
-  selected: ReadonlySet<string>,
-  seatIdByVenueSeatId: ReadonlyMap<string, string>,
-): string[] {
-  return [...selected]
-    .map((venueSeatId) => seatIdByVenueSeatId.get(venueSeatId))
-    .filter((seatId): seatId is string => seatId !== undefined);
-}
-
-function useReservationSubmit(
-  eventId: string,
-  queueToken: string | undefined,
-  selected: ReadonlySet<string>,
-  seatIdByVenueSeatId: ReadonlyMap<string, string>,
-): { handleContinue: () => void; isError: boolean; errorMessage: string | undefined } {
-  const navigate = useNavigate();
-  // Generated ONCE per mount, not per click: a retry of the SAME
-  // attempt must reuse the same key so the server's idempotency check
-  // (docs/plan.md "Idempotens") can actually replay it instead of
-  // creating a second reservation attempt that collides on "one active
-  // reservation per queue token".
-  const idempotencyKeyRef = useRef(crypto.randomUUID());
-
-  const reservationMutation = useMutation({
-    mutationFn: (seatIds: readonly string[]) =>
-      createReservation(eventId, queueToken ?? '', seatIds, idempotencyKeyRef.current),
-    onSuccess: (result) => navigate(`/events/${eventId}/reservations/${result.reservationId}`),
-  });
-
-  function handleContinue(): void {
-    const seatIds = resolveSelectedSeatIds(selected, seatIdByVenueSeatId);
-    if (seatIds.length > 0) {
-      reservationMutation.mutate(seatIds);
-    }
-  }
-
-  return {
-    handleContinue,
-    isError: reservationMutation.isError,
-    errorMessage: reservationMutation.error?.message,
-  };
-}
-
-function SeatSelector({
-  eventId,
-  geometry,
-  seatStatuses,
-  queueToken,
-}: {
-  eventId: string;
-  geometry: readonly SeatGeometry[];
-  seatStatuses: readonly SeatStatusEntry[];
-  queueToken: string | undefined;
-}): JSX.Element {
-  const { statusByVenueSeatId, seatIdByVenueSeatId } = buildSeatLookups(seatStatuses);
-  const { selected, handleToggleSeat, deselectSeat } = useSeatMarkToggle(
-    eventId,
-    queueToken,
-    seatIdByVenueSeatId,
-    MAX_SEATS_PER_RESERVATION,
-  );
-  const takenNotice = useSeatTakenNotifications(queueToken, seatIdByVenueSeatId, deselectSeat);
-  const { handleContinue, isError, errorMessage } = useReservationSubmit(
-    eventId,
-    queueToken,
-    selected,
-    seatIdByVenueSeatId,
-  );
-
-  return (
-    <>
-      <SeatGrid
-        geometry={geometry}
-        statusByVenueSeatId={statusByVenueSeatId}
-        selectedVenueSeatIds={selected}
-        onToggleSeat={handleToggleSeat}
-      />
-      {takenNotice !== undefined ? <p role="status">{takenNotice}</p> : null}
-      <p>
-        {selected.size} av {MAX_SEATS_PER_RESERVATION} stolar valda
-      </p>
-      <button
-        type="button"
-        disabled={selected.size === 0 || queueToken === undefined}
-        onClick={handleContinue}
-      >
-        Gå vidare
-      </button>
-      {isError ? <p role="alert">Kunde inte reservera: {errorMessage}</p> : null}
-    </>
+    <SeatmapContent event={eventQuery.data} summary={summaryQuery.data} queueToken={token} />
   );
 }
