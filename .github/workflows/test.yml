@@ -59,3 +59,8 @@ jobs:
         # Testcontainers kräver Docker, som finns förinstallerat på
         # GitHub-hostade ubuntu-körare — inget extra steg behövs.
         run: pnpm test:integration
+
+      # docs/plan.md 7.9: Pact utan broker. Konsumenttesterna skriver pact-filer till
+      # pacts/ och providrarna (booking-api, scheduler-worker) verifierar dem i samma körning.
+      - name: Contract tests (Pact)
+        run: pnpm test:contract

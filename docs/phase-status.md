@@ -3,13 +3,20 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Fas 7, steg 4–6 — säkerhetsnät, backend, seed (`feature/fas7-backend`)
+
+- **Steg 4:** `tests/system` (`@tickets/system-tests`, script `test:system`, F1–F6 + invarianter i ett eget varv sist). Black-box: ESLint-regeln `no-restricted-imports` förbjuder import från `services/` och `shared/`. Kräver Auth0-appen "CI System Tests" + andra testkonto (runbook "Systemtester och kontraktstester"). e2e.yml: dubbla webhooks alltid, latens 50–200 ms, steget "Run system tests". Pact utan broker: `pnpm test:contract` (rensar `pacts/`, kör konsumenttester, sedan providrarna). `pacts/` är genererat/gitignorerat.
+- **Steg 5:** E1 (`image_url`, `description`, `featured`, aggregat via LATERAL, `availability`), E2 `GET /events/:id/sections/summary`, E4 `priceCents`, E5 `seats`/`totalCents` via `services/pricing.ts` (delas med checkout), E6 `GET /events/:eventId/orders/:orderId` (404 för annans order), E8 payment-mock `GET /mock-checkout/:sessionId`, E9 event/venue/sektion i `/me/tickets`. Migrationer `…14000` (events), global `…5000` (layout), `…15000` (`ticket_scans`, oanvänd till steg 9). `PUBLIC_ASSET_BASE_URL` valideras vid start (måste sluta på `/`).
+- **Steg 6:** `seed/venues.csv`, `seed/events.csv`, `seed/images/` (genererade). `seed-events-from-csv.ts` (mapper → repository), idempotent: arenor/sektioner/event uppdateras, stolar läggs bara till (priser ändras inte i efterhand). Se runbook för körning.
+- Kvar att göra manuellt: Auth0-appen och GitHub-secrets för systemtesterna, merge, `seed-events-from-csv` mot prod, beslut om de gamla demo-eventen.
+
 ## Fas 7, steg 3 — bevis (`feature/fas7-zero-downtime`)
 
 - `tests/load/deploy-under-load.js`: egen profil (10 iterationer/s i 5 min, 1 stol per försök så eventet inte säljer slut), 409 räknas som korrekt svar. Thresholds: `http_req_failed rate==0`, `dropped_iterations count==0`, `checks rate==1`, `completed_bookings count>0` (de två sista utöver planen, mot falskt "0 fel").
 - Deployen under beviset är `kubectl rollout restart deployment/booking-api` ×2, inte en merge genom pipelinen (literal `STRIPE_WEBHOOK_SECRET` under `loadtest-mode on` failar `kubectl apply`). Beslut av användaren, motivering i `docs/forsvar.md`. `loadtest-mode.sh` är oförändrat.
 - Körordning i `docs/runbook.md` "Bevis: deploy utan nertid". Serverbeviset läses som rå `sum(nginx_ingress_controller_requests{status=~"5..", service!="metrics-blackhole"})` före/efter.
 - `docs/evidence/zero-downtime.md` är en mall: resultatrutorna fylls i av användaren efter körningen. Beviset är ALDRIG körd än.
-- **PÅMINNELSE:** beviset körs senare, när branch C (`fas7-ui`, steg 7) är klar och före försvaret 4/11. Steg 3 är [VG] och är inte klart förrän `docs/evidence/zero-downtime.md` är ifylld. Branch B får inte mergas före beviset (plan 7.16).
+- **PÅMINNELSE:** beviset körs när branch C (`fas7-ui`, steg 7) är **mergad**, före försvaret 4/11 (ändrat av användaren från 7.16:s ordning, som kräver verifiering före nästa branch). Steg 3 är [VG] och är inte klart förrän `docs/evidence/zero-downtime.md` är ifylld.
 
 ## Fas 7, steg 2 — mätbarhet (`feature/fas7-matbarhet`)
 

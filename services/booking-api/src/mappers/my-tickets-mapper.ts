@@ -5,15 +5,17 @@
 import type {
   MyTicket,
   MyTicketOrder,
+  EventTicketInfo,
   OrderRow,
   TicketWithSeatRow,
 } from '../types/my-tickets.js';
 
-export function toMyTicket(row: TicketWithSeatRow): MyTicket {
+export function toMyTicket(row: TicketWithSeatRow, sectionName: string): MyTicket {
   return {
     ticketId: row.id,
     seatId: row.seatId,
     sectionId: row.sectionId,
+    sectionName,
     row: row.row,
     number: row.number,
     status: row.status,
@@ -23,13 +25,17 @@ export function toMyTicket(row: TicketWithSeatRow): MyTicket {
 
 export function toMyTicketOrder(
   order: OrderRow,
-  eventTitle: string,
+  event: EventTicketInfo,
+  venue: { readonly name: string; readonly city: string },
   tickets: readonly MyTicket[],
 ): MyTicketOrder {
   return {
     orderId: order.id,
     eventId: order.eventId,
-    eventTitle,
+    eventTitle: event.title,
+    eventStartsAt: event.startsAt?.toISOString() ?? null,
+    venueName: venue.name,
+    venueCity: venue.city,
     status: order.status,
     totalCents: order.totalCents,
     createdAt: order.createdAt.toISOString(),

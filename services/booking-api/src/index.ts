@@ -47,6 +47,7 @@ import { registerEventRoutes } from './routes/events.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerMyTicketsRoutes } from './routes/my-tickets.js';
+import { registerOrderRoutes } from './routes/orders.js';
 import { registerQueueRoutes } from './routes/queue.js';
 import { registerRateLimitHook } from './routes/rate-limit.js';
 import { registerReservationRoutes } from './routes/reservations.js';
@@ -111,7 +112,11 @@ function registerRoutes(
     logger,
     deps.rateLimitAllowlistedIps,
   );
-  registerEventRoutes(app, { shardPools: deps.shardPools, logger });
+  registerEventRoutes(app, {
+    shardPools: deps.shardPools,
+    logger,
+    assetBaseUrl: deps.publicAssetBaseUrl,
+  });
   registerSeatmapRoutes(app, { shardPools: deps.shardPools, redis: deps.redis, logger });
   registerQueueRoutes(app, deps);
   registerReservationRoutes(app, deps);
@@ -131,6 +136,7 @@ function registerRoutes(
     deps.auth0Verifier,
   );
   registerMyTicketsRoutes(app, { shardPools: deps.shardPools, logger }, deps.auth0Verifier);
+  registerOrderRoutes(app, { shardPools: deps.shardPools }, deps.auth0Verifier);
   registerWebhookRoutes(app, {
     shardPools: deps.shardPools,
     stripe,

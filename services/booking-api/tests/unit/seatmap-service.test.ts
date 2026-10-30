@@ -11,7 +11,12 @@ const SILENT_LOGGER = {
   error: vi.fn(),
 } as unknown as Logger;
 
-const SEAT_ROW = { id: 'seat-1', venue_seat_id: 'venue-seat-1', status: 'available' };
+const SEAT_ROW = {
+  id: 'seat-1',
+  venue_seat_id: 'venue-seat-1',
+  status: 'available',
+  price_cents: 1000,
+};
 
 function fakePool(): Pool {
   return { query: vi.fn().mockResolvedValue({ rows: [SEAT_ROW] }) } as unknown as Pool;
@@ -36,7 +41,7 @@ describe('getSectionSeatStatus', () => {
     );
 
     expect(result).toEqual([
-      { seatId: 'seat-1', venueSeatId: 'venue-seat-1', status: 'available' },
+      { seatId: 'seat-1', venueSeatId: 'venue-seat-1', status: 'available', priceCents: 1000 },
     ]);
   });
 
@@ -54,7 +59,26 @@ describe('getSectionSeatStatus', () => {
     );
 
     expect(result).toEqual([
-      { seatId: 'seat-1', venueSeatId: 'venue-seat-1', status: 'available' },
+      { seatId: 'seat-1', venueSeatId: 'venue-seat-1', status: 'available', priceCents: 1000 },
     ]);
+  });
+
+  it('behandlar en cachepost utan priceCents (skriven av en äldre podd) som cachemiss', async () => {
+    const pool = fakePool();
+    const stale = JSON.stringify([
+      { seatId: 'seat-1', venueSeatId: 'venue-seat-1', status: 'held' },
+    ]);
+    const redis = {
+      get: vi.fn().mockResolvedValue(stale),
+      set: vi.fn().mockResolvedValue('OK'),
+    } as unknown as RedisClient;
+
+    const result = await getSectionSeatStatus(
+      { shardPools: fakeShardPools(pool), redis, logger: SILENT_LOGGER },
+      'event-1',
+      'section-1',
+    );
+
+    expect(result[0]?.priceCents).toBe(1000);
   });
 });

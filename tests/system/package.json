@@ -1,0 +1,18 @@
+{
+  "name": "@tickets/system-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:system": "vitest run --exclude '**/invariants.test.ts' && vitest run flows/invariants"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

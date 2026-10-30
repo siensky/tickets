@@ -3,6 +3,7 @@ packages:
   - 'services/*'
   - 'apps/*'
   - 'tests/e2e'
+  - 'tests/system'
 allowBuilds:
   esbuild: true
   # Kör bara napi-postinstall (välja rätt förkompilerad binär för
@@ -24,6 +25,9 @@ allowBuilds:
   # projekt-reklammeddelande — verifierat i scripts/postinstall.js,
   # ingen kompilering eller nätverksanrop.
   browser-tabs-lock: true
+  # Transitivt via @pact-foundation/pact (kontraktstester, docs/plan.md 7.9). Har bara ett
+  # postinstall-skript för anonym användningstelemetri och behövs inte, så det körs aldrig.
+  '@scarf/scarf': false
 minimumReleaseAgeExclude:
   - '@tanstack/query-core@5.104.5'
   - '@tanstack/react-query@5.104.5'

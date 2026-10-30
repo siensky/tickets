@@ -14,6 +14,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:integration": "turbo run test:integration",
+    "test:contract": "rm -rf pacts && pnpm --filter @tickets/web --filter @tickets/payment-mock --filter @tickets/notification-worker --filter @tickets/realtime-gateway run test:pact && pnpm --filter @tickets/booking-api --filter @tickets/scheduler-worker run test:contract",
     "test:e2e": "turbo run test:e2e",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

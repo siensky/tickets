@@ -35,6 +35,8 @@ describe('createCreateCheckoutSessionHandler', () => {
       'metadata[reservationId]': 'res-1',
       'line_items[0][price_data][unit_amount]': '2500',
       customer_email: 'user@example.test',
+      success_url: 'https://app.test/success?order_id=order-1',
+      cancel_url: 'https://app.test/cancel',
     }).toString();
     const request = { body } as unknown as FastifyRequest;
     const { reply, send } = fakeReply();
@@ -55,5 +57,7 @@ describe('createCreateCheckoutSessionHandler', () => {
     const stored = sessionStore.get(response.id);
     expect(stored?.amountTotal).toBe(2500);
     expect(stored?.customerEmail).toBe('user@example.test');
+    expect(stored?.successUrl).toBe('https://app.test/success?order_id=order-1');
+    expect(stored?.cancelUrl).toBe('https://app.test/cancel');
   });
 });

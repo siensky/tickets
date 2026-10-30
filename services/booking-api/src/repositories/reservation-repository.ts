@@ -8,6 +8,7 @@ import { isLockNotAvailable } from '@tickets/db';
 import type { Pool, PoolClient } from 'pg';
 import type {
   InsertedReservation,
+  ReservationSeatDetailRow,
   ReservationStatus,
   ReservationWithSeatsRow,
   SeatLockOutcome,
@@ -269,6 +270,32 @@ export async function getSeatPricesForReservation(
     [eventId, reservationId],
   );
   return rows.map((row) => ({ seatId: row.id, priceCents: row.price_cents }));
+}
+
+/** Stolarna i en reservation med sektion, rad, plats och pris för reservationsvyn (docs/plan.md 7.13 E5). */
+export async function getReservationSeatDetails(
+  pool: Pool,
+  eventId: string,
+  reservationId: string,
+): Promise<ReservationSeatDetailRow[]> {
+  const { rows } = await pool.query<{
+    id: string;
+    section_id: string;
+    row: string;
+    number: number;
+    price_cents: number;
+  }>(
+    `SELECT s.id, s.section_id, s.row, s.number, s.price_cents
+     FROM seats s WHERE s.event_id = $1 AND s.reservation_id = $2`,
+    [eventId, reservationId],
+  );
+  return rows.map((row) => ({
+    seatId: row.id,
+    sectionId: row.section_id,
+    row: row.row,
+    number: row.number,
+    priceCents: row.price_cents,
+  }));
 }
 
 /**

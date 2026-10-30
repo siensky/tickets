@@ -23,3 +23,24 @@ export interface VenueSeatGeometryRow {
   readonly x: number;
   readonly y: number;
 }
+
+/** Koordinater i en abstrakt ruta på 0–1000 × 0–700 (SVG-viewBox, docs/plan.md 7.13 E2). */
+export interface SectionLayout {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly rotation: number;
+}
+
+export interface VenueStage {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** `layout` är null för en venue utan layout (t.ex. lasttestarenan). */
+export interface VenueSectionWithLayoutRow extends VenueSectionRow {
+  readonly layout: SectionLayout | null;
+}

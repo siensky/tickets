@@ -35,6 +35,14 @@ on:
         required: true
       AUTH0_TEST_USER_PASSWORD:
         required: true
+      AUTH0_CI_CLIENT_ID:
+        required: true
+      AUTH0_CI_CLIENT_SECRET:
+        required: true
+      SYSTEMTEST_USER2_EMAIL:
+        required: true
+      SYSTEMTEST_USER2_PASSWORD:
+        required: true
 
 jobs:
   e2e:
@@ -47,6 +55,10 @@ jobs:
       QUEUE_TOKEN_SECRET: e2e-test-queue-token-secret-at-least-32-bytes!!
       RATE_LIMIT_PER_SECOND: '1000'
       CORS_ALLOWED_ORIGINS: http://localhost:5173
+      # payment-mocks GET /mock-checkout/:id svarar med 302 till dessa (docs/plan.md 7.13 E8),
+      # så webbläsaren i e2e landar tillbaka i webbappen i stället för på example.test.
+      CHECKOUT_SUCCESS_URL: http://localhost:5173/checkout/success
+      CHECKOUT_CANCEL_URL: http://localhost:5173/checkout/cancel
       AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
       AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
       # Aldrig riktiga Stripe — pekas om mot payment-mock nedan, samma
@@ -63,12 +75,14 @@ jobs:
       PAYMENT_MOCK_PORT: '3002'
       # Deterministiskt i CI — inget slumpat kaos (docs/plan.md
       # "payment-mock för lasttest" beskriver kaoset, men det hör till
-      # LASTTESTET, inte till detta funktionstest).
+      # LASTTESTET, inte till detta funktionstest). Dubbla webhooks alltid
+      # (docs/plan.md 7.14), så idempotensen testas varje gång; e2e tål det
+      # eftersom webhooken är idempotent.
       PAYMENT_MOCK_FAILURE_RATE: '0'
-      PAYMENT_MOCK_DUPLICATE_WEBHOOK_RATE: '0'
+      PAYMENT_MOCK_DUPLICATE_WEBHOOK_RATE: '1'
       PAYMENT_MOCK_LATE_WEBHOOK_RATE: '0'
       PAYMENT_MOCK_LATENCY_MIN_MS: '50'
-      PAYMENT_MOCK_LATENCY_MAX_MS: '500'
+      PAYMENT_MOCK_LATENCY_MAX_MS: '200'
       VITE_API_BASE_URL: http://localhost:3000
       VITE_AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
       VITE_AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
@@ -76,6 +90,13 @@ jobs:
       E2E_BASE_URL: http://localhost:5173
       E2E_AUTH0_TEST_USER_EMAIL: ${{ secrets.AUTH0_TEST_USER_EMAIL }}
       E2E_AUTH0_TEST_USER_PASSWORD: ${{ secrets.AUTH0_TEST_USER_PASSWORD }}
+      # Systemtesterna (tests/system) loggar in via en EGEN Auth0-app (docs/plan.md 7.14).
+      AUTH0_CI_CLIENT_ID: ${{ secrets.AUTH0_CI_CLIENT_ID }}
+      AUTH0_CI_CLIENT_SECRET: ${{ secrets.AUTH0_CI_CLIENT_SECRET }}
+      AUTH0_TEST_USER_EMAIL: ${{ secrets.AUTH0_TEST_USER_EMAIL }}
+      AUTH0_TEST_USER_PASSWORD: ${{ secrets.AUTH0_TEST_USER_PASSWORD }}
+      SYSTEMTEST_USER2_EMAIL: ${{ secrets.SYSTEMTEST_USER2_EMAIL }}
+      SYSTEMTEST_USER2_PASSWORD: ${{ secrets.SYSTEMTEST_USER2_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
 
@@ -223,6 +244,19 @@ jobs:
 
       - name: Run the e2e suite
         run: pnpm --filter @tickets/e2e-tests run test:e2e
+
+      - name: Run system tests
+        run: pnpm --filter @tickets/system-tests run test:system
+
+      # Utan detta syns bara testsidans fel, inte vad tjänsterna loggade (t.ex. varför en order inte blev betald).
+      - name: Print service logs on failure
+        if: failure()
+        run: |
+          for log in booking-api scheduler-worker payment-mock; do
+            echo "::group::$log.log (last 80 lines)"
+            tail -n 80 "$log.log" || true
+            echo "::endgroup::"
+          done
 
       - name: Upload Playwright report on failure
         if: failure()

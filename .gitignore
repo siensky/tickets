@@ -54,3 +54,4 @@ apps/web/dist/
 
 # Misc
 *.local
+pacts/

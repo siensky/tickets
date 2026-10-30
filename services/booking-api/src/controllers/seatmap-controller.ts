@@ -8,6 +8,7 @@
  */
 import { ValidationError } from '@tickets/domain';
 import {
+  eventIdParamSchema,
   eventSectionParamSchema,
   venueIdParamSchema,
   venueSectionParamSchema,
@@ -16,6 +17,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   getSectionGeometry,
   getSectionSeatStatus,
+  getSectionSummary,
   listVenueSections,
   type SeatmapServiceDeps,
 } from '../services/seatmap-service.js';
@@ -61,5 +63,17 @@ export function createGetSectionSeatStatusHandler(deps: SeatmapServiceDeps) {
     }
     const seats = await getSectionSeatStatus(deps, parsed.data.eventId, parsed.data.sectionId);
     reply.header('cache-control', EDGE_CACHE_STATUS).send({ seats });
+  };
+}
+
+export function createGetSectionSummaryHandler(deps: SeatmapServiceDeps) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const parsed = eventIdParamSchema.safeParse(request.params);
+    if (!parsed.success) {
+      throw new ValidationError('eventId route param is not a valid UUID', {
+        issues: parsed.error.issues,
+      });
+    }
+    reply.send(await getSectionSummary(deps, parsed.data.eventId));
   };
 }

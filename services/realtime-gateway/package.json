@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir tests/unit",
-    "test:integration": "vitest run --dir tests/integration"
+    "test:integration": "vitest run --dir tests/integration",
+    "test:pact": "vitest run --dir tests/contract --no-file-parallelism"
   },
   "dependencies": {
     "@fastify/websocket": "11.3.4",
@@ -32,11 +33,14 @@
     "ws": "8.22.0"
   },
   "devDependencies": {
+    "@pact-foundation/pact": "17.1.4",
+    "@testcontainers/redis": "12.2.1",
     "@types/node": "22.19.0",
+    "@types/ws": "8.18.2",
+    "testcontainers": "12.2.1",
     "tsup": "9.0.0",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
-    "vitest": "5.0.5",
-    "@types/ws": "8.18.2"
+    "vitest": "5.0.5"
   }
 }

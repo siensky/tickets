@@ -49,6 +49,23 @@ export interface ReservationResult {
 export type ReservationStatus =
   'active' | 'pending_payment' | 'converted' | 'expired' | 'cancelled';
 
+export interface ReservationSeatDetailRow {
+  readonly seatId: string;
+  readonly sectionId: string;
+  readonly row: string;
+  readonly number: number;
+  readonly priceCents: number;
+}
+
+export interface ReservationSeatView {
+  readonly seatId: string;
+  readonly sectionId: string;
+  readonly sectionName: string;
+  readonly row: string;
+  readonly number: number;
+  readonly priceCents: number;
+}
+
 /** The read shape for `GET /reservations/:id` — unlike `ReservationResult`, status can be anything the row currently holds. */
 export interface ReservationView {
   readonly reservationId: string;
@@ -57,6 +74,9 @@ export interface ReservationView {
   readonly status: ReservationStatus;
   readonly expiresAt: string;
   readonly seatIds: readonly string[];
+  readonly seats: readonly ReservationSeatView[];
+  readonly totalCents: number;
+  readonly currency: 'SEK';
 }
 
 export interface ReservationWithSeatsRow {

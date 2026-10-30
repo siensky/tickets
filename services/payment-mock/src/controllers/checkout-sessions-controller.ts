@@ -37,6 +37,8 @@ export function createCreateCheckoutSessionHandler(deps: CheckoutSessionsDeps) {
       paymentIntentId: `pi_mock_${randomUUID()}`,
       amountTotal: Number(params.get('line_items[0][price_data][unit_amount]') ?? '0'),
       customerEmail: params.get('customer_email') ?? '',
+      successUrl: params.get('success_url') ?? '',
+      cancelUrl: params.get('cancel_url') ?? '',
       metadata: {
         orderId: params.get('metadata[orderId]') ?? '',
         eventId: params.get('metadata[eventId]') ?? '',

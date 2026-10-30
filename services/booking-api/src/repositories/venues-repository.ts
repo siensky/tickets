@@ -4,7 +4,13 @@
  * the GLOBAL pool (`getGlobalPool`), never a per-event pool.
  */
 import type { Pool } from 'pg';
-import type { VenueRow, VenueSeatGeometryRow, VenueSectionRow } from '../types/venue.js';
+import type {
+  VenueRow,
+  VenueSeatGeometryRow,
+  VenueSectionRow,
+  VenueSectionWithLayoutRow,
+  VenueStage,
+} from '../types/venue.js';
 
 interface RawVenueRow {
   id: string;
@@ -53,6 +59,92 @@ export async function listSectionsForVenue(
     [venueId],
   );
   return rows.map((row) => ({ id: row.id, name: row.name, displayOrder: row.display_order }));
+}
+
+interface RawSectionLayoutRow extends RawVenueSectionRow {
+  // `numeric` kommer som sträng från pg; null när venuen saknar layout.
+  layout_x: string | null;
+  layout_y: string | null;
+  layout_width: string | null;
+  layout_height: string | null;
+  layout_rotation: string;
+}
+
+/** Sektioner med layout för arenakartans översikt (docs/plan.md 7.13 E2). `layout` är null om någon koordinat saknas. */
+export async function listSectionsWithLayout(
+  pool: Pool,
+  venueId: string,
+): Promise<VenueSectionWithLayoutRow[]> {
+  const { rows } = await pool.query<RawSectionLayoutRow>(
+    `SELECT id, name, display_order, layout_x, layout_y, layout_width, layout_height, layout_rotation
+     FROM venue_sections WHERE venue_id = $1 ORDER BY display_order ASC`,
+    [venueId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    displayOrder: row.display_order,
+    layout:
+      row.layout_x === null ||
+      row.layout_y === null ||
+      row.layout_width === null ||
+      row.layout_height === null
+        ? null
+        : {
+            x: Number(row.layout_x),
+            y: Number(row.layout_y),
+            width: Number(row.layout_width),
+            height: Number(row.layout_height),
+            rotation: Number(row.layout_rotation),
+          },
+  }));
+}
+
+export async function getVenueStage(pool: Pool, venueId: string): Promise<VenueStage | null> {
+  const { rows } = await pool.query<{
+    stage_x: string | null;
+    stage_y: string | null;
+    stage_width: string | null;
+    stage_height: string | null;
+  }>('SELECT stage_x, stage_y, stage_width, stage_height FROM venues WHERE id = $1', [
+    venueId,
+  ]);
+  const row = rows[0];
+  if (
+    row === undefined ||
+    row.stage_x === null ||
+    row.stage_y === null ||
+    row.stage_width === null ||
+    row.stage_height === null
+  ) {
+    return null;
+  }
+  return {
+    x: Number(row.stage_x),
+    y: Number(row.stage_y),
+    width: Number(row.stage_width),
+    height: Number(row.stage_height),
+  };
+}
+
+/** Sektionsnamn och ordning för ett antal sektioner (reservationens stolslista, docs/plan.md 7.13 E5). */
+export async function getSectionNames(
+  pool: Pool,
+  sectionIds: readonly string[],
+): Promise<Map<string, VenueSectionRow>> {
+  if (sectionIds.length === 0) {
+    return new Map();
+  }
+  const { rows } = await pool.query<RawVenueSectionRow>(
+    'SELECT id, name, display_order FROM venue_sections WHERE id = ANY($1)',
+    [sectionIds],
+  );
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      { id: row.id, name: row.name, displayOrder: row.display_order },
+    ]),
+  );
 }
 
 export async function sectionBelongsToVenue(

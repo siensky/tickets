@@ -3,10 +3,15 @@
  * venue row into the API shape (docs/rules.md §1: mappers do the
  * database-row ↔ API-object conversion, nothing else).
  */
-import type { EventRow, EventSummary } from '../types/event.js';
+import type { EventAvailability, EventRow, EventSummary } from '../types/event.js';
 import type { VenueRow } from '../types/venue.js';
 
-export function toEventSummary(row: EventRow, venue: VenueRow): EventSummary {
+export function toEventSummary(
+  row: EventRow,
+  venue: VenueRow,
+  assetBaseUrl: string,
+  availability: EventAvailability,
+): EventSummary {
   return {
     id: row.id,
     title: row.title,
@@ -21,5 +26,13 @@ export function toEventSummary(row: EventRow, venue: VenueRow): EventSummary {
     status: row.status,
     isBeforeOpen: row.isBeforeOpen,
     isAfterClose: row.isAfterClose,
+    imageUrl: row.imageKey === null ? null : new URL(row.imageKey, assetBaseUrl).toString(),
+    description: row.description,
+    featured: row.featured,
+    minPriceCents: row.minPriceCents,
+    maxPriceCents: row.maxPriceCents,
+    availableSeats: row.availableSeats,
+    totalSeats: row.totalSeats,
+    availability,
   };
 }

@@ -252,6 +252,25 @@ export default tseslint.config(
     },
   },
   {
+    // docs/plan.md 7.14: systemtesterna är black-box. Bara publikt HTTP-API och
+    // läsande SQL, aldrig import av implementationen.
+    files: ['tests/system/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@tickets/*', '**/services/**', '**/shared/**'],
+              message:
+                'System tests are black-box: no imports from services/ or shared/ (docs/plan.md 7.14).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Frontend apps don't follow the service layer structure.
     files: ['apps/**/*.{ts,tsx}'],
     rules: {

@@ -12,6 +12,8 @@ export interface StoredSession {
   readonly paymentIntentId: string;
   readonly amountTotal: number;
   readonly customerEmail: string;
+  readonly successUrl: string;
+  readonly cancelUrl: string;
   readonly metadata: Readonly<Record<string, string>>;
 }
 
