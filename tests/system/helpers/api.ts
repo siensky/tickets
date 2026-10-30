@@ -160,9 +160,15 @@ export async function waitForOrderStatus(
   token: string,
   expected: string,
 ): Promise<Record<string, unknown>> {
-  return waitFor(`order ${orderId} to become ${expected}`, async () => {
-    const response = await call('GET', `/events/${eventId}/orders/${orderId}`, { token });
-    const order = asRecord(response.body);
-    return response.status === 200 && str(order, 'status') === expected ? order : undefined;
-  });
+  let lastSeen = 'no response';
+  try {
+    return await waitFor(`order ${orderId} to become ${expected}`, async () => {
+      const response = await call('GET', `/events/${eventId}/orders/${orderId}`, { token });
+      lastSeen = `HTTP ${String(response.status)} ${JSON.stringify(response.body)}`;
+      const order = asRecord(response.body);
+      return response.status === 200 && str(order, 'status') === expected ? order : undefined;
+    });
+  } catch (error) {
+    throw new Error(`${String(error)} (last seen: ${lastSeen})`);
+  }
 }
