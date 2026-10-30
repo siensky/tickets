@@ -1,23 +1,26 @@
 /**
  * Väntrummet (docs/plan.md "Väntrum"): utfärdar en signerad, stateless
- * kötoken vid join, och läser status via Redis. Join/status är
- * medvetet INTE det som bestämmer insläpp — det gör scheduler-workers
- * periodiska insläppsjobb (samma mekanism oavsett hur tom kön är, se
- * dess egen header-kommentar), så den här filen skriver aldrig till
- * `admitted:*` själv.
+ * kötoken vid join, och läser status via Redis. Insläpp ur kön görs av
+ * scheduler-workers periodiska jobb. Undantaget är direktinsläppet vid join
+ * (`joinOrAdmitWaitingRoom`): är kön tom och färre än `queue_direct_admit_limit`
+ * är insläppta för eventet släpps joinaren in direkt.
  */
 import { getGlobalPool, getPoolForEvent, type ShardPools } from '@tickets/db';
 import { SalesClosedError, SalesNotOpenError } from '@tickets/domain';
 import {
   getCachedConfigValue,
   getWaitingRoomStatus,
-  joinWaitingRoom,
+  joinOrAdmitWaitingRoom,
   touchAdmittedActivity,
   type RedisClient,
 } from '@tickets/redis';
 import { createQueueTokenSecret, issueQueueToken } from '@tickets/auth';
 import type { BusinessMetrics } from '@tickets/observability';
-import { getQueueConfig, parsePositiveInteger } from '../repositories/config-repository.js';
+import {
+  getQueueConfig,
+  parseNonNegativeInteger,
+  parsePositiveInteger,
+} from '../repositories/config-repository.js';
 import { getEventSalesWindow } from '../repositories/events-repository.js';
 import type {
   EventSalesWindow,
@@ -43,17 +46,22 @@ export interface QueueServiceDeps {
 // för en — försumbart var 5:e sekund.
 async function getCachedQueueConfig(deps: QueueServiceDeps): Promise<QueueConfig> {
   const pool = getGlobalPool(deps.shardPools);
-  const [admissionRate, sessionTotal, sessionInactivity] = await Promise.all([
-    getCachedConfigValue(deps.redis, 'queue_admission_rate_per_minute', 5, async () =>
-      String((await getQueueConfig(pool)).admissionRatePerMinute),
-    ),
-    getCachedConfigValue(deps.redis, 'queue_session_total_minutes', 5, async () =>
-      String((await getQueueConfig(pool)).sessionTotalMinutes),
-    ),
-    getCachedConfigValue(deps.redis, 'queue_session_inactivity_minutes', 5, async () =>
-      String((await getQueueConfig(pool)).sessionInactivityMinutes),
-    ),
-  ]);
+  const [admissionRate, sessionTotal, sessionInactivity, directAdmitLimit] = await Promise.all(
+    [
+      getCachedConfigValue(deps.redis, 'queue_admission_rate_per_minute', 5, async () =>
+        String((await getQueueConfig(pool)).admissionRatePerMinute),
+      ),
+      getCachedConfigValue(deps.redis, 'queue_session_total_minutes', 5, async () =>
+        String((await getQueueConfig(pool)).sessionTotalMinutes),
+      ),
+      getCachedConfigValue(deps.redis, 'queue_session_inactivity_minutes', 5, async () =>
+        String((await getQueueConfig(pool)).sessionInactivityMinutes),
+      ),
+      getCachedConfigValue(deps.redis, 'queue_direct_admit_limit', 5, async () =>
+        String((await getQueueConfig(pool)).directAdmitLimit),
+      ),
+    ],
+  );
 
   return {
     admissionRatePerMinute: parsePositiveInteger(
@@ -65,6 +73,7 @@ async function getCachedQueueConfig(deps: QueueServiceDeps): Promise<QueueConfig
       'queue_session_inactivity_minutes',
       sessionInactivity,
     ),
+    directAdmitLimit: parseNonNegativeInteger('queue_direct_admit_limit', directAdmitLimit),
   };
 }
 
@@ -91,7 +100,14 @@ export async function joinQueue(
     input.eventId,
     config.sessionTotalMinutes * 60,
   );
-  await joinWaitingRoom(deps.redis, input.eventId, issued.queueTokenId);
+  // Tomt i kön och under gränsen: direkt in (klientens första statusanrop ger `admitted`).
+  await joinOrAdmitWaitingRoom(
+    deps.redis,
+    input.eventId,
+    issued.queueTokenId,
+    config.directAdmitLimit,
+    config.sessionInactivityMinutes * 60,
+  );
   // docs/plan.md "Vad som mäts": insläppstakt/konverteringsgrad räknas
   // i Grafana som en kvot mot den här nämnaren.
   deps.businessMetrics.queueJoinsTotal.inc({ event_id: input.eventId });

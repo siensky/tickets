@@ -8,6 +8,8 @@ export interface QueueConfig {
   readonly admissionRatePerMinute: number;
   readonly sessionTotalMinutes: number;
   readonly sessionInactivityMinutes: number;
+  /** Direktinsläpp: så många per event får vara insläppta utan kö. 0 = alla köar. */
+  readonly directAdmitLimit: number;
 }
 
 export interface EventSalesWindow {

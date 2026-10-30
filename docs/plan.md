@@ -112,6 +112,14 @@ FOR UPDATE NOWAIT;
 - **Stängt försäljningsfönster** (`sales_close_at` passerad med folk kvar i kön): eget
   tillstånd, kön töms med besked. Lasttestet kommer att producera båda fallen
 - Ködjup = autoscaling-signal
+- **Direktinsläpp (beslutat efter Fas 7 steg 7):** är kön för eventet tom och färre än
+  `queue_direct_admit_limit` (config, standard **1000**, 0 = alla köar) är insläppta just nu
+  släpps den som joinar in direkt, så en enstaka köpare aldrig ser väntrummet. Per event.
+  Avgörs atomärt i ett Lua-skript (`joinOrAdmitWaitingRoom`, `shared/redis/src/waiting-room.ts`)
+  mot ett index över insläppta (`admitted-index:<event>`). Så fort någon väntar går alla nya in
+  bakom hen (FIFO), och schemaläggarens insläpp är oförändrat. Talet 1000 är en försiktig
+  startpunkt, inte ett uppmätt tak: mät med lasttestet (`queue-storm`: de första 1000 per event
+  släpps nu in direkt, resten köar) och justera i `config` utan deploy.
 
 ---
 
@@ -1827,9 +1835,9 @@ telefon), samt en genomgång av UI:t i prod efter C. För övriga steg räcker g
 | 4 | Säkerhetsnät | 7.14 systemtester F1–F6 mot *nuvarande* API (inga nya fält) + Pact-infrastruktur och kontrakten för befintliga endpoints (7.9) | 1a | Gröna i CI. Byggs *före* API-ändringarna, så de skyddar dagens beteende när allt byggs om | *Status: byggt och granskat (`feature/fas7-backend`, steg 4–6 i en branch). Systemtester F1–F6 + invarianter i `tests/system` (körs som `test:system`; skrevs direkt mot slutläget med de nya fälten, eftersom 4–6 byggdes i ett svep) och Pact (web, payment-mock, notification-worker, realtime-gateway som konsumenter; booking-api och scheduler-worker som providers). F2, F3 och invarianterna provkörda lokalt; F1/F4/F5/F6 kräver Auth0-appen "CI System Tests" och körs första gången i CI.*
 | 5 | Backend | E1–E6 + E8 + E9, migrationerna, Pact-kontrakten för dem, systemtesterna utökade med de nya fälten | 4 | Allt grönt. Nya fält syns i prod. Gamla frontenden fungerar oförändrad | *Status: byggt och granskat (`feature/fas7-backend`). E1–E6, E8, E9 och migrationerna, inklusive `ticket_scans` (E7:s migration byggdes här, själva endpointen hör till steg 9). `getUserByAuth0Sub` återanvänds i stället för `findUserIdByAuth0Sub`. Notering till steg 7: sätt `CHECKOUT_SUCCESS_URL`/`CHECKOUT_CANCEL_URL` i `e2e.yml` så mockens 302 landar på webbappen; `{CHECKOUT_SESSION_ID}` i bas-URL:ens query stöds inte. `GET /events` och `/sections/summary` saknar cache-header och kantregel, och eventlistan aggregerar alla stolar per anrop: lägg en kort `max-age` + Cloudflare-regel om startsidan blir långsam. `eventStartsAt` i `/me/tickets` är `null` om eventet saknas.*
 | 6 | Seed | 7.6 CSV + bilder (bilderna godkänns av användaren först) + layout (E3) | 5, 1c (cdn) | 20 events syns i prod-API:t med `imageUrl`. Kartöversikt-data finns | *Status: byggt och granskat (`feature/fas7-backend`). `seed-events-from-csv.ts`, 5 arenor, 20 events, 20 genererade bilder (inte Unsplash, godkänt av användaren), uppladdning till `images/` i `deploy-frontend`. Väntar på merge, deploy och att scriptet körs mot prod (runbook "Seed: events från CSV"). Öppet: de 5 gamla demo-eventen från `seed-demo-events.ts` ligger kvar i prod, utan bild.*
-| 7 | UI | 7.11 steg 1–7 + 7.15 e2e + logga/favicon | 5, 6 | Hela "Klart när" i 7.11 uppfyllt, e2e grönt |
-| 8 | PostHog | 7.7 | 7 | Verifieringslistan i 7.7 klar |
-| 9 | Scanner | 7.8 + E7 + F7 + scanner-e2e | 5, 7 (tema) | Riktig telefon skannar en riktig biljett i prod: ok → redan skannad |
+| 7 | UI | 7.11 steg 1–7 + 7.15 e2e + logga/favicon | 5, 6 | Hela "Klart när" i 7.11 uppfyllt, e2e grönt *Status: byggt och granskat (`feature/fas7-ui`). Typecheck, lint, 72 enhetstester (inkl. kontrast och vitest-axe per sida) gröna. a11y-, keyboard-, mobile-, seat-taken- och reservation-expiry-specarna körda grönt lokalt mot riktig stack; `booking-flow` (riktig Auth0) körs första gången i CI. Lighthouse mobil lokalt: start 95/100, event 93/100. Väntar på merge, CI och UI-genomgång i prod.* |
+| 8 | PostHog | 7.7 | 7 | Verifieringslistan i 7.7 klar *Notering från steg 7: `show_seats_left_badge` på EventCard och samtyckesbanner/`consent.ts`-hjälparen i e2e hör hit. Samtyckeslänken ska in i navbarens användarmeny, men `UserMenu` visas bara för inloggade och renderar inget utan Auth0: anonyma besökare behöver en egen plats för länken.* |
+| 9 | Scanner | 7.8 + E7 + F7 + scanner-e2e | 5, 7 (tema) | Riktig telefon skannar en riktig biljett i prod: ok → redan skannad *Notering från steg 7: temat ligger i `shared/ui-theme/theme.css` (ren CSS, ingen `package.json`) och importeras via relativ sökväg i `apps/web/src/styles/globals.css`. Kontrasttestet ligger i `apps/web/src/__tests__/theme-contrast.test.ts`. e2e-seeden har nu en event per spec (`E2E_EVENTS` i `tests/e2e/seed.ts`) och `playwright.config.ts` kör en worker.* |
 | 10 | Dokumentation | 7.12 (README, architecture, ADR:er, runbook) | 1–9 | Användaren har granskat README |
 | 11 | Slutverifiering | full CI, smoke mot prod, demomanuset genomkört, `loadtest-mode off`, loadgen-VM:er rivna | 10 | Checklistan i 7.18 avbockad |
 

@@ -1,12 +1,12 @@
 /**
- * End-to-end: välj evenemang → väntrum → arenakarta (sektionsvy) →
- * reservation → RIKTIG Auth0-inloggning (ett dedikerat testkonto, se
+ * End-to-end: startsida → eventsida → väntrum → arenakarta (översikt → sektionsvy) →
+ * bokningspanel → reservation → RIKTIG Auth0-inloggning (ett dedikerat testkonto, se
  * docs/runbook.md "Nödvändiga GitHub Actions-secrets") → betalning mot
  * payment-mock (aldrig riktiga Stripe) → biljett med QR-kod syns under
  * "Mina biljetter" (docs/plan.md "Domän och användarflöde", fasplan
  * Fas 5: "G: e2e i pipeline").
  *
- * Admission är driven direkt via `admitNextBatch` mot samma Redis den
+ * Admission är driven direkt via `admitNextBatch` (helpers/queue.ts) mot samma Redis den
  * CI-startade booking-api använder, i stället för att köra
  * scheduler-workers periodiska jobb — samma förenkling som
  * services/booking-api/tests/integration/queue-flow.test.ts redan gör,
@@ -21,9 +21,11 @@
  * en riktig CI-körning bekräftar dem.
  */
 import { expect, test, type Page } from '@playwright/test';
-import { admitNextBatch, createRedisClient } from '@tickets/redis';
-import { E2E_EVENT_ID } from '../seed.js';
+import { E2E_EVENTS } from '../seed.js';
+import { openSectionA, selectSeat } from '../helpers/booking-steps.js';
+import { passTheQueue } from '../helpers/queue.js';
 
+const EVENT = E2E_EVENTS.booking;
 const APP_ORIGIN = new URL(process.env['E2E_BASE_URL'] ?? 'http://localhost:5173').origin;
 
 // Forwards browser console/page errors into the CI text log, and dumps
@@ -50,15 +52,6 @@ test.afterEach(async ({ page }, testInfo) => {
     process.stdout.write(`[on-failure] visible page text:\n${bodyText}\n`);
   }
 });
-
-async function admitTheOnlyWaitingToken(): Promise<void> {
-  const redis = createRedisClient(process.env['E2E_REDIS_URL'] ?? 'redis://localhost:6379');
-  try {
-    await admitNextBatch(redis, E2E_EVENT_ID, 10, 600, 15);
-  } finally {
-    await redis.quit();
-  }
-}
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -94,35 +87,32 @@ async function loginWithTestUser(page: Page): Promise<void> {
 }
 
 async function reserveOneSeat(page: Page): Promise<void> {
-  await page.goto(`/events/${E2E_EVENT_ID}`);
-  await expect(page.getByRole('heading', { name: 'E2E Concert' })).toBeVisible();
+  // Startsida → eventkort → eventsida → "Boka biljetter" → kön.
+  await page.goto('/');
+  await page
+    .getByRole('link', { name: `Köp biljetter till ${EVENT.title}`, exact: true })
+    .click();
+  await expect(page.getByRole('heading', { level: 1, name: EVENT.title })).toBeVisible();
+  await page.getByRole('link', { name: 'Boka biljetter' }).first().click();
+  await page.waitForURL(`**/events/${EVENT.id}/queue`);
 
-  // Joining the queue happens async on mount — wait for the waiting-room
-  // text instead of a fixed sleep (docs/rules.md §8: "Inga sleep").
-  await expect(page.getByText(/Din plats i kön/)).toBeVisible({ timeout: 10_000 });
-  await admitTheOnlyWaitingToken();
+  // Kön ansluts asynkront: väntar på texten i stället för en fast sleep (docs/rules.md §8).
+  await passTheQueue(page, EVENT.id);
 
-  const seatmapLink = page.getByRole('link', { name: 'Välj dina platser' });
-  await expect(seatmapLink).toBeVisible({ timeout: 10_000 });
-  await seatmapLink.click();
+  // Arenakartan: översikt → sektion A → stol → bokningspanelen.
+  await openSectionA(page);
+  await selectSeat(page, 1);
+  await expect(page.getByText('1/5 valda').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Reservera och gå vidare' }).click();
 
-  // `exact: true` krävs sedan Fas 6: utan den matchar Playwrights
-  // skiftlägesokänsliga DELSTRÄNGSmatchning även Navbar.tsx:s
-  // "Logga in"-knapp (som finns på ALLA sidor, "Logg[a] in" innehåller
-  // bokstaven "a") — en global nav-knapp med "a" i texten var alltid en
-  // landmina för en bar bokstavsselektor, den utlöstes bara aldrig förrän
-  // Fas 6:s navbar fanns. Hittat live: CI klickade fel knapp och hamnade
-  // på Auth0:s riktiga inloggningssida mitt i platsvalet.
-  await page.getByRole('button', { name: 'A', exact: true }).click();
-  await page.getByRole('button', { name: /Rad A, plats 1/ }).click();
-  await expect(page.getByText('1 av 5 stolar valda')).toBeVisible();
-  await page.getByRole('button', { name: 'Gå vidare' }).click();
-
-  await expect(page.getByRole('heading', { name: 'Din reservation' })).toBeVisible({
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Granska och betala' }),
+  ).toBeVisible({
     timeout: 10_000,
   });
-  await expect(page.getByText('1 stol(ar) reserverade.')).toBeVisible();
+  await expect(page.getByText('Rad A, plats 1')).toBeVisible();
   await expect(page.getByRole('timer')).toBeVisible();
+  await expect(page.getByText('Totalt')).toBeVisible();
 }
 
 test('bokar en plats, loggar in och betalar: hela flödet fram till biljetten', async ({
@@ -133,31 +123,24 @@ test('bokar en plats, loggar in och betalar: hela flödet fram till biljetten', 
   await page.getByRole('button', { name: 'Logga in och betala' }).click();
   await loginWithTestUser(page);
 
-  // Tillbaka på reservationssidan, nu inloggad — knappens text byter
-  // (ReservationPage.tsx) när isAuthenticated blir true.
-  const payNowButton = page.getByRole('button', { name: 'Gå till betalning' });
-  await expect(payNowButton).toBeVisible({ timeout: 10_000 });
-  await payNowButton.click();
+  // Tillbaka på checkoutsidan, nu inloggad — knappens text byter när isAuthenticated blir true.
+  const payButton = page.getByRole('button', { name: 'Betala med Stripe' });
+  await expect(payButton).toBeVisible({ timeout: 10_000 });
+  await payButton.click();
 
-  // createCheckout lyckas → window.location.href navigerar till payment-mocks
-  // checkoutUrl, som svarar med 302 till success_url (docs/plan.md 7.13 E8) och
-  // därmed tillbaka till webbappens bekräftelsesida. Själva "betalningen" är
-  // redan schemalagd server-sidan när sessionen skapades (payment-mock skickar
-  // sin webhook automatiskt, se services/payment-mock/src/services/
-  // webhook-delivery-service.ts). Väntar bara ut returen, påstår inget om sidan.
+  // createCheckout lyckas → webbläsaren navigerar till payment-mocks checkoutUrl, som svarar med
+  // 302 till success_url med event_id och order_id (docs/plan.md 7.13 E6/E8). Betalningen är
+  // redan schemalagd server-sidan (payment-mock skickar sin webhook automatiskt).
   await page.waitForURL((url) => url.pathname === '/checkout/success', { timeout: 10_000 });
 
-  // Auth0-sessionen överlever navigeringen (localStorage-cachad, se
-  // apps/web/src/lib/auth-provider.tsx) — ingen ny inloggning behövs.
-  await page.goto('/my-tickets');
-  await expect(page.getByRole('heading', { name: 'E2E Concert' })).toBeVisible({
-    timeout: 20_000, // webhook-leveransen har sin egen latens (PAYMENT_MOCK_LATENCY_MAX_MS)
+  // Bekräftelsesidan pollar ordern och visar "klart" först när backend säger `paid`.
+  await expect(page.getByRole('heading', { name: 'Tack för ditt köp!' })).toBeVisible({
+    timeout: 30_000, // webhook → outbox → RabbitMQ → konsument har sin egen latens
   });
-  // Ordern hinner visas som "pending" innan hela betalningspipen (webhook
-  // → outbox → RabbitMQ → booking-apis konsument) hunnit flippa den till
-  // "paid" — sidan pollar nu om (MyTicketsPage.tsx), men det tar fler
-  // sekunder än defaultens 5000ms. Hittat live: utan både pollingen OCH
-  // den här förlängda timeouten fastnade testet på "pending" varje gång.
-  await expect(page.getByText('Status: paid')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(/Rad A, plats 1 — valid/)).toBeVisible();
+
+  await page.getByRole('link', { name: 'Visa mina biljetter' }).click();
+  await expect(page.getByRole('heading', { name: EVENT.title })).toBeVisible();
+  await expect(page.getByText('Betald')).toBeVisible();
+  await page.getByRole('button', { name: /Visa QR-kod/ }).click();
+  await expect(page.getByRole('img', { name: /QR-kod för/ })).toBeVisible();
 });

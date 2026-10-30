@@ -19,6 +19,7 @@ const QUEUE_CONFIG_KEYS = [
   'queue_admission_rate_per_minute',
   'queue_session_total_minutes',
   'queue_session_inactivity_minutes',
+  'queue_direct_admit_limit',
 ] as const;
 
 export async function getReservationConfig(pool: Pool): Promise<ReservationConfig> {
@@ -75,10 +76,12 @@ export async function getQueueConfig(pool: Pool): Promise<QueueConfig> {
   const admissionRatePerMinute = values.get('queue_admission_rate_per_minute');
   const sessionTotalMinutes = values.get('queue_session_total_minutes');
   const sessionInactivityMinutes = values.get('queue_session_inactivity_minutes');
+  const directAdmitLimit = values.get('queue_direct_admit_limit');
   if (
     admissionRatePerMinute === undefined ||
     sessionTotalMinutes === undefined ||
-    sessionInactivityMinutes === undefined
+    sessionInactivityMinutes === undefined ||
+    directAdmitLimit === undefined
   ) {
     throw new InternalError('Queue config keys are missing from the config table', {
       foundKeys: [...values.keys()],
@@ -98,6 +101,7 @@ export async function getQueueConfig(pool: Pool): Promise<QueueConfig> {
       'queue_session_inactivity_minutes',
       sessionInactivityMinutes,
     ),
+    directAdmitLimit: parseNonNegativeInteger('queue_direct_admit_limit', directAdmitLimit),
   };
 }
 
@@ -105,6 +109,15 @@ export function parsePositiveInteger(key: string, rawValue: string): number {
   const value = Number(rawValue);
   if (!Number.isInteger(value) || value <= 0) {
     throw new InternalError(`config.${key} is not a positive integer`, { key, rawValue });
+  }
+  return value;
+}
+
+/** Som `parsePositiveInteger`, men 0 är giltigt (t.ex. `queue_direct_admit_limit = 0`: alla köar). */
+export function parseNonNegativeInteger(key: string, rawValue: string): number {
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new InternalError(`config.${key} is not a non-negative integer`, { key, rawValue });
   }
   return value;
 }

@@ -66,7 +66,17 @@ export interface EventSummary {
   readonly status: string;
   readonly isBeforeOpen: boolean;
   readonly isAfterClose: boolean;
+  readonly imageUrl: string | null;
+  readonly description: string | null;
+  readonly featured: boolean;
+  readonly minPriceCents: number | null;
+  readonly maxPriceCents: number | null;
+  readonly availableSeats: number;
+  readonly totalSeats: number;
+  readonly availability: EventAvailability;
 }
+
+export type EventAvailability = 'closed' | 'opens_soon' | 'sold_out' | 'few_left' | 'on_sale';
 
 export interface ListEventsFilter {
   readonly category?: EventCategory;
@@ -101,6 +111,35 @@ export function listVenueSections(venueId: string): Promise<{ sections: VenueSec
   return request(`/venues/${venueId}/sections`);
 }
 
+export interface SectionLayout {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly rotation: number;
+}
+
+export interface SectionSummaryEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly displayOrder: number;
+  readonly layout: SectionLayout | null;
+  readonly availableCount: number;
+  readonly totalCount: number;
+  readonly minPriceCents: number | null;
+  readonly maxPriceCents: number | null;
+  readonly availability: 'sold_out' | 'few_left' | 'on_sale';
+}
+
+export interface SectionSummary {
+  readonly stage: Omit<SectionLayout, 'rotation'> | null;
+  readonly sections: readonly SectionSummaryEntry[];
+}
+
+export function getSectionSummary(eventId: string): Promise<SectionSummary> {
+  return request(`/events/${eventId}/sections/summary`);
+}
+
 export interface SeatGeometry {
   readonly id: string;
   readonly row: string;
@@ -122,6 +161,7 @@ export interface SeatStatusEntry {
   readonly seatId: string;
   readonly venueSeatId: string;
   readonly status: SeatStatus;
+  readonly priceCents: number;
 }
 
 export function getSectionSeatStatus(
@@ -177,6 +217,15 @@ export function createReservation(
   });
 }
 
+export interface ReservationSeat {
+  readonly seatId: string;
+  readonly sectionId: string;
+  readonly sectionName: string;
+  readonly row: string;
+  readonly number: number;
+  readonly priceCents: number;
+}
+
 export interface ReservationView {
   readonly reservationId: string;
   readonly eventId: string;
@@ -184,6 +233,9 @@ export interface ReservationView {
   readonly status: 'active' | 'pending_payment' | 'converted' | 'expired' | 'cancelled';
   readonly expiresAt: string;
   readonly seatIds: readonly string[];
+  readonly seats: readonly ReservationSeat[];
+  readonly totalCents: number;
+  readonly currency: 'SEK';
 }
 
 export function getReservation(
@@ -236,10 +288,31 @@ export function createCheckout(
   });
 }
 
+export type OrderStatus = 'pending' | 'paid' | 'refunded' | 'cancelled';
+
+export interface OrderView {
+  readonly orderId: string;
+  readonly eventId: string;
+  readonly status: OrderStatus;
+  readonly totalCents: number;
+  readonly ticketCount: number;
+}
+
+export function getOrder(
+  eventId: string,
+  orderId: string,
+  accessToken: string,
+): Promise<OrderView> {
+  return request(`/events/${eventId}/orders/${orderId}`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+}
+
 export interface MyTicket {
   readonly ticketId: string;
   readonly seatId: string;
   readonly sectionId: string;
+  readonly sectionName: string;
   readonly row: string;
   readonly number: number;
   readonly status: string;
@@ -250,6 +323,9 @@ export interface MyTicketOrder {
   readonly orderId: string;
   readonly eventId: string;
   readonly eventTitle: string;
+  readonly eventStartsAt: string | null;
+  readonly venueName: string;
+  readonly venueCity: string;
   readonly status: string;
   readonly totalCents: number;
   readonly createdAt: string;

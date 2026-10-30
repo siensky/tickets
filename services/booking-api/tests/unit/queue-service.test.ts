@@ -41,12 +41,13 @@ function fakeShardPools(salesWindow: { salesOpenAt: Date; salesCloseAt: Date }):
         ],
       });
     }
-    // config lookup (getQueueConfig) — same three keys every time.
+    // config lookup (getQueueConfig) — same four keys every time.
     return Promise.resolve({
       rows: [
         { key: 'queue_admission_rate_per_minute', value: '300' },
         { key: 'queue_session_total_minutes', value: '15' },
         { key: 'queue_session_inactivity_minutes', value: '10' },
+        { key: 'queue_direct_admit_limit', value: '1000' },
       ],
     });
   });
@@ -62,6 +63,7 @@ function fakeShardPools(salesWindow: { salesOpenAt: Date; salesCloseAt: Date }):
 function fakeRedis(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> = {}): {
   redis: RedisClient;
   zadd: ReturnType<typeof vi.fn>;
+  evalScript: ReturnType<typeof vi.fn>;
   exists: ReturnType<typeof vi.fn>;
   zrank: ReturnType<typeof vi.fn>;
   zcard: ReturnType<typeof vi.fn>;
@@ -71,6 +73,7 @@ function fakeRedis(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> 
     get: vi.fn().mockResolvedValue(null),
     set: vi.fn().mockResolvedValue('OK'),
     zadd: vi.fn().mockResolvedValue(1),
+    eval: vi.fn().mockResolvedValue(0),
     sadd: vi.fn().mockResolvedValue(1),
     exists: vi.fn().mockResolvedValue(0),
     zrank: vi.fn().mockResolvedValue(null),
@@ -78,17 +81,17 @@ function fakeRedis(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> 
     expire: vi.fn().mockResolvedValue(1),
     ...overrides,
   };
-  return { redis: fns as unknown as RedisClient, ...fns };
+  return { redis: fns as unknown as RedisClient, ...fns, evalScript: fns.eval };
 }
 
 describe('joinQueue', () => {
-  it('issues a token scoped to the event and adds it to the waiting-room ZSET', async () => {
+  it('issues a token scoped to the event and lets the atomic script decide queue or direct admit', async () => {
     const now = new Date();
     const shardPools = fakeShardPools({
       salesOpenAt: new Date(now.getTime() - 60_000),
       salesCloseAt: new Date(now.getTime() + 60_000),
     });
-    const { redis, zadd } = fakeRedis();
+    const { redis, evalScript } = fakeRedis();
 
     const result = await joinQueue(
       { shardPools, redis, queueTokenSecret: SECRET, businessMetrics: fakeBusinessMetrics() },
@@ -98,10 +101,19 @@ describe('joinQueue', () => {
     expect(result.eventId).toBe('event-1');
     const verified = await verifyQueueToken(SECRET, result.token);
     expect(verified).toMatchObject({ kind: 'valid', eventId: 'event-1' });
-    expect(zadd).toHaveBeenCalledWith(
-      'waitingroom:event-1',
-      expect.any(Number),
+    // KEYS: kö, insläppsindex, admitted-nyckel, aktiva event. ARGV: token, nu, gräns (1000), TTL (10 min), event.
+    expect(evalScript).toHaveBeenCalledWith(
       expect.any(String),
+      4,
+      'waitingroom:event-1',
+      'admitted-index:event-1',
+      expect.stringMatching(/^admitted:event-1:/),
+      'waitingroom:active-events',
+      expect.any(String),
+      expect.any(Number),
+      1000,
+      600,
+      'event-1',
     );
   });
 

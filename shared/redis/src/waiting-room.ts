@@ -11,7 +11,12 @@
  * redan skyddas av tokenens egen `exp`.
  */
 import type { Redis } from 'ioredis';
-import { admittedKey, waitingRoomActiveEventsKey, waitingRoomKey } from './keys.js';
+import {
+  admittedIndexKey,
+  admittedKey,
+  waitingRoomActiveEventsKey,
+  waitingRoomKey,
+} from './keys.js';
 
 export async function joinWaitingRoom(
   redis: Redis,
@@ -20,6 +25,54 @@ export async function joinWaitingRoom(
 ): Promise<void> {
   await redis.zadd(waitingRoomKey(eventId), Date.now(), queueTokenId);
   await redis.sadd(waitingRoomActiveEventsKey(), eventId);
+}
+
+/**
+ * Direktinsläpp (docs/plan.md "Väntrum", beslutat efter Fas 7 steg 7): är det tomt i kön och
+ * färre än `directAdmitLimit` är insläppta just nu för eventet släpps den som joinar in direkt;
+ * annars ställs hen i kön. Kön är alltså kvar som skydd när belastningen är hög, men en enstaka
+ * köpare behöver inte vänta. Kontrollen och skrivningen sker atomärt i ett Lua-skript, så att en
+ * våg av samtidiga joins inte kan slinka förbi gränsen. Kön måste vara tom för att behålla FIFO:
+ * så länge någon väntar går alla nya in bakom hen.
+ */
+const JOIN_OR_ADMIT_SCRIPT = `
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[2])
+local waiting = redis.call('ZCARD', KEYS[1])
+local active = redis.call('ZCARD', KEYS[2])
+if waiting == 0 and active < tonumber(ARGV[3]) then
+  redis.call('SET', KEYS[3], '1', 'EX', ARGV[4])
+  redis.call('ZADD', KEYS[2], tonumber(ARGV[2]) + tonumber(ARGV[4]) * 1000, ARGV[1])
+  return 1
+end
+redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+redis.call('SADD', KEYS[4], ARGV[5])
+return 0
+`;
+
+export async function joinOrAdmitWaitingRoom(
+  redis: Redis,
+  eventId: string,
+  queueTokenId: string,
+  directAdmitLimit: number,
+  inactivityTtlSeconds: number,
+): Promise<'admitted' | 'waiting'> {
+  const raw: unknown = await redis.eval(
+    JOIN_OR_ADMIT_SCRIPT,
+    4,
+    waitingRoomKey(eventId),
+    admittedIndexKey(eventId),
+    admittedKey(eventId, queueTokenId),
+    waitingRoomActiveEventsKey(),
+    queueTokenId,
+    Date.now(),
+    directAdmitLimit,
+    inactivityTtlSeconds,
+    eventId,
+  );
+  if (raw !== 0 && raw !== 1) {
+    throw new TypeError(`join-or-admit script returned ${String(raw)}`);
+  }
+  return raw === 1 ? 'admitted' : 'waiting';
 }
 
 export type WaitingRoomStatus =
@@ -61,6 +114,13 @@ export async function touchAdmittedActivity(
   inactivityTtlSeconds: number,
 ): Promise<void> {
   await redis.expire(admittedKey(eventId, queueTokenId), inactivityTtlSeconds);
+  // `XX`: förnyar bara poster som redan finns i indexet (scheduler-insläpp läggs dit också).
+  await redis.zadd(
+    admittedIndexKey(eventId),
+    'XX',
+    Date.now() + inactivityTtlSeconds * 1000,
+    queueTokenId,
+  );
 }
 
 export interface AdmissionBatchResult {
@@ -129,10 +189,12 @@ export async function admitNextBatch(
     remaining = batchSize - admittedQueueTokenIds.length;
   }
 
+  const indexExpiry = Date.now() + inactivityTtlSeconds * 1000;
   await Promise.all(
-    admittedQueueTokenIds.map((queueTokenId) =>
+    admittedQueueTokenIds.flatMap((queueTokenId) => [
       redis.set(admittedKey(eventId, queueTokenId), '1', 'EX', inactivityTtlSeconds),
-    ),
+      redis.zadd(admittedIndexKey(eventId), indexExpiry, queueTokenId),
+    ]),
   );
   const remainingDepth = await redis.zcard(key);
   if (remainingDepth === 0) {

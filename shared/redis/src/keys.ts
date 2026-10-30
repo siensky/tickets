@@ -17,6 +17,11 @@ export function admittedKey(eventId: string, queueTokenId: string): string {
   return `admitted:${eventId}:${queueTokenId}`;
 }
 
+/** Index över event-ets insläppta (score = när insläppet löper ut, ms): `admitted:*`-nycklarna går inte att räkna billigt, så direktinsläppet räknar här. */
+export function admittedIndexKey(eventId: string): string {
+  return `admitted-index:${eventId}`;
+}
+
 export function revokedKey(queueTokenId: string): string {
   return `revoked:${queueTokenId}`;
 }
