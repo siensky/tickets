@@ -59,11 +59,15 @@ resources:
   - backup/cronjob.yaml
 
 # RabbitMQs konfiguration och policyer (docs/plan.md 8.6) som filer, så att definitions.json kan återanvändas
-# oförändrad i integrationstestet. Kustomize lägger ett hash-suffix på namnet och uppdaterar referensen i
-# statefulseten, så en ändring av filerna rullar ut en ny pod.
+# oförändrad i integrationstestet. Inget hash-suffix: deploy.yml applicerar rabbitmq/statefulset.yaml direkt
+# (utanför Kustomize) och skapar samma ConfigMap med `kubectl create configmap --from-file` före det, så båda
+# vägarna måste ge exakt samma namn. En ändrad policy rullar därför inte om podden av sig själv; starta om den
+# (docs/runbook.md "RabbitMQ: döda meddelanden") en dag utan demo.
 configMapGenerator:
   - name: rabbitmq-config
     namespace: data
+    options:
+      disableNameSuffixHash: true
     files:
       - rabbitmq/rabbitmq.conf
       - rabbitmq/definitions.json
