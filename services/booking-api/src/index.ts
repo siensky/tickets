@@ -64,6 +64,8 @@ import {
 import './types/request-context.js';
 
 const SERVICE_NAME = 'booking-api';
+// Sektionssammanfattningens cache-header när API-cachen är på (docs/plan.md 8.3): kort, platser tar slut snabbt.
+const SUMMARY_MAX_AGE_SECONDS = 5;
 const PAYMENT_CONSUMER_QUEUE = 'booking-api.payment-succeeded';
 const PAYMENT_CONSUMER_DELIVERY_LIMIT = 5;
 
@@ -147,8 +149,14 @@ function registerRoutes(
     shardPools: deps.shardPools,
     logger,
     assetBaseUrl: deps.publicAssetBaseUrl,
+    listCache: { redis: deps.redis, ttlSeconds: deps.apiCacheSeconds },
   });
-  registerSeatmapRoutes(app, { shardPools: deps.shardPools, redis: deps.redis, logger });
+  registerSeatmapRoutes(app, {
+    shardPools: deps.shardPools,
+    redis: deps.redis,
+    logger,
+    summaryCacheSeconds: deps.apiCacheSeconds > 0 ? SUMMARY_MAX_AGE_SECONDS : 0,
+  });
   registerQueueRoutes(app, deps);
   registerReservationRoutes(app, deps);
   registerSeatMarkRoutes(app, deps);

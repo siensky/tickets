@@ -66,7 +66,14 @@ async function postJson(
   return fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
     // Fastify avvisar en tom body med content-type: application/json, så headern sätts bara med body.
-    headers: body === undefined ? headers : { 'content-type': 'application/json', ...headers },
+    headers: {
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      // Botskyddets undantag (docs/plan.md 8.5): API-hjälparna går från samma IP som webbläsarna.
+      ...(process.env['CHALLENGE_BYPASS_TOKEN']
+        ? { 'x-challenge-bypass': process.env['CHALLENGE_BYPASS_TOKEN'] }
+        : {}),
+      ...headers,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }

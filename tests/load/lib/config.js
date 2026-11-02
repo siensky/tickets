@@ -33,6 +33,10 @@ export const AUTH_TOKENS = (__ENV.AUTH_TOKENS || '')
   .split(',')
   .filter((token) => token.length > 0);
 
+// Botskyddets undantag (docs/plan.md 8.5): skickas som X-Challenge-Bypass på queue/join. Värdet skrivs ut av
+// `scripts/loadtest-mode.sh on` (k6 läser OS-miljön som __ENV, så `export CHALLENGE_BYPASS=…` räcker); tomt = ingen header (och k6 utmanas då som vilken bot som helst).
+export const CHALLENGE_BYPASS = __ENV.CHALLENGE_BYPASS || '';
+
 export function randomAuthToken() {
   if (AUTH_TOKENS.length === 0) {
     throw new Error(

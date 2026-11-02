@@ -6,7 +6,8 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { getQueueStatus, joinQueue, type QueueStatusResult } from '../lib/api-client.js';
+import { getQueueStatus, type QueueStatusResult } from '../lib/api-client.js';
+import { joinQueueWithChallenge } from '../lib/challenge.js';
 import { getStoredQueueToken, storeQueueToken } from '../lib/queue-token-storage.js';
 
 const POLL_INTERVAL_MS = 2000;
@@ -34,7 +35,7 @@ function useJoinQueueOnce(eventId: string): {
     }
     let cancelled = false;
     setIsJoining(true);
-    joinQueue(eventId)
+    joinQueueWithChallenge(eventId)
       .then((result) => {
         if (!cancelled) {
           storeQueueToken(eventId, result.token);

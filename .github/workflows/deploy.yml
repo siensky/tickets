@@ -124,6 +124,7 @@ jobs:
           VITE_AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
           VITE_AUTH0_CLIENT_ID: ${{ secrets.AUTH0_WEB_CLIENT_ID }}
           VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
         run: pnpm --filter @tickets/web run build
 
       - name: Upload static files to R2
@@ -307,6 +308,7 @@ jobs:
             --from-literal=stripe-secret-key="${{ secrets.STRIPE_SECRET_KEY }}" \
             --from-literal=stripe-webhook-secret="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
             --from-literal=posthog-key="${{ secrets.POSTHOG_KEY }}" \
+            --from-literal=turnstile-secret-key="${{ secrets.TURNSTILE_SECRET_KEY }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       # Fas 4 (docs/plan.md "Backups"): R2-bucketen/kontot är inget klustret

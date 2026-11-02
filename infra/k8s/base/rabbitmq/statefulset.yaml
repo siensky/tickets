@@ -22,7 +22,7 @@ metadata:
   namespace: data
 data:
   enabled_plugins: |
-    [rabbitmq_management,rabbitmq_prometheus].
+    [rabbitmq_management,rabbitmq_prometheus,rabbitmq_shovel,rabbitmq_shovel_management].
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -93,6 +93,24 @@ spec:
             - name: enabled-plugins
               mountPath: /etc/rabbitmq/enabled_plugins
               subPath: enabled_plugins
+            # docs/plan.md 8.6: konfiguration (per-kö-mått) och policyer (dead-letter).
+            - name: config
+              mountPath: /etc/rabbitmq/conf.d/20-tickets.conf
+              subPath: rabbitmq.conf
+            - name: config
+              mountPath: /etc/rabbitmq/definitions.json
+              subPath: definitions.json
+          # Importerar policyerna mot den KÖRANDE mäklaren (idempotent, additivt: rör varken användare eller
+          # köer). `load_definitions` vid boot kraschar i stället ("Please create virtual host /"). Misslyckas
+          # importen efter 5 minuter loggas felet (kubectl logs) och larmet RabbitMQDeadLetterPolicyMissing går; hooken
+          # avslutar alltid med 0 så att ett policyfel aldrig kraschloopar hela mäklaren.
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - 'for i in $(seq 1 60); do rabbitmq-diagnostics -q check_running >/dev/null 2>&1 && rabbitmqctl import_definitions /etc/rabbitmq/definitions.json && exit 0; sleep 5; done; echo "import_definitions misslyckades" >/proc/1/fd/2; exit 0'
           resources:
             requests:
               cpu: 200m
@@ -133,6 +151,9 @@ spec:
         - name: enabled-plugins
           configMap:
             name: rabbitmq-enabled-plugins
+        - name: config
+          configMap:
+            name: rabbitmq-config
   volumeClaimTemplates:
     - metadata:
         name: data

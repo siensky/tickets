@@ -14,6 +14,7 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code: string | undefined,
+    readonly context?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -21,7 +22,11 @@ export class ApiError extends Error {
 }
 
 interface ErrorBody {
-  readonly error?: { readonly code?: string; readonly message?: string };
+  readonly error?: {
+    readonly code?: string;
+    readonly message?: string;
+    readonly context?: unknown;
+  };
 }
 
 async function request<T>(
@@ -47,6 +52,7 @@ async function request<T>(
       body?.error?.message ?? `Request to ${path} failed with ${response.status}`,
       response.status,
       body?.error?.code,
+      body?.error?.context,
     );
   }
   return json as T;
@@ -176,8 +182,12 @@ export interface JoinQueueResult {
   readonly eventId: string;
 }
 
-export function joinQueue(eventId: string): Promise<JoinQueueResult> {
-  return request(`/events/${eventId}/queue/join`, { method: 'POST' });
+/** `headers` bär botskyddets bevis efter ett 428 (lib/challenge.ts, docs/plan.md 8.5). */
+export function joinQueue(
+  eventId: string,
+  headers: Record<string, string> = {},
+): Promise<JoinQueueResult> {
+  return request(`/events/${eventId}/queue/join`, { method: 'POST', headers });
 }
 
 export type QueueStatusResult =

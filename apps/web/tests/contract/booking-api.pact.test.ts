@@ -30,6 +30,8 @@ const iso = (example: string) => regex(ISO_DATETIME, example);
 const STARTS_AT = '2026-12-05T18:30:00.000Z';
 const QUEUE_TOKEN = 'queue-token';
 const ACCESS_TOKEN = 'contract-user';
+const BROWSER_USER_AGENT =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 const pact = new PactV4({
   consumer: 'web',
@@ -181,6 +183,60 @@ describe('web → booking-api', () => {
         client = await loadClient(mockServer.url);
         const { seats } = await client.getSectionSeatStatus(EVENT_ID, SECTION_ID);
         expect(seats[0]?.seatId).toBe(SEAT_ID);
+      });
+  });
+
+  it('POST /events/:eventId/queue/join ger ett kötoken till en vanlig webbläsare', async () => {
+    await pact
+      .addInteraction()
+      .given('an event with an available seat exists')
+      .uponReceiving('a request to join the queue from a normal browser')
+      .withRequest('POST', `/events/${EVENT_ID}/queue/join`, (b) => {
+        b.headers({ 'user-agent': BROWSER_USER_AGENT });
+      })
+      .willRespondWith(201, (b) => {
+        b.jsonBody({ token: string('queue-token'), eventId: uuid(EVENT_ID) });
+      })
+      .executeTest(async (mockServer) => {
+        client = await loadClient(mockServer.url);
+        const joined = await client.joinQueue(EVENT_ID, { 'user-agent': BROWSER_USER_AGENT });
+        expect(joined.eventId).toBe(EVENT_ID);
+      });
+  });
+
+  // Botskyddet (docs/plan.md 8.5): en uppenbar automat får en proof-of-work-utmaning i stället för ett kötoken.
+  it('POST /events/:eventId/queue/join kräver en utmaning av en uppenbar automat (428)', async () => {
+    await pact
+      .addInteraction()
+      .given('an event with an available seat exists')
+      .uponReceiving('a request to join the queue from an obvious script')
+      .withRequest('POST', `/events/${EVENT_ID}/queue/join`, (b) => {
+        b.headers({ 'user-agent': 'curl/8.4.0' });
+      })
+      .willRespondWith(428, (b) => {
+        b.jsonBody({
+          error: {
+            code: string('CHALLENGE_REQUIRED'),
+            message: string('A challenge must be solved before joining the queue'),
+            context: {
+              challenge: {
+                type: string('pow'),
+                challenge: string('1700000120.16.abcdef.0123abcd'),
+                bits: integer(16),
+                expiresAt: integer(1_700_000_120),
+              },
+            },
+          },
+        });
+      })
+      .executeTest(async (mockServer) => {
+        client = await loadClient(mockServer.url);
+        await expect(
+          client.joinQueue(EVENT_ID, { 'user-agent': 'curl/8.4.0' }),
+        ).rejects.toMatchObject({
+          status: 428,
+          code: 'CHALLENGE_REQUIRED',
+        });
       });
   });
 

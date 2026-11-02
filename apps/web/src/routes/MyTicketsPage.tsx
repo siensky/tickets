@@ -23,7 +23,7 @@ import { useAccessToken } from '../lib/use-access-token.js';
 function Page({ children }: { children: JSX.Element | JSX.Element[] }): JSX.Element {
   const isOnline = useIsOnline();
   return (
-    <Container className="flex max-w-3xl flex-col gap-6 py-8">
+    <Container className="ph-no-capture flex max-w-3xl flex-col gap-6 py-8">
       <div className="flex items-center gap-3">
         <h1 className="text-2xl sm:text-3xl">Mina biljetter</h1>
         {isOnline ? null : (

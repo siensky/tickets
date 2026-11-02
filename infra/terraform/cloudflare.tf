@@ -87,6 +87,21 @@ resource "cloudflare_ruleset" "edge_cache" {
           default = 1
         }
       }
+    },
+    {
+      # Sektionssammanfattningen (docs/plan.md 8.3): anonym, samma svar för alla. `respect_origin` låter
+      # API:ts egen Cache-Control styra (API_CACHE_MAX_AGE_SECONDS=0 skickar ingen header, och kanten cachar då
+      # inget). Svaret bär Access-Control-Allow-Origin: * (setPublicCacheHeaders), så ett cachat svar kan aldrig
+      # sakna CORS-header. Eventlistan cachas INTE vid kanten utan i Redis (docs/forsvar.md).
+      description = "Cacha per-event sektionssammanfattning vid kanten enligt origin-headern (max 5 s) — docs/plan.md 8.3"
+      expression  = "(starts_with(http.request.uri.path, \"/events/\") and ends_with(http.request.uri.path, \"/sections/summary\") and http.host eq \"api.${var.domain_name}\")"
+      action      = "set_cache_settings"
+      action_parameters = {
+        cache = true
+        edge_ttl = {
+          mode = "respect_origin"
+        }
+      }
     }
   ]
 }

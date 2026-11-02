@@ -36,3 +36,24 @@ export function toEventSummary(
     availability,
   };
 }
+
+/**
+ * Läser tillbaka eventlistan ur Redis-cachen (docs/plan.md 8.3). Värdet skrevs av `listAllEvents` själv,
+ * så formen är känd; en cache som ändå inte ser ut som en lista av objekt med `id` (trasig) behandlas som
+ * en miss i stället för att skickas vidare. Cache-nyckeln är versionerad (`events:list:v1:`), så en ändrad
+ * form efter en deploy aldrig läses från ett äldre värde.
+ */
+export function parseCachedEventSummaries(raw: string): EventSummary[] | undefined {
+  const parsed: unknown = JSON.parse(raw);
+  const isEventList =
+    Array.isArray(parsed) &&
+    parsed.every(
+      (item: unknown) =>
+        typeof item === 'object' &&
+        item !== null &&
+        'id' in item &&
+        typeof item.id === 'string',
+    );
+  // as: den enda platsen där cachad JSON får typen EventSummary[], efter kontrollen ovan (docs/rules.md §2).
+  return isEventList ? (parsed as EventSummary[]) : undefined;
+}

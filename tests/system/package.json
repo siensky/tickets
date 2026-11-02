@@ -6,7 +6,9 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:system": "vitest run --exclude '**/invariants.test.ts' && vitest run flows/invariants"
+    "test:system": "vitest run --exclude '**/invariants.test.ts' && vitest run flows/invariants",
+    "test:system:fast": "vitest run --exclude '**/invariants.test.ts' --exclude '**/f5-reservation-expiry.test.ts' && vitest run flows/invariants",
+    "test:system:slow": "vitest run flows/f5-reservation-expiry && vitest run flows/invariants"
   },
   "devDependencies": {
     "@types/node": "22.19.0",

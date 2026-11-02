@@ -19,7 +19,17 @@ export function AppAuthProvider({ children }: { children: ReactNode }): JSX.Elem
     <Auth0Provider
       domain={AUTH0_DOMAIN}
       clientId={AUTH0_CLIENT_ID}
-      authorizationParams={{ redirect_uri: window.location.origin, audience: AUTH0_AUDIENCE }}
+      authorizationParams={{
+        redirect_uri: window.location.origin,
+        audience: AUTH0_AUDIENCE,
+        // Inloggningssidan på svenska (docs/plan.md 8.2).
+        ui_locales: 'sv',
+      }}
+      // Förnyelse via refresh token i stället för en dold iframe, som iOS Safari blockerar (ITP).
+      // Kräver Refresh Token Rotation i Auth0 (runbook "Auth0: inloggningens utseende"). Faller
+      // tillbaka på iframe om ingen refresh token finns, t.ex. för sessioner från före ändringen.
+      useRefreshTokens
+      useRefreshTokensFallback
       // Personalen ska inte behöva logga in igen efter en omladdning mitt i en kö vid grinden.
       cacheLocation="localstorage"
     >

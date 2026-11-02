@@ -46,6 +46,51 @@ test('cookielöst före samtycke, cookie och flagga efter "Godkänn"', async ({ 
   await expect(page.getByText(SEATS_LEFT_BADGE).first()).toBeVisible();
 });
 
+test('session replay skickar ingenting före samtycke och börjar först efter "Godkänn"', async ({
+  page,
+}) => {
+  const events = await capturePostHog(page);
+  await page.goto(`/events/${EVENT.id}`);
+  await expect(page.getByRole('region', { name: BANNER })).toBeVisible();
+  // Vänta på ett positivt villkor (en senare händelse har skickats) i stället för en fast väntan: då har
+  // PostHog hunnit ladda sin konfiguration, och inspelningen hade börjat om den var påslagen.
+  await expect.poll(() => events.names(), { timeout: 15_000 }).toContain('event_viewed');
+  expect(events.recordingRequests()).toBe(0);
+
+  await page.getByRole('button', { name: 'Godkänn' }).click();
+  // Inspelningen skickar när sidan ändras (navigering ger aktivitet).
+  await page.getByRole('link', { name: 'tikknet, startsidan' }).click();
+  await expect.poll(() => events.recordingRequests(), { timeout: 20_000 }).toBeGreaterThan(0);
+});
+
+test('session replay slutar skicka när samtycket återkallas', async ({ page }) => {
+  const events = await capturePostHog(page);
+  await page.goto(`/events/${EVENT.id}`);
+  await page.getByRole('button', { name: 'Godkänn' }).click();
+  await page.getByRole('link', { name: 'tikknet, startsidan' }).click();
+  await expect.poll(() => events.recordingRequests(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+  // Återkallat samtycke laddar om sidan (posthog-js startar annars om inspelningen, se analytics.ts): vänta in
+  // omladdningen och mät sedan att ingen ny inspelningstrafik skickas trots aktivitet.
+  await page.getByRole('button', { name: 'Cookie-inställningar' }).click();
+  await Promise.all([
+    page.waitForEvent('load'),
+    page.getByRole('button', { name: 'Avvisa' }).click(),
+  ]);
+  const viewed = (): number => events.names().filter((name) => name === 'event_viewed').length;
+  const before = viewed();
+  await page.getByRole('link', { name: 'tikknet, startsidan' }).click();
+  await page.getByRole('link', { name: `Köp biljetter till ${EVENT.title}` }).click();
+  await expect.poll(viewed, { timeout: 15_000 }).toBeGreaterThan(before);
+  const settled = events.recordingRequests();
+
+  await page.getByRole('link', { name: 'tikknet, startsidan' }).click();
+  await page.getByRole('link', { name: `Köp biljetter till ${EVENT.title}` }).click();
+  await expect.poll(viewed, { timeout: 15_000 }).toBeGreaterThan(before + 1);
+
+  expect(events.recordingRequests()).toBe(settled);
+});
+
 test('valet kan ändras via Cookie-inställningar', async ({ page }) => {
   await capturePostHog(page);
   await page.goto('/');

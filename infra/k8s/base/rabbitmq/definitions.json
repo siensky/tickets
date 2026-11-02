@@ -1,0 +1,26 @@
+{
+  "policies": [
+    {
+      "vhost": "/",
+      "name": "dead-letter-booking-api.payment-succeeded",
+      "pattern": "^booking-api\\.payment-succeeded$",
+      "apply-to": "queues",
+      "priority": 0,
+      "definition": {
+        "dead-letter-exchange": "tickets.dlx",
+        "dead-letter-routing-key": "booking-api.payment-succeeded"
+      }
+    },
+    {
+      "vhost": "/",
+      "name": "dead-letter-notification-worker.order-events",
+      "pattern": "^notification-worker\\.order-events$",
+      "apply-to": "queues",
+      "priority": 0,
+      "definition": {
+        "dead-letter-exchange": "tickets.dlx",
+        "dead-letter-routing-key": "notification-worker.order-events"
+      }
+    }
+  ]
+}

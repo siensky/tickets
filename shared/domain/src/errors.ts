@@ -78,6 +78,18 @@ export class GoneError extends BaseError {
   }
 }
 
+export class PreconditionRequiredError extends BaseError {
+  readonly httpStatus = 428;
+  readonly isOperational = true;
+  constructor(
+    message: string,
+    context?: Record<string, unknown>,
+    code = 'PRECONDITION_REQUIRED',
+  ) {
+    super(code, message, context);
+  }
+}
+
 export class TooManyRequestsError extends BaseError {
   readonly httpStatus = 429;
   readonly isOperational = true;
@@ -135,6 +147,20 @@ export class IdempotencyConflictError extends ConflictError {
       `Idempotency key ${idempotencyKey} was already used with a different request`,
       { idempotencyKey },
       'IDEMPOTENCY_CONFLICT',
+    );
+  }
+}
+
+/**
+ * Thrown by `queue/join` when the botskydd (docs/plan.md 8.5) wants proof before issuing a queue token. The
+ * `challenge` in the context tells the client what to solve (proof of work or Turnstile) before retrying.
+ */
+export class ChallengeRequiredError extends PreconditionRequiredError {
+  constructor(challenge: Readonly<Record<string, unknown>>) {
+    super(
+      'A challenge must be solved before joining the queue',
+      { challenge },
+      'CHALLENGE_REQUIRED',
     );
   }
 }

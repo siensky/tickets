@@ -12,7 +12,16 @@
 import cors from '@fastify/cors';
 import type { FastifyInstance } from 'fastify';
 
-const ALLOWED_HEADERS = ['content-type', 'authorization', 'x-queue-token', 'idempotency-key'];
+const ALLOWED_HEADERS = [
+  'content-type',
+  'authorization',
+  'x-queue-token',
+  'idempotency-key',
+  // Botskyddets bevis på queue/join (docs/plan.md 8.5).
+  'x-pow-challenge',
+  'x-pow-solution',
+  'x-turnstile-token',
+];
 const ALLOWED_METHODS = ['GET', 'POST', 'DELETE'];
 const DEFAULT_ALLOWED_ORIGIN = 'http://localhost:5173';
 

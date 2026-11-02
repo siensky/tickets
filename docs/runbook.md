@@ -196,6 +196,84 @@ Vi kör en tenant, så `loki.auth_enabled = false` i `helm_release.loki` (`obser
 5. Applicera ändringar med
    `terraform apply -target=helm_release.loki -target=helm_release.alloy`.
 
+## Ta bort de gamla demo-eventen (Fas 8, steg 0)
+
+`seed-demo-events.ts` la fem event (id `…0201`–`…0205`, 30-sätesarenan, utan bild) i produktion. De tas bort med ett
+fristående skript (docs/plan.md 8.3). Lasttestets event och CSV-eventen rörs aldrig.
+
+1. Port-forward och miljö som i "Lokal DB-åtkomst" i `infra/LASTTEST-NOTES.md` (`DATABASE_URL_SHARD_0/1`).
+2. Torrkörning (raderar inget, listar vad som finns och antalet betalda ordrar):
+   `pnpm --filter @tickets/scheduler-worker remove-demo-events`
+3. Stämmer listan: `pnpm --filter @tickets/scheduler-worker remove-demo-events -- --apply`. Per event, i en transaktion,
+   vägrar skriptet om eventet har betalda eller väntande ordrar eller aktiva reservationer (inget raderas då),
+   exporterar alla rader till `~/demo-events-export-<tid>-<eventId>.json` (rättigheter 0600) före raderingen, och
+   tar bort eventet. Väntrummets Redis-nycklar töms också (`REDIS_URL` ska peka på produktionens Redis via port-forward).
+   Skriptet går att köra om: event som redan är borta hoppas över.
+4. Exportfilerna innehåller personuppgifter (QR-token, betalningssvar). Spara dem tills du är säker på att inget saknas och
+   radera dem därefter. Kör inte mitt under en demo.
+
+## Auth0: inloggningens utseende och refresh tokens (Fas 8, steg 2)
+
+Rubriken "Log in to dev-… to continue to Tickets Web" och Auth0-loggan kommer från Auth0-tenantens inställningar, inte
+från vår kod (docs/plan.md 8.2). Koden ber bara om svenska (`ui_locales: 'sv'`). **Gör detta efter försvaret** och
+anteckna dagens värden först (för att kunna ställa tillbaka dem). Menynamn i Auth0 ändras ibland: hittar du inte
+något, sök i dashboardens sökruta på ordet.
+
+1. **Anteckna** nuvarande värden i tabellen nedan innan du ändrar något (rollback = ställ tillbaka dem).
+
+   | Inställning | Värde före ändring |
+   |---|---|
+   | Tenant Friendly Name / Logo URL | _fylls i_ |
+   | Appnamn (webb / scanner) | _fylls i_ |
+   | Universal Login: primärfärg / bakgrund / logga | _fylls i_ |
+   | Standardspråk | _fylls i_ |
+   | Scanner: Refresh Token Rotation / Idle- och Maximum-livslängd | _fylls i_ |
+   | API: Allow Offline Access / Maximum Access Token Lifetime | _fylls i_ |
+
+2. **Tenantens namn och logga:** **Settings → General**: *Friendly Name* = `tikknet`, *Logo URL* =
+   `https://cdn.tikknet.se/brand/tikknet-icon.svg` (eller `tikknet-logo.svg`; en PNG fungerar om SVG nekas).
+3. **Utseende:** **Branding → Universal Login → Customization Options** (eller *Colors*/*Appearance*): *Primary color* =
+   `#c30048`, *Page background* = `#f9fafb`, logotyp = samma URL som ovan.
+4. **Applikationsnamn:** **Applications → Applications:** byt "Tickets Web" till `tikknet` och "Scanner" till
+   `tikknet scanner` (Client ID ändras inte).
+5. **Språk och texter:** **Settings → General → Languages**: standardspråk *Swedish* (och lägg till engelska om du vill).
+   Rubriktexten ("Log in to … to continue to …") ändras under **Branding → Universal Login → Advanced Options** (textanpassning),
+   eller via Management API: `PUT /api/v2/prompts/login/custom-text/sv` med t.ex.
+   `{"login": {"title": "Logga in", "description": "Fortsätt till tikknet"}}`. Verifiera i en privat webbläsare.
+6. **Refresh tokens för scannern (iOS):**
+   - **Applications → "tikknet scanner" → Settings → Refresh Token Rotation**: slå på *Rotation*, och korta
+     *Idle Refresh Token Lifetime* till 1 dag och *Maximum Refresh Token Lifetime* till 7 dagar (en stulen token ska inte
+     gälla länge). Kontrollera under **Advanced Settings → Grant Types** att *Refresh Token* är ikryssad.
+   - **APIs → ditt API → Settings → Access Settings: Allow Offline Access** = på.
+   - **Alla scannrar, och iPhones särskilt, måste logga ut och in en gång** efter ändringen, före nästa demo: gamla
+     inloggningar saknar refresh token, och förnyelsen via dold iframe blockeras av iOS Safari (ITP), så de får annars
+     `login_required` vid nästa förnyelse.
+   - **Test på en riktig iPhone:** sänk tillfälligt API:ts *Maximum Access Token Lifetime* (t.ex. till 300 s), logga in,
+     vänta tills access-tokenet gått ut, skanna, och sätt sedan tillbaka värdet du antecknade.
+7. **Rollback:** ställ tillbaka värdena i tabellen. För refresh tokens: stäng av *Allow Offline Access* på API:t (stänger
+   man bara Rotation kan Auth0 dela ut långlivade refresh tokens som inte roteras), och återkalla redan utdelade
+   tokens vid behov (**Users → användaren → Authorized Applications**, eller `DELETE /api/v2/device-credentials/{id}`).
+
+## RabbitMQ: döda meddelanden (Fas 8, steg 5)
+
+Ett meddelande som en konsument nackar fler gånger än `x-delivery-limit` (5 för betalningskonsumenten) försvann tidigare
+(bara en loggrad). Nu hamnar det i en dödkö, `<kö>.dead` (`booking-api.payment-succeeded.dead`,
+`notification-worker.order-events.dead`), via exchangen `tickets.dlx`. Kopplingen görs av policyerna i
+`infra/k8s/base/rabbitmq/definitions.json` (importeras av statefulsetens postStart-hook; en ändrad policy rullar därför om den enda RabbitMQ-repliken, några sekunders avbrott,
+   så ändra dem utanför demo- och försvarsdagar). Tillfälliga fel (`SHARD_UNAVAILABLE`) köas alltid om och räknas inte mot gränsen. Larmet `RabbitMQDeadLetters`
+(Slack) avfyras när en dödkö inte är tom, och Grafana-panelen "Döda meddelanden" visar dem.
+
+1. **Se dem:** `kubectl port-forward -n data svc/rabbitmq 15672:15672`, öppna http://localhost:15672, logga in som `app`
+   (lösenordet i secreten `rabbitmq-credentials`), fliken **Queues**, kön `*.dead` → **Get messages** med **Ack mode: Nack message requeue true** (aldrig
+   "Automatic ack", det raderar meddelandet ur dödkön).
+2. **Förstå varför:** läs meddelandets innehåll och konsumentens loggar (Loki, `kubectl logs`) för den tidpunkten. Ett
+   giftigt meddelande ska rättas i koden eller datan innan det spelas upp.
+3. **Spela upp igen:** i dödköns sida → **Move messages** (kräver pluginet `rabbitmq_shovel_management`) → destination =
+   den ursprungliga kön (`booking-api.payment-succeeded`). Konsumenterna är idempotenta (`processed_messages`).
+4. **Radera:** **Purge** på dödkön, när meddelandet är utrett.
+5. Pluginändringen (`rabbitmq_shovel`, `rabbitmq_shovel_management`) och per-kö-måtten kräver en omstart av den enda
+   RabbitMQ-repliken: några sekunders avbrott i bokningsflödet, så gör den utanför demo- och försvarsdagar.
+
 ## Grafana-inloggning via Auth0 (Fas 4)
 
 Grafana (`https://grafana.<domän>`, se `infra/terraform/observability.tf`) loggas in
@@ -480,6 +558,66 @@ ordertabellen under rapportens granskning — en handfull räcker, inte
 AUTH_TOKENS=tok1,tok2,tok3 ...`. Tokens har en begränsad livstid
 (Auth0-defaulten är timmar, inte dagar) — hämta färska strax innan en
 körning, inte dagen före.
+
+## Tempo: traces (Fas 8, steg 7)
+
+Alloy tar emot OTLP-spans från alla tjänster, skickar alla till debug-exportören (loggas, behålls tills Tempo är bevisad)
+och 10 % (`tempo_sampling_percentage`) till Tempo. Grafana har Tempo som datakälla; ett trace länkar till Loki-loggarna med
+samma `trace_id`, och en loggrad med `trace_id` länkar tillbaka till sitt trace.
+
+**Införande (du kör, i den här ordningen, utanför demo- och försvarsdagar):**
+
+1. Före: `kubectl top nodes` och `kubectl get pods -A | grep -v Running` (spara utskriften som jämförelse).
+2. `terraform -chdir=infra/terraform apply -target=helm_release.tempo`, vänta tills `kubectl get pods -n observability`
+   visar Tempo `Running` (readiness tar ca 30 s).
+3. `terraform -chdir=infra/terraform apply -target=helm_release.alloy` (ny Alloy-konfiguration) och
+   `terraform -chdir=infra/terraform apply -target=helm_release.kube_prometheus_stack` (Grafanas nya datakällor).
+4. Efter: `kubectl top nodes` igen, inga `Pending`-poddar, inga `OOMKilled` (`kubectl get pods -n observability`
+   → `kubectl describe pod` vid tvekan). Tempo ska ligga under 384Mi.
+5. Gör ett bokningsanrop (gå med i en kö på tikknet.se) och öppna Grafana → Explore → Tempo → *Search* (service
+   `booking-api`). Ett trace ska ha spans för booking-api, `pg` och `ioredis`. Med 10 % sampling kan du behöva
+   upprepa anropet några gånger; höj tillfälligt `-var tempo_sampling_percentage=100` för att se det direkt.
+
+**Rollback:** `terraform apply -var tempo_enabled=false -target=helm_release.alloy -target=helm_release.kube_prometheus_stack`
+följt av `-target=helm_release.tempo` (tar bort Tempo och dess PVC; Alloy går tillbaka till bara debug-exportören).
+
+**Larm:** `TempoVolumeFilling` (disken över 80 %). Tempo saknar storleksbaserad retention, så PVC:n (5Gi) är taket.
+
+## Botskydd: proof of work och Turnstile (Fas 8, steg 6)
+
+`POST /events/:eventId/queue/join` utmanar misstänkta klienter (docs/plan.md 8.5). Nivå 0 = ingen utmaning (alla
+vanliga besökare), nivå 1 = proof of work (webbläsaren löser det osynligt, ca 0,3 s), nivå 2 = Cloudflare Turnstile
+(synlig ruta). Nivån räknas ur fyra signaler: fler än 30 joinförsök per IP och minut (varje försök räknas, även med bevis), fler än 10 reserverade join
+per IP och event på 10 min (dessa två räknas som EN signal, så ett delat nät ensamt ger högst nivå 1), ködjup över `challenge_global_queue_depth` (0 = av) och saknad eller uppenbart
+automatisk `User-Agent`. En signal ger nivå 1, två olika (eller tre ogiltiga lösningar för samma IP och event) ger nivå 2.
+
+**Slå av / ändra utan deploy** (rader i `config`, cachas 5 s):
+
+```sql
+UPDATE config SET value = '0' WHERE key = 'challenge_enabled';              -- kill switch (1 = på)
+UPDATE config SET value = '60' WHERE key = 'challenge_ip_attempts_per_minute';
+UPDATE config SET value = '20' WHERE key = 'challenge_ip_joins_per_window';
+UPDATE config SET value = '500' WHERE key = 'challenge_global_queue_depth';   -- 0 = signalen av
+UPDATE config SET value = '18' WHERE key = 'challenge_pow_bits';              -- svårighet, 16 ≈ 0,3 s
+```
+
+Kör mot shard 0 (`kubectl exec -n data postgres-shard-0-0 -- psql -U postgres -d tickets -c "..."`). Ett fel i
+botskyddet släpper alltid igenom (fail-open), och Turnstile som är nere påverkar bara nivå 2.
+
+**Manuellt (en gång, görs av dig):**
+
+1. Cloudflare → *Turnstile* → *Add widget* för `tikknet.se` (läge *Managed*). Du får en **site key** (publik) och en **secret key**.
+2. GitHub → *Settings → Secrets → Actions*: `TURNSTILE_SECRET_KEY` (secret key) och `VITE_TURNSTILE_SITE_KEY` (site key).
+   Utan `TURNSTILE_SECRET_KEY` nedgraderas nivå 2 till proof of work; utan `VITE_TURNSTILE_SITE_KEY` kan webben inte visa
+   rutan, så sätt båda innan du förväntar dig nivå 2.
+3. Deploya (merge till `main`). Kontrollera i Cloudflare-panelen att Turnstile-förfrågningar syns efter ett test.
+
+**Lasttest:** `scripts/loadtest-mode.sh on` slumpar en `CHALLENGE_BYPASS_TOKEN`, sätter den på booking-api och skriver ut
+den. Exportera den före k6: `export CHALLENGE_BYPASS=<värdet>` (k6 läser den som `__ENV`, och den hamnar inte i argumentlistan; skripten skickar headern `X-Challenge-Bypass`); `off` tar bort den.
+Utan den utmanas lasttestets enda IP-adresser. Värdet jämförs i konstant tid och loggas som `challenge bypassed`.
+
+**Följ upp:** PostHog-händelserna `challenge_shown` och `challenge_passed` (prop `challenge_type`). Målet är att
+`challenge_shown` ligger under 1 % av sessionerna med normal trafik.
 
 ## Nödvändiga GitHub Actions-secrets (Fas 3)
 

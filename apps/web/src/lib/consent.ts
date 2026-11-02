@@ -6,13 +6,13 @@ import { useSyncExternalStore } from 'react';
 
 export type ConsentChoice = 'granted' | 'denied' | 'unset';
 
-const STORAGE_KEY = 'tikknet:analytics-consent';
+export const CONSENT_STORAGE_KEY = 'tikknet:analytics-consent';
 const CHANGE_EVENT = 'tikknet:consent-changed';
 export const OPEN_CONSENT_EVENT = 'tikknet:open-consent';
 
 export function getConsent(): ConsentChoice {
   try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const stored = window.localStorage.getItem(CONSENT_STORAGE_KEY);
     return stored === 'granted' || stored === 'denied' ? stored : 'unset';
   } catch {
     // localStorage kan saknas eller blockeras (privat läge): behandla som "inget val".
@@ -22,7 +22,7 @@ export function getConsent(): ConsentChoice {
 
 export function storeConsent(choice: 'granted' | 'denied'): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, choice);
+    window.localStorage.setItem(CONSENT_STORAGE_KEY, choice);
   } catch {
     // Valet gäller då bara tills sidan laddas om; ingenting att göra åt det.
   }

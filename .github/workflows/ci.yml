@@ -87,3 +87,17 @@ jobs:
           tags: ${{ matrix.tag }}:ci
           cache-from: type=gha,scope=${{ matrix.tag }}
           cache-to: type=gha,mode=max,scope=${{ matrix.tag }}
+
+  # Sammanfattande grind (docs/plan.md 8.1): grön bara om ALLA jobb ovan lyckades. `always()` gör att jobbet
+  # körs även när något annat misslyckats; ett avbrutet eller skippat jobb räknas som fel, inte som grönt.
+  ci-ok:
+    if: always()
+    needs: [test, e2e, k8s-dry-run, docker-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every CI job to have succeeded
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "true" ]; then
+            echo "Minst ett CI-jobb misslyckades, avbröts eller hoppades över" >&2
+            exit 1
+          fi

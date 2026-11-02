@@ -7,6 +7,7 @@
 export * from './client.js';
 export * from './keys.js';
 export * from './rate-limiter.js';
+export * from './challenge.js';
 export * from './waiting-room.js';
 export * from './queue-token-revocation.js';
 export * from './seat-marks.js';

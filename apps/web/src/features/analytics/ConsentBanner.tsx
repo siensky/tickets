@@ -35,8 +35,9 @@ export function ConsentBanner(): JSX.Element | null {
     >
       <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-prose text-sm">
-          Vi samlar in anonym statistik om hur bokningsflödet används, ingen personinformation.
-          Godkänner du sparas ett anonymt id i din webbläsare.
+          Vi samlar in anonym statistik om hur bokningsflödet används och spelar in hur sidan
+          används (all text och alla fält är maskerade, betalning och biljetter spelas aldrig
+          in). Ingen personinformation. Godkänner du sparas ett anonymt id i din webbläsare.
         </p>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => choose('denied')}>

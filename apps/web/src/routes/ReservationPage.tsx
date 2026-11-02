@@ -23,8 +23,9 @@ import { isAuth0Configured } from '../lib/auth-provider.js';
 import { getStoredQueueToken } from '../lib/queue-token-storage.js';
 
 function Page({ children }: { children: JSX.Element | JSX.Element[] }): JSX.Element {
+  // ph-no-capture: checkout spelas aldrig in (docs/plan.md 8.4).
   return (
-    <Container className="flex flex-col gap-6 py-8">
+    <Container className="ph-no-capture flex flex-col gap-6 py-8">
       <h1 className="text-2xl sm:text-3xl">Granska och betala</h1>
       {children}
     </Container>

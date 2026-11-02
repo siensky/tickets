@@ -12,6 +12,7 @@ import { ErrorState } from '../../components/ui/ErrorState.js';
 import { Spinner } from '../../components/ui/Spinner.js';
 import { useQueueAdmission } from '../../hooks/use-queue-admission.js';
 import { ApiError, type QueueStatusResult } from '../../lib/api-client.js';
+import { ChallengeGate } from './ChallengeGate.js';
 import { ConnectionBanner } from './ConnectionBanner.js';
 import { QueuePosition } from './QueuePosition.js';
 import { useQueueAnalytics } from './use-queue-analytics.js';
@@ -100,6 +101,7 @@ export function QueueScreen({
       <Centered>
         <Spinner size="lg" />
         <p role="status">Ansluter till kön…</p>
+        <ChallengeGate />
       </Centered>
     ) : (
       <ErrorState message="Kunde inte ställa dig i kön." onRetry={onRejoin} />
