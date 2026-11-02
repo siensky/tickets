@@ -17,13 +17,21 @@ const POSTHOG_HOST = import.meta.env.VITE_POSTHOG_HOST ?? '/ingest';
 const POSTHOG_UI_HOST = 'https://eu.posthog.com';
 const SEATS_LEFT_FLAG = 'show_seats_left_badge';
 
+// Händelser som följs av en helsidesnavigering (checkout → Stripe) skickas direkt: en köad händelse
+// tappas annars när sidan lämnas, och tratten förlorar steget före betalningen.
+const INSTANT_EVENTS: ReadonlySet<string> = new Set(['checkout_started']);
+
 export const isAnalyticsConfigured = POSTHOG_KEY !== undefined && POSTHOG_KEY !== '';
 
 const tracker = createTracker<ClientEvents>(
   isAnalyticsConfigured
     ? {
         capture: (name, props) => {
-          posthog.capture(name, { ...props });
+          posthog.capture(
+            name,
+            { ...props },
+            INSTANT_EVENTS.has(name) ? { send_instantly: true } : undefined,
+          );
         },
       }
     : null,
