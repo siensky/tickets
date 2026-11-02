@@ -92,6 +92,9 @@ spec:
                   key: password
             - name: RABBITMQ_URL
               value: 'amqp://app:$(RABBITMQ_PASSWORD)@rabbitmq.data.svc.cluster.local:5672'
+            # Kort cache för eventlistan (Redis) och sektionssammanfattningen (docs/plan.md 8.3). 0 = av.
+            - name: API_CACHE_MAX_AGE_SECONDS
+              value: '10'
             - name: RATE_LIMIT_PER_SECOND
               value: '50'
             - name: PAYMENT_FROZEN_MINUTES
@@ -146,6 +149,16 @@ spec:
                 secretKeyRef:
                   name: tickets-app-secrets
                   key: posthog-key
+            # Botskyddets nivå 2 (docs/plan.md 8.5). Saknas hemligheten nedgraderas nivå 2 till proof of work,
+            # så en tom nyckel stoppar aldrig podden. Sätts från GitHub-secreten TURNSTILE_SECRET_KEY.
+            - name: TURNSTILE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-app-secrets
+                  key: turnstile-secret-key
+                  optional: true
+            - name: TURNSTILE_EXPECTED_HOSTNAME
+              value: tikknet.se
             - name: QUEUE_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:

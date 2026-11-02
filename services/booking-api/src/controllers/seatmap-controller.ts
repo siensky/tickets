@@ -14,6 +14,7 @@ import {
   venueSectionParamSchema,
 } from '@tickets/schemas';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { setPublicCacheHeaders } from './http-headers.js';
 import {
   getSectionGeometry,
   getSectionSeatStatus,
@@ -36,7 +37,8 @@ export function createListVenueSectionsHandler(deps: SeatmapServiceDeps) {
       });
     }
     const sections = await listVenueSections(deps, parsed.data.venueId);
-    reply.header('cache-control', EDGE_CACHE_GEOMETRY).send({ sections });
+    setPublicCacheHeaders(reply, EDGE_CACHE_GEOMETRY);
+    reply.send({ sections });
   };
 }
 
@@ -49,7 +51,8 @@ export function createGetSectionGeometryHandler(deps: SeatmapServiceDeps) {
       });
     }
     const seats = await getSectionGeometry(deps, parsed.data.venueId, parsed.data.sectionId);
-    reply.header('cache-control', EDGE_CACHE_GEOMETRY).send({ seats });
+    setPublicCacheHeaders(reply, EDGE_CACHE_GEOMETRY);
+    reply.send({ seats });
   };
 }
 
@@ -62,7 +65,8 @@ export function createGetSectionSeatStatusHandler(deps: SeatmapServiceDeps) {
       });
     }
     const seats = await getSectionSeatStatus(deps, parsed.data.eventId, parsed.data.sectionId);
-    reply.header('cache-control', EDGE_CACHE_STATUS).send({ seats });
+    setPublicCacheHeaders(reply, EDGE_CACHE_STATUS);
+    reply.send({ seats });
   };
 }
 
@@ -74,6 +78,13 @@ export function createGetSectionSummaryHandler(deps: SeatmapServiceDeps) {
         issues: parsed.error.issues,
       });
     }
-    reply.send(await getSectionSummary(deps, parsed.data.eventId));
+    const summary = await getSectionSummary(deps, parsed.data.eventId);
+    // Samma svar för alla (ingen inloggning, ingen kötoken). 0 = ingen header, och kanten cachar då inget
+    // (regeln i cloudflare.tf följer origin-headern).
+    const maxAge = deps.summaryCacheSeconds ?? 0;
+    if (maxAge > 0) {
+      setPublicCacheHeaders(reply, `public, max-age=${String(maxAge)}`);
+    }
+    reply.send(summary);
   };
 }

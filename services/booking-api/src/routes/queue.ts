@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   createJoinQueueHandler,
+  type ChallengeDeps,
   createQueueStatusHandler,
   type QueueAuthDeps,
   type QueueServiceDeps,
@@ -12,7 +13,7 @@ import {
 
 export function registerQueueRoutes(
   app: FastifyInstance,
-  deps: QueueServiceDeps & QueueAuthDeps,
+  deps: QueueServiceDeps & QueueAuthDeps & { challenge: ChallengeDeps },
 ): void {
   app.post('/events/:eventId/queue/join', createJoinQueueHandler(deps));
   app.get('/events/:eventId/queue/status', createQueueStatusHandler(deps));

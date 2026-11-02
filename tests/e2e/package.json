@@ -7,7 +7,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "seed": "tsx seed.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:fast": "playwright test --grep-invert @slow",
+    "test:e2e:slow": "playwright test --grep @slow"
   },
   "dependencies": {
     "@tickets/db": "workspace:*",

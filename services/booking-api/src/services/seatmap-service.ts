@@ -38,6 +38,8 @@ export interface SeatmapServiceDeps {
   readonly shardPools: ShardPools;
   readonly redis: RedisClient;
   readonly logger: Logger;
+  /** `Cache-Control: max-age` för sektionssammanfattningen; 0 = ingen header (docs/plan.md 8.3). */
+  readonly summaryCacheSeconds?: number;
 }
 
 const SEAT_STATUS_CACHE_TTL_SECONDS = 2;

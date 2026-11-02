@@ -32,6 +32,9 @@ export async function call(
   if (options.idempotencyKey !== undefined)
     headers['idempotency-key'] = options.idempotencyKey;
   if (options.body !== undefined) headers['content-type'] = 'application/json';
+  // Botskyddets undantag (docs/plan.md 8.5): alla flöden går från samma IP, så de skulle annars utmanas.
+  const bypass = process.env['CHALLENGE_BYPASS_TOKEN'];
+  if (bypass !== undefined && bypass !== '') headers['x-challenge-bypass'] = bypass;
   const response = await fetch(`${options.baseUrl ?? API_URL}${path}`, {
     method,
     headers,

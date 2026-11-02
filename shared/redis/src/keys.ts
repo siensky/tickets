@@ -40,6 +40,31 @@ export function seatmapStatusKey(eventId: string, sectionId: string): string {
   return `seatmap:${eventId}:${sectionId}`;
 }
 
+/** Cache för eventlistan per kategori (docs/plan.md 8.3). Fritextsök cachas aldrig: obegränsad nyckelmängd. */
+export function eventsListKey(category: string | undefined): string {
+  return `events:list:v1:${category ?? 'all'}`;
+}
+
+/** Joinförsök per IP och minut (botskydd, docs/plan.md 8.5). */
+export function challengeAttemptsKey(ip: string): string {
+  return `challenge:attempts:${ip}`;
+}
+
+/** Reserverade (påbörjade eller lyckade) joins per IP och event under ett fönster. */
+export function challengeJoinsKey(eventId: string, ip: string): string {
+  return `challenge:joins:${eventId}:${ip}`;
+}
+
+/** Ogiltiga proof-of-work-lösningar per IP och event. */
+export function challengePowFailKey(eventId: string, ip: string): string {
+  return `challenge:powfail:${eventId}:${ip}`;
+}
+
+/** Förbrukad proof-of-work-lösning (engångs), nycklad på utmaningens hash. */
+export function challengePowUsedKey(challengeHash: string): string {
+  return `challenge:pow-used:${challengeHash}`;
+}
+
 export function rateLimitKey(ip: string): string {
   return `ratelimit:${ip}`;
 }

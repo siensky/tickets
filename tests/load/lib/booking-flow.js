@@ -7,13 +7,20 @@
 import http from 'k6/http';
 import ws from 'k6/ws';
 import { check, sleep } from 'k6';
-import { randomAuthToken, BASE_URL, WS_BASE_URL, EVENT_ID } from './config.js';
+import {
+  randomAuthToken,
+  BASE_URL,
+  WS_BASE_URL,
+  EVENT_ID,
+  CHALLENGE_BYPASS,
+} from './config.js';
 
 const QUEUE_TOKEN_HEADER = 'X-Queue-Token';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export function joinQueue() {
-  const res = http.post(`${BASE_URL}/events/${EVENT_ID}/queue/join`);
+  const headers = CHALLENGE_BYPASS === '' ? {} : { 'X-Challenge-Bypass': CHALLENGE_BYPASS };
+  const res = http.post(`${BASE_URL}/events/${EVENT_ID}/queue/join`, null, { headers });
   const ok = check(res, { 'queue/join: 201': (r) => r.status === 201 });
   return ok ? res.json('token') : undefined;
 }

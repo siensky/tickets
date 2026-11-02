@@ -57,3 +57,13 @@ resources:
   - monitoring/prometheusrule.yaml
   - monitoring/dashboards.yaml
   - backup/cronjob.yaml
+
+# RabbitMQs konfiguration och policyer (docs/plan.md 8.6) som filer, så att definitions.json kan återanvändas
+# oförändrad i integrationstestet. Kustomize lägger ett hash-suffix på namnet och uppdaterar referensen i
+# statefulseten, så en ändring av filerna rullar ut en ny pod.
+configMapGenerator:
+  - name: rabbitmq-config
+    namespace: data
+    files:
+      - rabbitmq/rabbitmq.conf
+      - rabbitmq/definitions.json

@@ -44,11 +44,17 @@ const { connectConsumer } = await import('../consumer.js');
 function fakeMessage(
   payload: unknown,
   messageId?: string,
+  acquiredCount?: number,
 ): {
   content: Buffer;
-  properties: { messageId: string | undefined };
+  properties: { messageId: string | undefined; headers: Record<string, number> };
 } {
-  return { content: Buffer.from(JSON.stringify(payload)), properties: { messageId } };
+  const headers: Record<string, number> =
+    acquiredCount === undefined ? {} : { 'x-acquired-count': acquiredCount };
+  return {
+    content: Buffer.from(JSON.stringify(payload)),
+    properties: { messageId, headers },
+  };
 }
 
 describe('connectConsumer', () => {
@@ -78,6 +84,31 @@ describe('connectConsumer', () => {
     );
   });
 
+  it('declares the dead-letter exchange and a bound <queue>.dead queue, without touching the main queue arguments (docs/plan.md 8.6)', async () => {
+    await connectConsumer(
+      'amqp://fake',
+      options,
+      () => Promise.resolve(),
+      () => undefined,
+    );
+
+    expect(assertExchange).toHaveBeenCalledWith('tickets.dlx', 'direct', { durable: true });
+    expect(assertQueue).toHaveBeenCalledWith('notification-worker.dead', {
+      durable: true,
+      arguments: { 'x-queue-type': 'quorum' },
+    });
+    expect(bindQueue).toHaveBeenCalledWith(
+      'notification-worker.dead',
+      'tickets.dlx',
+      'notification-worker',
+    );
+    // Dead-letter-kopplingen görs av en policy, aldrig av ett köargument (PRECONDITION_FAILED).
+    const mainQueueCall = assertQueue.mock.calls.find(
+      (call) => call[0] === 'notification-worker',
+    );
+    expect(JSON.stringify(mainQueueCall)).not.toContain('dead-letter');
+  });
+
   it('acks the message once the handler resolves', async () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     await connectConsumer('amqp://fake', options, handler, () => undefined);
@@ -101,6 +132,29 @@ describe('connectConsumer', () => {
 
     expect(ack).not.toHaveBeenCalledWith(message);
     expect(onHandlerError).toHaveBeenCalledWith(handlerError, 'evt-1');
+  });
+
+  it('nacks with requeue=false on the last allowed attempt so the broker dead-letters it', async () => {
+    const handler = vi.fn().mockRejectedValue(new Error('poison'));
+    await connectConsumer('amqp://fake', options, handler, () => undefined);
+
+    // deliveryLimit 5: fjärde tidigare leveransen (x-acquired-count 4) är det femte försöket.
+    const message = fakeMessage({ reservationId: 'r-1' }, 'evt-1', 4);
+    registeredConsumer?.(message);
+    await vi.waitFor(() => expect(nack).toHaveBeenCalledWith(message, false, false));
+  });
+
+  it('keeps requeueing a transient shard outage instead of dead-lettering the message', async () => {
+    const handler = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('Shard 0 is unavailable'), { code: 'SHARD_UNAVAILABLE' }),
+      );
+    await connectConsumer('amqp://fake', options, handler, () => undefined);
+
+    const message = fakeMessage({ reservationId: 'r-1' }, 'evt-1', 40);
+    registeredConsumer?.(message);
+    await vi.waitFor(() => expect(nack).toHaveBeenCalledWith(message, false, true));
   });
 
   it('closes the channel then the connection', async () => {

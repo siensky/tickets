@@ -2,17 +2,26 @@
  * Delad konsumentbas för RabbitMQ (docs/plan.md "Idempotens": "Delivery
  * limit på RabbitMQ-köerna (quorum-kö med `x-delivery-limit` ...)").
  *
- * `x-queue-type: quorum` + `x-delivery-limit` gör att mäklaren SJÄLV
- * slutar leverera om ett meddelande ett giftigt meddelande nackas
- * (requeue=true) fler än `deliveryLimit` gånger — konsumentkoden
- * behöver aldrig själv räkna försök. Utan detta ger ett giftigt
- * meddelande evig redelivery → växande ködjup → KEDA skalar till 10
+ * `x-queue-type: quorum` + `x-delivery-limit` gör att mäklaren slutar
+ * leverera ett meddelande som returneras (kanalen dör, konsumenten
+ * kraschar) fler än `deliveryLimit` gånger. Men en `basic.nack` med
+ * requeue=true räknas INTE av mäklaren i RabbitMQ 4 (verifierat: bara
+ * headern `x-acquired-count` ökar, aldrig `x-delivery-count`), så ett
+ * giftigt meddelande som nackas av handlern loopade för evigt. Därför
+ * räknar konsumenten själv med `x-acquired-count`: på det `deliveryLimit`:e
+ * misslyckade försöket nackas meddelandet med requeue=false, vilket
+ * dead-letterar det (policyn nedan) i stället för att köa om det. Utan en
+ * gräns blir det evig redelivery → växande ködjup → KEDA skalar till 10
  * kraschloopande poddar mitt i lastdemon (docs/plan.md "Idempotens").
  *
- * Ingen dead-letter-exchange är bunden här — en adminvy för en DLQ är
- * medvetet flyttad till efter inlämningen (docs/plan.md "Fasplan").
- * Mäklaren tappar meddelandet tyst efter gränsen; `handler`-anroparen
- * loggar varje nack, så det syns i loggarna även utan en DLQ-vy.
+ * Dead-letter (docs/plan.md 8.6): ett meddelande som överskrider gränsen
+ * hamnar i `<kö>.dead` via exchangen `tickets.dlx` i stället för att
+ * försvinna. Koden deklarerar bara exchangen, dödkön och bindningen
+ * (additivt, ändrar inga argument på befintliga köer). Själva kopplingen
+ * kö → exchange görs av en POLICY (infra/k8s/base/rabbitmq/definitions.json),
+ * eftersom en köes argument inte kan ändras efter att den skapats
+ * (PRECONDITION_FAILED). Ingen adminvy: RabbitMQs egen managementvy visar
+ * dödköerna, och Grafana larmar när en är icke-tom.
  *
  * Återansluter med exponentiell backoff om anslutningen tappas efter
  * att den väl upprättats — annars dör konsumenten TYST vid en
@@ -23,6 +32,13 @@
  * processen på första glappet.
  */
 import { connect, type ChannelModel, type Channel, type ConsumeMessage } from 'amqplib';
+
+/** Exchangen som döda meddelanden skickas till (policyn pekar hit). Routing key = den ursprungliga kön. */
+export const DEAD_LETTER_EXCHANGE = 'tickets.dlx';
+
+export function deadLetterQueueName(queue: string): string {
+  return `${queue}.dead`;
+}
 
 const RECONNECT_INITIAL_DELAY_MS = 1000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
@@ -54,6 +70,14 @@ async function setUpQueue(channel: Channel, options: ConsumeOptions): Promise<vo
     },
   });
   await channel.bindQueue(options.queue, options.exchange, options.routingKey);
+
+  const deadQueue = deadLetterQueueName(options.queue);
+  await channel.assertExchange(DEAD_LETTER_EXCHANGE, 'direct', { durable: true });
+  await channel.assertQueue(deadQueue, {
+    durable: true,
+    arguments: { 'x-queue-type': 'quorum' },
+  });
+  await channel.bindQueue(deadQueue, DEAD_LETTER_EXCHANGE, options.queue);
 }
 
 function parseMessage(message: ConsumeMessage): unknown {
@@ -68,9 +92,28 @@ function readMessageId(message: ConsumeMessage): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+/** Antal tidigare leveranser av meddelandet (RabbitMQ 4:s `x-acquired-count`); 0 vid första leveransen. */
+function readAcquiredCount(message: ConsumeMessage): number {
+  const value: unknown = message.properties.headers?.['x-acquired-count'];
+  return typeof value === 'number' ? value : 0;
+}
+
+// Tillfälliga fel (en shard som inte nås) säger inget om meddelandet: de köas alltid om och räknas inte mot
+// gränsen, så ett kort databasavbrott inte dödar betalningshändelser. Duck-typat på `code` (ShardUnavailableError i
+// @tickets/domain) så att paketet slipper bero på domänen.
+function isTransientError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'SHARD_UNAVAILABLE'
+  );
+}
+
 async function handleMessage(
   channel: Channel,
   message: ConsumeMessage,
+  options: ConsumeOptions,
   handler: MessageHandler,
   onHandlerError: (error: unknown, messageId: string | undefined) => void,
 ): Promise<void> {
@@ -81,9 +124,10 @@ async function handleMessage(
     channel.ack(message);
   } catch (error) {
     onHandlerError(error, messageId);
-    // requeue=true: mäklaren räknar själv mot x-delivery-limit ovan,
-    // och ger upp åt oss när gränsen nås.
-    channel.nack(message, false, true);
+    // Gränsen nådd: requeue=false dead-letterar meddelandet (policyn) i stället för att köa om det.
+    const isLastAttempt =
+      !isTransientError(error) && readAcquiredCount(message) + 1 >= options.deliveryLimit;
+    channel.nack(message, false, !isLastAttempt);
   }
 }
 
@@ -142,7 +186,7 @@ async function establishConnection(
     if (message === null) {
       return;
     }
-    void handleMessage(channel, message, handler, onHandlerError);
+    void handleMessage(channel, message, options, handler, onHandlerError);
   });
 
   const onConnectionLost = (error: unknown): void => {

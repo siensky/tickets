@@ -13,6 +13,8 @@ import { createShardPools, type ShardPools } from '@tickets/db';
 import type { BusinessMetrics, Logger } from '@tickets/observability';
 import { createRedisClient, type RedisClient } from '@tickets/redis';
 import { createStripeClient } from './services/stripe-client.js';
+import type { ChallengeDeps } from './services/challenge-service.js';
+import { createPowKey } from './services/pow.js';
 
 export function requireEnv(name: string): string {
   const value = process.env[name];
@@ -38,6 +40,10 @@ export interface Dependencies {
   readonly businessMetrics: BusinessMetrics;
   readonly publicAssetBaseUrl: string;
   readonly analytics: ServerAnalytics;
+  /** `API_CACHE_MAX_AGE_SECONDS`: 0 = ingen cache (standard lokalt och i CI), annars TTL för eventlistan och cache-header på sektionssammanfattningen. */
+  readonly apiCacheSeconds: number;
+  /** Botskyddet på queue/join (docs/plan.md 8.5). */
+  readonly challenge: ChallengeDeps;
 }
 
 /**
@@ -69,6 +75,27 @@ function readAssetBaseUrl(): string {
   return value;
 }
 
+/** `API_CACHE_MAX_AGE_SECONDS` måste vara ett heltal >= 0; annars avvisar Redis `SET ... EX` varje skrivning tyst. */
+function readCacheSeconds(): number {
+  const value = Number(process.env['API_CACHE_MAX_AGE_SECONDS'] ?? 0);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error('API_CACHE_MAX_AGE_SECONDS must be an integer >= 0');
+  }
+  return value;
+}
+
+function readTurnstileConfig(): ChallengeDeps['turnstile'] {
+  const secret = process.env['TURNSTILE_SECRET_KEY'];
+  if (secret === undefined || secret === '') {
+    return undefined;
+  }
+  const hostname = process.env['TURNSTILE_EXPECTED_HOSTNAME'];
+  return {
+    secret,
+    expectedHostname: hostname === undefined || hostname === '' ? undefined : hostname,
+  };
+}
+
 export function loadDependencies(
   logger: Logger,
   businessMetrics: BusinessMetrics,
@@ -78,11 +105,21 @@ export function loadDependencies(
       logger.warn({ shardIndex, error }, 'shard connection error');
     },
   });
+  const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
+  const queueTokenSecret = createQueueTokenSecret(requireEnv('QUEUE_TOKEN_SECRET'));
   return {
     shardPools,
     logger,
-    redis: createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379'),
-    queueTokenSecret: createQueueTokenSecret(requireEnv('QUEUE_TOKEN_SECRET')),
+    redis,
+    queueTokenSecret,
+    challenge: {
+      shardPools,
+      redis,
+      logger,
+      powKey: createPowKey(queueTokenSecret),
+      turnstile: readTurnstileConfig(),
+      bypassToken: process.env['CHALLENGE_BYPASS_TOKEN'],
+    },
     auth0Verifier: createAuth0Verifier({
       domain: requireEnv('AUTH0_DOMAIN'),
       audience: requireEnv('AUTH0_AUDIENCE'),
@@ -103,6 +140,7 @@ export function loadDependencies(
     ),
     businessMetrics,
     publicAssetBaseUrl: readAssetBaseUrl(),
+    apiCacheSeconds: readCacheSeconds(),
     analytics: createServerAnalyticsFromEnv(process.env, (error) => {
       logger.warn({ error }, 'posthog error');
     }),

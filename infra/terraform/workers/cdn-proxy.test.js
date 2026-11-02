@@ -2,7 +2,7 @@
  * Tester för cdn-proxy.js (docs/plan.md 7.19). Vitelistan är en säkerhetsgräns:
  * bucketen innehåller även databasbackuperna, så varje icke-vitlistad sökväg måste ge 404.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from './cdn-proxy.js';
 
 const OBJECTS = {
@@ -19,26 +19,55 @@ function fakeEnv() {
   return {
     ALLOWED_ORIGINS: 'https://tikknet.se,https://scan.tikknet.se',
     CDN_BUCKET: {
-      async get(key) {
+      async get(key, options) {
         requestedKeys.push(key);
         const body = OBJECTS[key];
         if (body === undefined) {
           return null;
         }
-        return {
-          body,
-          httpEtag: '"etag"',
-          httpMetadata: undefined,
-          writeHttpMetadata() {},
-        };
+        const object = { httpEtag: '"etag"', httpMetadata: undefined, writeHttpMetadata() {} };
+        // R2 med `onlyIf`: uppfyllt If-None-Match ger ett objekt UTAN body.
+        if (options?.onlyIf?.get('if-none-match') === '"etag"') {
+          return object;
+        }
+        return { ...object, body };
       },
     },
   };
 }
 
-function request(path, init) {
-  return worker.fetch(new Request(`https://cdn.tikknet.se${path}`, init), fakeEnv());
+/** Minimal Cache API-ersättning: nyckel = URL, lagrar en klon av svaret. */
+function stubCache() {
+  const store = new Map();
+  vi.stubGlobal('caches', {
+    default: {
+      async match(key) {
+        return store.get(key.url)?.clone();
+      },
+      async put(key, response) {
+        store.set(key.url, response);
+      },
+    },
+  });
 }
+
+const pending = [];
+const ctx = { waitUntil: (promise) => pending.push(promise) };
+
+async function request(path, init) {
+  const response = await worker.fetch(
+    new Request(`https://cdn.tikknet.se${path}`, init),
+    fakeEnv(),
+    ctx,
+  );
+  await Promise.all(pending.splice(0));
+  return response;
+}
+
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  stubCache();
+});
 
 describe('cdn-proxy', () => {
   it('serverar en vitlistad fil med cache-header och rätt content-type', async () => {
@@ -46,7 +75,7 @@ describe('cdn-proxy', () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('<svg/>');
-    expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
+    expect(response.headers.get('cache-control')).toBe('public, max-age=300');
     expect(response.headers.get('content-type')).toBe('image/svg+xml');
   });
 
@@ -55,6 +84,7 @@ describe('cdn-proxy', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('image/webp');
+    expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
   });
 
   it.each([
@@ -129,5 +159,66 @@ describe('cdn-proxy', () => {
     const response = await request('/brand/tikknet-icon.svg');
 
     expect(response.headers.get('vary')).toBe('Origin');
+  });
+
+  it('svarar 304 när If-None-Match matchar ETag', async () => {
+    const response = await request('/images/rock-night.webp', {
+      headers: { 'if-none-match': '"etag"' },
+    });
+
+    expect(response.status).toBe(304);
+    expect(await response.text()).toBe('');
+    expect(response.headers.get('etag')).toBe('"etag"');
+  });
+
+  it('svarar 200 med hela filen när ETag har ändrats', async () => {
+    const response = await request('/images/rock-night.webp', {
+      headers: { 'if-none-match': '"gammal"' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('webp-bytes');
+  });
+
+  it('serverar andra anropet från kantcachen utan att fråga bucketen, och ger 304 därifrån', async () => {
+    await request('/images/rock-night.webp');
+    requestedKeys.length = 0;
+
+    const second = await request('/images/rock-night.webp');
+    const conditional = await request('/images/rock-night.webp', {
+      headers: { 'if-none-match': '"etag"' },
+    });
+
+    expect(second.status).toBe(200);
+    expect(await second.text()).toBe('webp-bytes');
+    expect(conditional.status).toBe(304);
+    expect(requestedKeys).toEqual([]);
+  });
+
+  it('cachar aldrig ett 404', async () => {
+    await request('/brand/finns-inte.svg');
+    requestedKeys.length = 0;
+
+    await request('/brand/finns-inte.svg');
+
+    expect(requestedKeys).toEqual(['brand/finns-inte.svg']);
+  });
+
+  it('håller CORS-headern rätt per origin även med kantcache', async () => {
+    const apex = await request('/brand/tikknet-icon.svg', {
+      headers: { origin: 'https://tikknet.se' },
+    });
+    const scanner = await request('/brand/tikknet-icon.svg', {
+      headers: { origin: 'https://scan.tikknet.se' },
+    });
+    const scannerAgain = await request('/brand/tikknet-icon.svg', {
+      headers: { origin: 'https://scan.tikknet.se' },
+    });
+
+    expect(apex.headers.get('access-control-allow-origin')).toBe('https://tikknet.se');
+    expect(scanner.headers.get('access-control-allow-origin')).toBe('https://scan.tikknet.se');
+    expect(scannerAgain.headers.get('access-control-allow-origin')).toBe(
+      'https://scan.tikknet.se',
+    );
   });
 });

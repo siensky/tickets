@@ -25,6 +25,9 @@ config-rad.
 
 F7 kräver också personalkontot (`SYSTEMTEST_STAFF_EMAIL`/`SYSTEMTEST_STAFF_PASSWORD`, rollen staff).
 
+CI kör två delmängder parallellt (docs/plan.md 8.1): `test:system:fast` (allt utom F5) och
+`test:system:slow` (bara F5, som väntar på att en reservation ska gå ut). `test:system` kör allt.
+
 ## Köra lokalt
 
 1. Starta infrastrukturen: `docker compose up -d postgres-shard-0 postgres-shard-1 redis rabbitmq`.

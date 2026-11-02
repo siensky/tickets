@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { Verifier } from '@pact-foundation/pact';
 import { NOOP_SERVER_ANALYTICS } from '@tickets/analytics/server';
 import { createQueueTokenSecret, type Auth0Verifier } from '@tickets/auth';
-import type { Logger } from '@tickets/observability';
+import { createBusinessMetrics, createRegistry, type Logger } from '@tickets/observability';
 import Fastify, { type FastifyInstance } from 'fastify';
 import Stripe from 'stripe';
 import { afterAll, beforeAll, describe, it } from 'vitest';
@@ -21,6 +21,8 @@ import { registerErrorHandler } from '../../src/routes/error-handler.js';
 import { registerEventRoutes } from '../../src/routes/events.js';
 import { registerMyTicketsRoutes } from '../../src/routes/my-tickets.js';
 import { registerOrderRoutes } from '../../src/routes/orders.js';
+import { registerQueueRoutes } from '../../src/routes/queue.js';
+import { createPowKey } from '../../src/services/pow.js';
 import { registerReservationRoutes } from '../../src/routes/reservations.js';
 import { registerScanRoutes } from '../../src/routes/scans.js';
 import { registerSeatmapRoutes } from '../../src/routes/seatmap.js';
@@ -143,6 +145,19 @@ describe('booking-api provider verification', () => {
     });
     registerSeatmapRoutes(app, { shardPools, redis: redis.client, logger: LOGGER });
     registerReservationRoutes(app, { ...queueDeps, shardPools });
+    registerQueueRoutes(app, {
+      ...queueDeps,
+      shardPools,
+      businessMetrics: createBusinessMetrics(createRegistry('contract')),
+      challenge: {
+        shardPools,
+        redis: redis.client,
+        logger: LOGGER,
+        powKey: createPowKey(queueTokenSecret),
+        turnstile: undefined,
+        bypassToken: undefined,
+      },
+    });
     registerCheckoutRoutes(
       app,
       {

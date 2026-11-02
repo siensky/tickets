@@ -120,6 +120,19 @@ data:
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
           "targets": [{ "expr": "redis_connected_clients", "legendFormat": "{{instance}}" }]
+        },
+        {
+          "id": 5,
+          "title": "Döda meddelanden (dödköer)",
+          "description": "docs/plan.md 8.6: meddelanden som överskred delivery-limit. Ska vara 0; larmet RabbitMQDeadLetters avfyras annars.",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "targets": [
+            {
+              "expr": "sum by (queue) (rabbitmq_queue_messages_ready{queue=~\".+\\\\.dead\"})",
+              "legendFormat": "{{queue}}"
+            }
+          ]
         }
       ]
     }
@@ -220,7 +233,8 @@ data:
             "name": "Deploy (booking-api)",
             "enable": true,
             "iconColor": "blue",
-            "expr": "changes(kube_deployment_status_observed_generation{namespace=\"ticketing\", deployment=\"booking-api\"}[1m]) > 0",
+            "expr": "(time() - kube_replicaset_created{namespace=\"ticketing\"}) < 60 and on(namespace, replicaset) kube_replicaset_owner{namespace=\"ticketing\", owner_kind=\"Deployment\", owner_name=\"booking-api\"}",
+            "step": "30s",
             "titleFormat": "Deploy av booking-api"
           }
         ]

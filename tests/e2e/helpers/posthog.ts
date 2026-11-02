@@ -5,13 +5,30 @@
  * med fasta värden. Ingen trafik når PostHog.
  */
 import type { Page, Route } from '@playwright/test';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+
+// posthog-js hämtar sina tillägg (t.ex. inspelaren) som /ingest/static/<namn>.js; de serveras här ur webbappens
+// installerade paket så att ingen trafik når PostHog.
+const POSTHOG_DIST = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../apps/web/node_modules/posthog-js/dist',
+);
+
+function staticScript(pathname: string): string {
+  const file = join(POSTHOG_DIST, pathname.slice(pathname.lastIndexOf('/') + 1));
+  return file.startsWith(POSTHOG_DIST) && existsSync(file) ? readFileSync(file, 'utf8') : '';
+}
 
 export const POSTHOG_E2E_KEY = 'phc_e2e_dummy';
 const SEATS_LEFT_FLAG = 'show_seats_left_badge';
 
 export interface CapturedEvents {
   names(): string[];
+  /** Antal anrop till PostHogs inspelningsändpunkt (`/s/`): session replay (docs/plan.md 8.4). */
+  recordingRequests(): number;
   find(name: string): Record<string, unknown> | undefined;
 }
 
@@ -70,9 +87,13 @@ function flagsResponse(): unknown {
 async function fulfillIngest(
   route: Route,
   captured: Record<string, unknown>[],
+  recordings: { count: number },
 ): Promise<void> {
   const request = route.request();
   const { pathname } = new URL(request.url());
+  if (/\/s\/?$/.test(pathname)) {
+    recordings.count += 1;
+  }
   const body = request.postDataBuffer();
   if (body !== null) {
     captured.push(...eventsIn(decodeBody(body)));
@@ -81,12 +102,15 @@ async function fulfillIngest(
     // Fjärrkonfigurationen laddas som ett script som fyller window._POSTHOG_REMOTE_CONFIG.
     await route.fulfill({
       contentType: 'application/javascript',
-      body: `(window._POSTHOG_REMOTE_CONFIG = window._POSTHOG_REMOTE_CONFIG || {})['${POSTHOG_E2E_KEY}'] = { config: { token: '${POSTHOG_E2E_KEY}', hasFeatureFlags: true, supportedCompression: ['gzip', 'gzip-js'] }, siteApps: [] };`,
+      body: `(window._POSTHOG_REMOTE_CONFIG = window._POSTHOG_REMOTE_CONFIG || {})['${POSTHOG_E2E_KEY}'] = { config: { token: '${POSTHOG_E2E_KEY}', hasFeatureFlags: true, supportedCompression: ['gzip', 'gzip-js'], sessionRecording: { endpoint: '/s/' } }, siteApps: [] };`,
     });
   } else if (pathname.includes('/flags') || pathname.includes('/decide')) {
     await route.fulfill({ json: flagsResponse() });
   } else if (pathname.includes('/static/')) {
-    await route.fulfill({ contentType: 'application/javascript', body: '' });
+    await route.fulfill({
+      contentType: 'application/javascript',
+      body: staticScript(pathname),
+    });
   } else {
     await route.fulfill({ json: { status: 1 } });
   }
@@ -101,9 +125,11 @@ export async function capturePostHog(page: Page): Promise<CapturedEvents> {
     Object.defineProperty(Navigator.prototype, 'userAgentData', { get: () => undefined });
   `);
   const captured: Record<string, unknown>[] = [];
-  await page.route('**/ingest/**', (route) => fulfillIngest(route, captured));
+  const recordings = { count: 0 };
+  await page.route('**/ingest/**', (route) => fulfillIngest(route, captured, recordings));
   return {
     names: () => captured.map((event) => String(event['event'])),
+    recordingRequests: () => recordings.count,
     find: (name) => captured.find((event) => event['event'] === name),
   };
 }

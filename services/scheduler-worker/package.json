@@ -15,6 +15,7 @@
     "generate-sale-report": "tsx src/scripts/generate-sale-report.ts",
     "seed-demo-events": "tsx src/scripts/seed-demo-events.ts",
     "seed-events-from-csv": "tsx src/scripts/seed-events-from-csv.ts",
+    "remove-demo-events": "tsx src/scripts/remove-demo-events.ts",
     "import-tickets": "tsx src/scripts/import-tickets.ts",
     "seed-real-venue": "tsx src/scripts/seed-real-venue.ts",
     "test:contract": "vitest run --dir tests/contract --no-file-parallelism"

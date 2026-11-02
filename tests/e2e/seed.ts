@@ -135,6 +135,19 @@ async function insertShardedFixture(shards: readonly Pool[]): Promise<void> {
   }
 }
 
+/**
+ * Alla webbläsartester kommer från samma IP och går med i kön många gånger per minut. Botskyddets signaler
+ * (docs/plan.md 8.5) höjs därför så högt att en vanlig testkörning aldrig utmanas; utmaningen själv testas av
+ * integrationstestet och av specen challenge.spec.ts, som svarar med 428 på egen hand.
+ */
+async function relaxChallengeThresholds(pool: Pool): Promise<void> {
+  await pool.query(
+    `INSERT INTO config (key, value) VALUES ('challenge_ip_attempts_per_minute', '100000'),
+       ('challenge_ip_joins_per_window', '100000')
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+  );
+}
+
 async function seed(): Promise<void> {
   const shard0 = new Pool({
     connectionString:
@@ -153,6 +166,7 @@ async function seed(): Promise<void> {
 
   await insertGlobalFixture(shard0);
   await insertShardedFixture([shard0, shard1]);
+  await relaxChallengeThresholds(shard0);
 
   await Promise.all([shard0.end(), shard1.end()]);
   process.stdout.write('Seeded e2e fixture data.\n');

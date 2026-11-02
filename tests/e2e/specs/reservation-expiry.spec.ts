@@ -29,20 +29,25 @@ test.afterAll(async () => {
   await writeConfig(HOLD_KEY, previousHold);
 });
 
-test('visar "Tiden gick ut" när reservationen löper ut', async ({ page }) => {
-  test.setTimeout(150_000);
-  const { queueToken, reservationId } = await reserveViaApi(
-    EVENT.id,
-    EVENT.seatIds.slice(0, 1),
-  );
-  await storeQueueToken(page, EVENT.id, queueToken);
+// @slow: väntar på att hållningen (1 minut) går ut och körs i ett eget CI-ben (docs/plan.md 8.1).
+test(
+  'visar "Tiden gick ut" när reservationen löper ut',
+  { tag: '@slow' },
+  async ({ page }) => {
+    test.setTimeout(150_000);
+    const { queueToken, reservationId } = await reserveViaApi(
+      EVENT.id,
+      EVENT.seatIds.slice(0, 1),
+    );
+    await storeQueueToken(page, EVENT.id, queueToken);
 
-  await page.goto(`/events/${EVENT.id}/reservations/${reservationId}`);
-  await expect(page.getByRole('timer')).toBeVisible();
+    await page.goto(`/events/${EVENT.id}/reservations/${reservationId}`);
+    await expect(page.getByRole('timer')).toBeVisible();
 
-  const dialog = page.getByRole('dialog', { name: 'Tiden gick ut' });
-  await expect(dialog).toBeVisible({ timeout: 100_000 });
-  await expect(dialog).toContainText('platserna är släppta');
-  await dialog.getByRole('button', { name: 'Välj nya platser' }).click();
-  await page.waitForURL(`**/events/${EVENT.id}/seatmap`);
-});
+    const dialog = page.getByRole('dialog', { name: 'Tiden gick ut' });
+    await expect(dialog).toBeVisible({ timeout: 100_000 });
+    await expect(dialog).toContainText('platserna är släppta');
+    await dialog.getByRole('button', { name: 'Välj nya platser' }).click();
+    await page.waitForURL(`**/events/${EVENT.id}/seatmap`);
+  },
+);

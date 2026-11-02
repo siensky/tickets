@@ -7,10 +7,11 @@
 import { getGlobalPool, getPoolForEvent, type ShardPools } from '@tickets/db';
 import { InternalError, NotFoundError } from '@tickets/domain';
 import type { Logger } from '@tickets/observability';
+import { eventsListKey, type RedisClient } from '@tickets/redis';
 import { getEventById, listEvents } from '../repositories/events-repository.js';
 import { getVenueById, getVenuesByIds } from '../repositories/venues-repository.js';
 import { computeAvailability } from './event-availability.js';
-import { toEventSummary } from '../mappers/event-mapper.js';
+import { parseCachedEventSummaries, toEventSummary } from '../mappers/event-mapper.js';
 import type { EventRow, EventsFilter, EventSummary } from '../types/event.js';
 
 export interface EventsServiceDeps {
@@ -18,6 +19,11 @@ export interface EventsServiceDeps {
   readonly logger: Logger;
   /** `PUBLIC_ASSET_BASE_URL` (cdn): eventbildernas relativa nycklar blir absoluta URL:er mot den. */
   readonly assetBaseUrl: string;
+  /**
+   * Kort cache för eventlistan i Redis (docs/plan.md 8.3). Listan aggregerar alla stolar per anrop, så en
+   * cache skyddar databasen när startsidan belastas. Utan `listCache` (standard lokalt och i CI) cachas inget.
+   */
+  readonly listCache?: { readonly redis: RedisClient; readonly ttlSeconds: number };
 }
 
 /**
@@ -35,6 +41,81 @@ export async function listAllEvents(
   deps: EventsServiceDeps,
   filter: EventsFilter = {},
 ): Promise<EventSummary[]> {
+  // Fritextsök cachas inte (obegränsad nyckelmängd); "alla" och en kategori cachas.
+  const cache = filter.search === undefined ? deps.listCache : undefined;
+  if (cache === undefined || cache.ttlSeconds <= 0) {
+    return (await listAllEventsUncached(deps, filter)).events;
+  }
+  const key = eventsListKey(filter.category);
+  const cached = await readCachedList(deps, cache.redis, key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  // Single-flight per pod: samtidiga missar delar EN databasfråga i stället för att alla kör den tunga
+  // aggregeringen när nyckeln gått ut (stampede).
+  const pending = inFlight.get(key) ?? loadAndCache(deps, cache, key, filter);
+  inFlight.set(key, pending);
+  try {
+    return await pending;
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+const inFlight = new Map<string, Promise<EventSummary[]>>();
+
+async function loadAndCache(
+  deps: EventsServiceDeps,
+  cache: { readonly redis: RedisClient; readonly ttlSeconds: number },
+  key: string,
+  filter: EventsFilter,
+): Promise<EventSummary[]> {
+  const { events, isComplete } = await listAllEventsUncached(deps, filter);
+  // Ett delresultat (en shard nere) cachas aldrig: annars saknas den shardens event i hela TTL:en.
+  if (isComplete) {
+    await writeCachedList(deps, cache, key, events);
+  }
+  return events;
+}
+
+/** Fails OPEN på Redis-fel, som stolsstatuscachen: cachen är en lastskärm, inte en säkerhetsmekanism. */
+async function readCachedList(
+  deps: EventsServiceDeps,
+  redis: RedisClient,
+  key: string,
+): Promise<EventSummary[] | undefined> {
+  try {
+    const raw = await redis.get(key);
+    if (raw === null) {
+      return undefined;
+    }
+    return parseCachedEventSummaries(raw);
+  } catch (error) {
+    deps.logger.warn(
+      { error, key },
+      'events list cache read failed, falling back to Postgres',
+    );
+    return undefined;
+  }
+}
+
+async function writeCachedList(
+  deps: EventsServiceDeps,
+  cache: { readonly redis: RedisClient; readonly ttlSeconds: number },
+  key: string,
+  events: readonly EventSummary[],
+): Promise<void> {
+  try {
+    await cache.redis.set(key, JSON.stringify(events), 'EX', cache.ttlSeconds);
+  } catch (error) {
+    deps.logger.warn({ error, key }, 'events list cache write failed, ignoring');
+  }
+}
+
+async function listAllEventsUncached(
+  deps: EventsServiceDeps,
+  filter: EventsFilter,
+): Promise<{ events: EventSummary[]; isComplete: boolean }> {
   const outcomes = await Promise.allSettled(
     deps.shardPools.pools.map((pool) => listEvents(pool, filter)),
   );
@@ -48,7 +129,10 @@ export async function listAllEvents(
     }
     return outcome.value;
   });
-  return mergeRowsWithVenues(deps, rows);
+  return {
+    events: await mergeRowsWithVenues(deps, rows),
+    isComplete: outcomes.every((outcome) => outcome.status === 'fulfilled'),
+  };
 }
 
 async function mergeRowsWithVenues(

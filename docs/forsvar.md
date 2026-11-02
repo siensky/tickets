@@ -1120,3 +1120,24 @@ Det är ändå värt att committa, av tre skäl:
 
 Kostnaden är noll: ett overksamt Kubernetes-objekt kostar inget i drift, bara fem extra rader
 YAML.
+
+## Vad fångar kontraktstesterna (Pact), och vad fångar de inte?
+
+Pact fångar att *formen* på ett API-svar ändras så att en konsument går sönder: ett fält byter namn, en statuskod ändras,
+ett obligatoriskt fält försvinner. Pact fångar **inte driftkonfiguration**. När en betalning gick fel under lasttestet
+var orsaken att `booking-api` verifierade webhooken mot en annan hemlighet än `payment-mock` signerade med. Kontraktet
+(payload och headerformat) var oförändrat, så Pact hade inte fångat det. Det fångas i stället av `loadtest-mode`s
+betalningskontroll (ordrarna ska bli `paid`, inte bara få 201 från checkout) och av `smoke.js`. Därför finns båda
+lagren: kontraktstester för formen, och en körning mot den riktiga miljön för konfigurationen.
+
+## Varför cachas eventlistan i Redis och inte vid Cloudflares kant?
+
+Eventlistan aggregerar alla stolar per anrop, så en kort cache skyddar databasen när startsidan belastas. Svaret
+innehåller dock en CORS-header som beror på anroparens `Origin`, och Cloudflare följer inte `Vary: Origin` på någon plan.
+Ett cachat svar till en anropare utan Origin (curl, en crawler) eller med en annan Origin än webbappens skulle då serveras
+utan rätt header till webbappen. Eventlistan anropas dessutom från två origins (webbappen och scannern). Därför cachas
+listan i Redis (10 s, fail-open, aldrig för fritextsök, aldrig ett delresultat), medan de kantcachade, anonyma routes
+(sektionssammanfattning, stolsstatus, arenageometri) sätter `Access-Control-Allow-Origin: *`: svaret är samma för alla och
+API:t använder aldrig cookies, så headern kan inte skilja sig mellan anropare. cdn-Workern har origin i cache-nyckeln av
+samma skäl. Kill switch: `API_CACHE_MAX_AGE_SECONDS=0` stänger av både Redis-cachen och sammanfattningens header, och
+Cloudflare-regeln följer origin-headern (`respect_origin`), så kanten slutar cacha.

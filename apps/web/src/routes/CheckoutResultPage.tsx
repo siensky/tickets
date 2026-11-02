@@ -28,7 +28,7 @@ function Shell({
   step?: 'Betala' | 'Klart';
 }): JSX.Element {
   return (
-    <Container className="flex max-w-3xl flex-col gap-6 py-8">
+    <Container className="ph-no-capture flex max-w-3xl flex-col gap-6 py-8">
       {step === undefined ? null : <CheckoutSteps current={step} />}
       {children}
     </Container>

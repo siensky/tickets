@@ -175,12 +175,39 @@ resource "helm_release" "kube_prometheus_stack" {
       # Prometheus datasource is auto-provisioned by this chart. Loki isn't
       # (separate helm_release below) — wired in here instead of via the
       # datasource-sidecar, since there's exactly one and it never changes.
-      additionalDataSources = [{
+      additionalDataSources = concat([{
         name   = "Loki"
+        uid    = "loki"
         type   = "loki"
         access = "proxy"
         url    = "http://loki.${kubernetes_namespace.observability.metadata[0].name}.svc.cluster.local:3100"
-      }]
+        # Från en loggrad till dess trace (pino-instrumenteringen lägger `trace_id` i varje loggrad inom en span).
+        jsonData = var.tempo_enabled ? {
+          derivedFields = [{
+            name          = "trace_id"
+            matcherRegex  = "\"trace_id\":\"(\\w+)\""
+            url           = "$${__value.raw}"
+            datasourceUid = "tempo"
+          }]
+        } : {}
+        }], var.tempo_enabled ? [{
+        name   = "Tempo"
+        uid    = "tempo"
+        type   = "tempo"
+        access = "proxy"
+        url    = "http://tempo.${kubernetes_namespace.observability.metadata[0].name}.svc.cluster.local:3200"
+        # Från ett trace till loggarna för samma trace_id.
+        jsonData = {
+          tracesToLogsV2 = {
+            datasourceUid      = "loki"
+            filterByTraceID    = false
+            spanStartTimeShift = "-5m"
+            spanEndTimeShift   = "5m"
+            customQuery        = true
+            query              = "{namespace=\"ticketing\"} |= \"$${__trace.traceId}\""
+          }
+        }
+      }] : [])
     }
   })]
 }
@@ -260,6 +287,41 @@ resource "helm_release" "loki" {
   })]
 }
 
+# docs/plan.md 8.7: Tempo som single-binary (samma mönster som Loki: filesystem, en replika). Resurserna är
+# hårda krav, eftersom noderna är cpx22 (4 GB): 128Mi begärt, 384Mi tak, och GOMEMLIMIT strax under taket så att
+# Go-runtimen städar innan kärnan OOM-dödar podden. 7 dagars retention; Tempo har ingen storleksbaserad
+# retention, så diskens tak är PVC:n (5Gi, larm vid 80 %) tillsammans med 10 % sampling i Alloy.
+# Chartet: grafana-community/tempo 3.2.0 (Tempo 3.1.0).
+resource "helm_release" "tempo" {
+  count      = var.tempo_enabled ? 1 : 0
+  name       = "tempo"
+  repository = "https://grafana-community.github.io/helm-charts"
+  chart      = "tempo"
+  version    = "3.2.0"
+  namespace  = kubernetes_namespace.observability.metadata[0].name
+
+  # kube_prometheus_stack: serviceMonitor nedan kräver att CRD:n redan finns.
+  depends_on = [kubernetes_namespace.observability, helm_release.kube_prometheus_stack]
+
+  values = [yamlencode({
+    tempo = {
+      retention        = "168h"
+      reportingEnabled = false
+      resources = {
+        requests = { cpu = "50m", memory = "128Mi" }
+        limits   = { cpu = "500m", memory = "384Mi" }
+      }
+      extraEnv = [{ name = "GOMEMLIMIT", value = "320MiB" }]
+    }
+    persistence = {
+      enabled          = true
+      storageClassName = "hcloud-volumes"
+      size             = "5Gi"
+    }
+    serviceMonitor = { enabled = true }
+  })]
+}
+
 # docs/plan.md "Observability": OTel-instrumentering (shared/observability/
 # src/tracing.ts) exporterar till Alloys OTLP-mottagare redan nu. Tempo
 # (traces-backend) kopplas in efter VG — tills då loggar Alloy bara att
@@ -273,17 +335,20 @@ resource "helm_release" "alloy" {
   namespace  = kubernetes_namespace.observability.metadata[0].name
 
   # kube_prometheus_stack: serviceMonitor nedan kräver att CRD:n redan finns.
-  depends_on = [helm_release.loki, helm_release.kube_prometheus_stack]
+  # Tempo först (docs/plan.md 8.7): Alloy ska inte börja skicka till en backend som inte finns än.
+  depends_on = [helm_release.loki, helm_release.kube_prometheus_stack, helm_release.tempo]
 
   values = [yamlencode({
     alloy = {
       configMap = {
-        create  = true
-        content = file("${path.module}/alloy-config.alloy")
+        create = true
+        content = templatefile("${path.module}/alloy-config.alloy.tftpl", {
+          tempo_enabled             = var.tempo_enabled
+          tempo_sampling_percentage = var.tempo_sampling_percentage
+        })
       }
-      # otelcol.exporter.debug (the trace placeholder in alloy-config.alloy,
-      # until Tempo exists) is still "experimental" upstream — drop this
-      # once it's swapped for otelcol.exporter.otlp pointed at Tempo.
+      # otelcol.exporter.debug is still "experimental" upstream. It stays until Tempo is proven
+      # (docs/plan.md 8.7); removing it and this setting is a separate last commit.
       stabilityLevel = "experimental"
       # The chart's auto-created Service (below) only exposes ports listed
       # here — it doesn't introspect alloy-config.alloy's otelcol.receiver.otlp

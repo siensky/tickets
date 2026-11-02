@@ -83,6 +83,7 @@ BaseError (abstrakt)
   ├─ NotFoundError          404
   ├─ ConflictError          409
   ├─ GoneError              410
+  ├─ PreconditionRequiredError 428   (ChallengeRequiredError: botskyddet kräver en utmaning, plan 8.5)
   ├─ TooManyRequestsError   429
   └─ InternalError          500
 ```

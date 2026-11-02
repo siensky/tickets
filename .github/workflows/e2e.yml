@@ -53,8 +53,16 @@ on:
         required: true
 
 jobs:
+  # docs/plan.md 8.1: tre parallella ben som alla startar sin EGEN stack (egen databas, egen Redis), så ingen
+  # delar tillstånd. De två testerna som VÄNTAR på att en reservation ska gå ut (e2e-specen
+  # reservation-expiry, taggad @slow, och systemtestet F5) har varsitt ben; allt annat ligger i `fast`.
+  # Inget test är borttaget eller ändrat, bara fördelat.
   e2e:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [fast, e2e-expiry, system-expiry]
     env:
       DATABASE_URL_SHARD_0: postgresql://postgres:postgres@localhost:5432/tickets
       DATABASE_URL_SHARD_1: postgresql://postgres:postgres@localhost:5452/tickets
@@ -78,6 +86,8 @@ jobs:
       STRIPE_PORT: '3002'
       STRIPE_WEBHOOK_SECRET: whsec_e2e_shared_with_payment_mock
       QR_TOKEN_SECRET: e2e-test-qr-token-secret
+      # Botskyddets undantag (docs/plan.md 8.5) för test-hjälparna som går direkt mot API:t.
+      CHALLENGE_BYPASS_TOKEN: e2e-challenge-bypass-token
       BOOKING_API_PORT: '3000'
       BOOKING_API_WEBHOOK_URL: http://localhost:3000/webhooks/stripe
       PAYMENT_MOCK_PORT: '3002'
@@ -99,6 +109,9 @@ jobs:
       # svarar själv på /ingest, så ingen trafik når PostHog.
       VITE_POSTHOG_KEY: phc_e2e_dummy
       VITE_POSTHOG_HOST: http://localhost:5173/ingest
+      # Botskydd (docs/plan.md 8.5): Cloudflares publika testnyckel (alltid godkänd). En normal e2e-användare ska
+      # aldrig se en utmaning; nyckeln finns bara så att widgeten kan renderas om en gör det.
+      VITE_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
       E2E_BASE_URL: http://localhost:5173
       E2E_SCANNER_URL: http://localhost:5174
       E2E_STAFF_EMAIL: ${{ secrets.E2E_STAFF_EMAIL }}
@@ -161,6 +174,7 @@ jobs:
       # (22 s–9 min). Webbläsaren cachas på Playwright-versionen; systempaketen
       # (apt) ligger utanför cachen och installeras därför alltid.
       - name: Get Playwright version
+        if: matrix.suite != 'system-expiry'
         id: playwright-version
         run: |
           version=$(pnpm --filter @tickets/e2e-tests exec playwright --version | awk '{print $2}')
@@ -168,6 +182,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright browsers
+        if: matrix.suite != 'system-expiry'
         id: playwright-cache
         uses: actions/cache@v4
         with:
@@ -175,11 +190,11 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
 
       - name: Install Playwright's browser
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        if: matrix.suite != 'system-expiry' && steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @tickets/e2e-tests exec playwright install --with-deps chromium
 
       - name: Install Playwright's system dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        if: matrix.suite != 'system-expiry' && steps.playwright-cache.outputs.cache-hit == 'true'
         run: pnpm --filter @tickets/e2e-tests exec playwright install-deps chromium
 
       - name: Build booking-api
@@ -240,9 +255,11 @@ jobs:
           exit 1
 
       - name: Build the web app
+        if: matrix.suite != 'system-expiry'
         run: pnpm --filter @tickets/web run build
 
       - name: Start the web app in the background
+        if: matrix.suite != 'system-expiry'
         # Porten sätts i package.json:s "preview"-skript, inte här: pnpm
         # forwardar inte "-- --port 5173" rent till Vite (ekar det som
         # "vite preview -- --port 5173", och Vite ignorerar allt efter
@@ -251,6 +268,7 @@ jobs:
         run: pnpm --filter @tickets/web run preview > web.log 2>&1 &
 
       - name: Wait for the web app to respond
+        if: matrix.suite != 'system-expiry'
         run: |
           for i in $(seq 1 30); do
             if curl -sf http://localhost:5173 > /dev/null; then exit 0; fi
@@ -261,14 +279,17 @@ jobs:
           exit 1
 
       - name: Build the scanner app
+        if: matrix.suite != 'system-expiry'
         env:
           VITE_AUTH0_CLIENT_ID: ${{ secrets.AUTH0_SCANNER_CLIENT_ID }}
         run: pnpm --filter @tickets/scanner run build
 
       - name: Start the scanner app in the background
+        if: matrix.suite != 'system-expiry'
         run: pnpm --filter @tickets/scanner run preview > scanner.log 2>&1 &
 
       - name: Wait for the scanner app to respond
+        if: matrix.suite != 'system-expiry'
         run: |
           for i in $(seq 1 30); do
             if curl -sf http://localhost:5174 > /dev/null; then exit 0; fi
@@ -279,10 +300,12 @@ jobs:
           exit 1
 
       - name: Run the e2e suite
-        run: pnpm --filter @tickets/e2e-tests run test:e2e
+        if: matrix.suite != 'system-expiry'
+        run: pnpm --filter @tickets/e2e-tests run ${{ matrix.suite == 'fast' && 'test:e2e:fast' || 'test:e2e:slow' }}
 
       - name: Run system tests
-        run: pnpm --filter @tickets/system-tests run test:system
+        if: matrix.suite != 'e2e-expiry'
+        run: pnpm --filter @tickets/system-tests run ${{ matrix.suite == 'fast' && 'test:system:fast' || 'test:system:slow' }}
 
       # Utan detta syns bara testsidans fel, inte vad tjänsterna loggade (t.ex. varför en order inte blev betald).
       - name: Print service logs on failure
@@ -295,10 +318,10 @@ jobs:
           done
 
       - name: Upload Playwright report on failure
-        if: failure()
+        if: failure() && matrix.suite != 'system-expiry'
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.suite }}
           # Playwrights DEFAULT utdatakatalog är "test-results/" (traces,
           # skärmdumpar, error-context.md) — "playwright-report/" skapas
           # bara av HTML-reportern, som inte är konfigurerad här. Fel

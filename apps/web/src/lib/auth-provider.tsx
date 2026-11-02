@@ -51,6 +51,8 @@ export function AppAuthProvider({ children }: { children: ReactNode }): JSX.Elem
       authorizationParams={{
         redirect_uri: window.location.origin,
         audience: AUTH0_AUDIENCE,
+        // Inloggningssidan på svenska (docs/plan.md 8.2). Utseendet i övrigt ställs in i Auth0.
+        ui_locales: 'sv',
       }}
       onRedirectCallback={handleRedirectCallback}
       // docs/plan.md "Offline": "mina biljetter" must still work after

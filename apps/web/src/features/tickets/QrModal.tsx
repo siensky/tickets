@@ -19,7 +19,8 @@ export function QrModal({
 }): JSX.Element {
   return (
     <Modal open={open} onClose={onClose} title={title}>
-      <div className="flex flex-col items-center gap-4">
+      {/* ph-no-capture: QR-koden spelas aldrig in (docs/plan.md 8.4) */}
+      <div className="ph-no-capture flex flex-col items-center gap-4">
         <div className="rounded-box bg-white p-4">
           <QRCodeSVG
             value={qrToken}

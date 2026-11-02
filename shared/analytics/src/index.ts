@@ -13,6 +13,11 @@ export interface EventContext {
   readonly category: string;
 }
 
+export interface ChallengeContext {
+  readonly event_id: string;
+  readonly challenge_type: 'pow' | 'turnstile';
+}
+
 /** `aborted` = avbröt hos Stripe; `cancelled` = ordern annullerades efter återbetalning. */
 export type CheckoutReturnStatus = 'paid' | 'refunded' | 'cancelled' | 'timeout' | 'aborted';
 
@@ -23,6 +28,9 @@ export type ClientEvents = {
   readonly search_performed: Record<string, never>;
   readonly category_filtered: { readonly category: string };
   readonly queue_joined: EventContext;
+  /** Botskyddet (docs/plan.md 8.5): `queue/join` svarade 428. `pow` löses osynligt, `turnstile` syns. */
+  readonly challenge_shown: ChallengeContext;
+  readonly challenge_passed: ChallengeContext;
   readonly queue_admitted: EventContext & { readonly wait_seconds: number };
   readonly queue_left: EventContext & { readonly wait_seconds: number };
   readonly seats_selected: EventContext & { readonly seat_count: number };

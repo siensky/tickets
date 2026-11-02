@@ -7,6 +7,7 @@ import { QueueTokenInvalidError, QueueTokenNotAdmittedError } from '@tickets/dom
 import { eventIdParamSchema } from '@tickets/schemas';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { authenticateQueueToken, type QueueAuthDeps } from '../services/queue-auth-service.js';
+import { enforceJoinChallenge, type ChallengeDeps } from '../services/challenge-service.js';
 import {
   getQueueStatus,
   joinQueue,
@@ -16,7 +17,7 @@ import {
 // Återexporterade åt routes/*.ts — routes får bara bero på controllers,
 // inte direkt på services-lagret (docs/rules.md §1,
 // boundaries/dependencies i eslint.config.js).
-export type { QueueAuthDeps, QueueServiceDeps };
+export type { ChallengeDeps, QueueAuthDeps, QueueServiceDeps };
 
 const QUEUE_TOKEN_HEADER = 'x-queue-token';
 
@@ -37,11 +38,31 @@ function parseEventIdParam(request: FastifyRequest): string {
   return parsed.data.eventId;
 }
 
-export function createJoinQueueHandler(deps: QueueServiceDeps) {
+function readHeader(request: FastifyRequest, name: string): string | undefined {
+  const value = request.headers[name];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export function createJoinQueueHandler(deps: QueueServiceDeps & { challenge: ChallengeDeps }) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const eventId = parseEventIdParam(request);
-    const result = await joinQueue(deps, { eventId });
-    reply.code(201).send(result);
+    const reservation = await enforceJoinChallenge(deps.challenge, {
+      eventId,
+      ip: request.ip,
+      userAgent: readHeader(request, 'user-agent'),
+      bypass: readHeader(request, 'x-challenge-bypass'),
+      proof: {
+        powChallenge: readHeader(request, 'x-pow-challenge'),
+        powSolution: readHeader(request, 'x-pow-solution'),
+        turnstileToken: readHeader(request, 'x-turnstile-token'),
+      },
+    });
+    try {
+      reply.code(201).send(await joinQueue(deps, { eventId }));
+    } catch (error) {
+      await reservation.release();
+      throw error;
+    }
   };
 }
 

@@ -11,7 +11,7 @@ Snabb checklista + kända fallgropar. Läs detta INNAN nästa lasttestkörning.
 ## Förbättringar som måste göras (prioritetsordning)
 
 1. **Fixa Loki/Alloy-autentiseringen.** `alloy` får `401 Unauthorized: no
-   org id` på VARJE loggbatch mot Loki — NOLL loggar har sparats någon
+org id` på VARJE loggbatch mot Loki — NOLL loggar har sparats någon
    gång under hela lasttestningen, trots att Fas 4 (observability) är
    markerad klar. Sätt `X-Scope-OrgID` i Alloys `loki.write`-config
    (`infra/terraform/observability.tf`), eller stäng av Lokis
@@ -53,28 +53,34 @@ Snabb checklista + kända fallgropar. Läs detta INNAN nästa lasttestkörning.
    stor körning. **Återställ efteråt** (ersätter `STRIPE_WEBHOOK_SECRET` med dess secretKeyRef och tar bort
    resten; körbar version i `.github/workflows/tmp-clear-loadtest-overrides.yml`):
    ```sh
+
+   ```
+
 IDX=$(kubectl get deploy booking-api -n ticketing -o json | jq '.spec.template.spec.containers[0].env | map(.name) | index("STRIPE_WEBHOOK_SECRET")')
 kubectl patch deploy booking-api -n ticketing --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/$IDX\",\"value\":{\"name\":\"STRIPE_WEBHOOK_SECRET\",\"valueFrom\":{\"secretKeyRef\":{\"name\":\"tickets-app-secrets\",\"key\":\"stripe-webhook-secret\"}}}}]"
 kubectl set env deployment/booking-api -n ticketing STRIPE_HOST- STRIPE_PORT- RATE_LIMIT_ALLOWLISTED_IPS-
-   ```
-   INTE `kubectl apply -f` på base-filen (den har `image: …:latest`). Och INTE
-   `kubectl set env --from=secret/…`: det namnger variabeln efter nyckeln
-   (`stripe-webhook-secret`) i stället för `STRIPE_WEBHOOK_SECRET`.
-   **Lämnas överskrivningen kvar failar nästa deploy** (CI:s `k8s-dry-run` ger
-   "valueFrom may not be specified when value is not empty").
+
+````
+INTE `kubectl apply -f` på base-filen (den har `image: …:latest`). Och INTE
+`kubectl set env --from=secret/…`: det namnger variabeln efter nyckeln
+(`stripe-webhook-secret`) i stället för `STRIPE_WEBHOOK_SECRET`.
+**Lämnas överskrivningen kvar failar nästa deploy** (CI:s `k8s-dry-run` ger
+"valueFrom may not be specified when value is not empty").
 1. **`terraform.tfvars`**: `demo_node_count` och `loadgen_node_count` måste stå
-   för vad som FAKTISKT finns i molnet, annars tar nästa `terraform apply`
-   (även med `-target` för något helt annat) bort dem för att stämma av mot
-   default (`0`). Kolla verkligheten först: `terraform output -json loadgen_ipv4s demo_worker_ipv4s`.
+för vad som FAKTISKT finns i molnet, annars tar nästa `terraform apply`
+(även med `-target` för något helt annat) bort dem för att stämma av mot
+default (`0`). Kolla verkligheten först: `terraform output -json loadgen_ipv4s demo_worker_ipv4s`.
 2. **Rate limiter-allowlistning** måste matcha de AKTUELLA loadgen-IP:erna:
-   ```sh
-   kubectl set env deployment/booking-api -n ticketing RATE_LIMIT_ALLOWLISTED_IPS="<ip1>,<ip2>"
-   ```
-   Glöm inte ta bort den igen efteråt (`RATE_LIMIT_ALLOWLISTED_IPS-`).
-3. **`queue_admission_rate_per_minute`** (config-tabell, shard 0):
-   - normal-sale: ~3600 (precis över 56/s)
-   - spike-sale: betydligt högre, min. 24000 (precis över toppens 337/s) —
-     annars ackumuleras en obegränsad kö redan i första toppen.
+```sh
+kubectl set env deployment/booking-api -n ticketing RATE_LIMIT_ALLOWLISTED_IPS="<ip1>,<ip2>"
+````
+
+Glöm inte ta bort den igen efteråt (`RATE_LIMIT_ALLOWLISTED_IPS-`). 3. **`queue_admission_rate_per_minute`** (config-tabell, shard 0):
+
+- normal-sale: ~3600 (precis över 56/s)
+- spike-sale: betydligt högre, min. 24000 (precis över toppens 337/s) —
+  annars ackumuleras en obegränsad kö redan i första toppen.
+
 4. **Event måste vara nollställt** (`reset-sale`) innan en ny körning —
    kör `generate-sale-report` INNAN `reset-sale`, aldrig efter (se nedan).
 5. **k6 måste faktiskt vara installerat** på loadgen-VM:erna — se cloud-init-
@@ -155,6 +161,7 @@ Verifiera med `cloud-init status --long` — om `status: error` med
 `generate-sale-report` läser BÅDE k6:s `--summary-export`-fil OCH
 `orders`/`tickets`-tabellerna i DB. `reset-sale` RADERAR de tabellraderna.
 Kör alltså ALLTID i denna ordning:
+
 1. `k6 run --summary-export=/tmp/k6-summary.json ...`
 2. vänta tills RabbitMQ-kön är tom (`rabbitmqctl list_queues name messages`)
 3. `generate-sale-report -- <eventId> <scenario> /tmp/k6-summary.json <sekunder> /tmp/report.json`
@@ -167,6 +174,7 @@ borta.
 
 Kräver port-forward + env (`DATABASE_URL_SHARD_0`, `DATABASE_URL_SHARD_1`,
 `REDIS_URL`) — se `.env.example` för formatet. Lösenord hämtas live:
+
 ```sh
 kubectl port-forward -n data svc/postgres-shard-0 5432:5432 &
 kubectl port-forward -n data svc/postgres-shard-1 5452:5432 &
@@ -262,6 +270,7 @@ betygsgrundande testerna har nu giltiga rapporter. 2026-10-28, klart.
    repliker + högre CPU-gräns precis innan ett lasttest, skala tillbaka
    till 1 efteråt — samma mönster som loadgen/demo-workers (temporär
    kapacitet för testets skull, inte en permanent arkitekturändring):
+
    ```sh
    kubectl scale deployment/payment-mock -n ticketing --replicas=4
    # ... kör testet ...
@@ -281,6 +290,7 @@ betygsgrundande testerna har nu giltiga rapporter. 2026-10-28, klart.
    gissningar.
 
 ### Att göra innan nästa körning
+
 - [ ] Fixa Loki/Alloy-autentiseringen (INTE gjort än — nästa körning har
       fortfarande ingen loggdata att felsöka med)
 - [x] Skala `payment-mock` statiskt till 4 repliker/500m CPU (gjort) —
