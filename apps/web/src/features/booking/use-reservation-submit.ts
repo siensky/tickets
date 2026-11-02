@@ -7,7 +7,9 @@
 import { useMutation } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { track } from '../../lib/analytics.js';
 import { ApiError, createReservation } from '../../lib/api-client.js';
+import { useEventContext } from '../analytics/use-event-context.js';
 
 function describeError(error: Error | null): string | undefined {
   if (error === null) {
@@ -25,12 +27,18 @@ export function useReservationSubmit(
   seatIds: readonly string[],
 ): { reserve: () => void; isReserving: boolean; errorMessage: string | undefined } {
   const navigate = useNavigate();
+  const eventContext = useEventContext(eventId);
   const selectionKey = [...seatIds].sort().join(',');
   const idempotencyKey = useMemo(() => crypto.randomUUID(), [selectionKey]);
 
   const mutation = useMutation({
     mutationFn: () => createReservation(eventId, queueToken ?? '', seatIds, idempotencyKey),
-    onSuccess: (result) => navigate(`/events/${eventId}/reservations/${result.reservationId}`),
+    onSuccess: (result) => {
+      if (eventContext !== undefined) {
+        track('reservation_created', { ...eventContext, seat_count: seatIds.length });
+      }
+      return navigate(`/events/${eventId}/reservations/${result.reservationId}`);
+    },
   });
 
   return {

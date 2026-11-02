@@ -11,6 +11,7 @@ import { Card } from '../components/ui/Card.js';
 import { Container } from '../components/ui/Container.js';
 import { ErrorState } from '../components/ui/ErrorState.js';
 import { Skeleton } from '../components/ui/Skeleton.js';
+import { useTrackEventViewed } from '../features/analytics/use-track-event-viewed.js';
 import { isBookable } from '../features/events/AvailabilityBadge.js';
 import { EventHero } from '../features/events/EventHero.js';
 import { EventInfo } from '../features/events/EventInfo.js';
@@ -85,6 +86,8 @@ export function EventPage(): JSX.Element {
     refetchInterval: (query) =>
       query.state.data?.availability === 'opens_soon' ? 5000 : false,
   });
+
+  useTrackEventViewed(eventQuery.data);
 
   if (eventQuery.isError) {
     return (

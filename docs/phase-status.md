@@ -3,6 +3,14 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Fas 7, steg 8–10 — PostHog, scanner, dokumentation (`feature/fas7-extra`)
+
+- **PostHog (7.7):** `shared/analytics` = typad katalog (`ClientEvents`/`ServerEvents`) + `createTracker(null)` som är no-op; `/server` = `posthog-node` med `shutdown(5000)` och `POSTHOG_ENABLED`. Webb: `lib/analytics.ts` (cookielöst `persistence: 'memory'` tills samtycke, flaggor först efter samtycke, `autocapture` av, `before_send` rensar `code`/`state`/`q` ur URL:er), `lib/consent.ts`, `features/analytics/*`. Hookarna är orörda: händelserna skickas från komponenter (`use-queue-analytics` m.fl.). Server: `payment-analytics.ts` anropas efter commit och bara av den leverans som gjorde jobbet (`refundAndNotify` returnerar `true` bara när statusen flippades). `posthog-node` måste stå i varje tjänsts `dependencies` (tsup håller det externt). e2e: `helpers/posthog.ts` fångar `/ingest`; PostHog filtrerar Playwright som bot, därför skrivs `navigator.webdriver`/`userAgentData` över och `playwright.config.ts` sätter en vanlig user-agent.
+- **Scanner (7.8, E7, F7):** `apps/scanner` (port 5174), `POST /scans` (permission först, sedan body; `FOR SHARE` på biljettraden; alltid 200 med `result`), `ticket_scans` från steg 5. Pact-kontrakt `scanner → booking-api` (provider-states i `provider-states.ts`). `scanner.spec` seedar biljetten med SQL och använder en fejkad kamera (canvas-ström med riktig QR, `helpers/fake-camera.ts`); den och F7 kräver Auth0-staffkontot och körs första gången i CI. Samma Worker-script som apex serverar scannern (`PREFIX`), `POSTHOG_PROXY=true` bara på apex.
+- **Dokumentation (7.12):** README (engelska), `architecture.md`, ADR 0006–0011, runbook (PostHog, Biljettscannern, Loki, Worker).
+- **Manuellt kvar (användaren):** PostHog-konto/flagga/secrets, Auth0 Scanner-app + roll staff + secrets (`AUTH0_SCANNER_CLIENT_ID`, `E2E_STAFF_EMAIL`, `E2E_STAFF_PASSWORD`, `VITE_POSTHOG_KEY`, `POSTHOG_KEY`), `terraform apply` (scanner-Worker och `scan.<domän>`), prov på riktig telefon, granskning av README.
+- **Utöver planen:** `@tanstack/react-query` (samma version som webben) i scannern för eventlistan; `core-js: false` i `pnpm-workspace.yaml` (posthog-js transitiv postinstall).
+
 ## Fas 7, steg 7 — UI (`feature/fas7-ui`)
 
 - **Designsystem:** Tailwind 4 med Preflight + daisyUI 5, temat `tikknet` i `shared/ui-theme/theme.css` (bara ljust). `components/ui` (Button, Badge, Alert, Card, Modal på native `<dialog>`, …), `components/layout` (AppShell, Navbar med drawer, OfflineBanner). `lib/format.ts` är enda platsen för `Intl`. `success` (grön) klarar bara 3:1, så text läggs aldrig på grön yta: Badge/Alert använder prick/kant (kontrasttestet bevakar det).
@@ -25,7 +33,7 @@ Läs båda innan en ny fas påbörjas.
 - `tests/load/deploy-under-load.js`: egen profil (10 iterationer/s i 5 min, 1 stol per försök så eventet inte säljer slut), 409 räknas som korrekt svar. Thresholds: `http_req_failed rate==0`, `dropped_iterations count==0`, `checks rate==1`, `completed_bookings count>0` (de två sista utöver planen, mot falskt "0 fel").
 - Deployen under beviset är `kubectl rollout restart deployment/booking-api` ×2, inte en merge genom pipelinen (literal `STRIPE_WEBHOOK_SECRET` under `loadtest-mode on` failar `kubectl apply`). Beslut av användaren, motivering i `docs/forsvar.md`. `loadtest-mode.sh` är oförändrat.
 - Körordning i `docs/runbook.md` "Bevis: deploy utan nertid". Serverbeviset läses som rå `sum(nginx_ingress_controller_requests{status=~"5..", service!="metrics-blackhole"})` före/efter.
-- `docs/evidence/zero-downtime.md` är en mall: resultatrutorna fylls i av användaren efter körningen. Beviset är ALDRIG körd än.
+- `docs/evidence/zero-downtime.md` är en mall: resultatrutorna fylls i av användaren efter körningen. Beviset kördes 30/10 efter merge av branch C: 0 fel, se `docs/evidence/zero-downtime.md`.
 - **PÅMINNELSE:** beviset körs när branch C (`fas7-ui`, steg 7) är **mergad**, före försvaret 4/11 (ändrat av användaren från 7.16:s ordning, som kräver verifiering före nästa branch). Steg 3 är [VG] och är inte klart förrän `docs/evidence/zero-downtime.md` är ifylld.
 
 ## Fas 7, steg 2 — mätbarhet (`feature/fas7-matbarhet`)

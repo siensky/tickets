@@ -12,7 +12,15 @@ import {
   setDirectAdmitLimit,
   storeQueueToken,
 } from '../helpers/queue.js';
+import { setConsent } from '../helpers/consent.js';
+import { capturePostHog } from '../helpers/posthog.js';
 import { E2E_EVENTS } from '../seed.js';
+
+// Samtycke förvalt (annars täcker bannern sidan); ingen trafik når PostHog (docs/plan.md 7.15).
+test.beforeEach(async ({ page }) => {
+  await setConsent(page, 'granted');
+  await capturePostHog(page);
+});
 
 const EVENT = E2E_EVENTS.a11y;
 

@@ -11,6 +11,7 @@
 #    rivs och kan hamna hos någon annan, som då skulle kringgå botskyddet.
 #  - STRIPE_HOST/STRIPE_PORT/STRIPE_WEBHOOK_SECRET → payment-mock: produktion kör
 #    riktigt Stripe-testläge, mocken finns för att inte skicka 50 000 försök till Stripe.
+#  - POSTHOG_ENABLED=false (booking-api + scheduler-worker): annars fylls analysdatan av k6-trafik.
 #  - queue_admission_rate_per_minute och payment-mock-repliker.
 #
 # Fallgropar: `off` får INTE använda `kubectl set env --from=secret/…` (det namnger
@@ -61,9 +62,10 @@ mode_on() {
   [[ -n $mock_secret ]] || { echo "payment-mock-webhook-secret saknas eller är tom" >&2; exit 1; }
   # Allt i en enda ändring (en rollout). Hemligheten går via stdin, aldrig som argument
   # (syns annars i processlistan).
-  printf 'STRIPE_WEBHOOK_SECRET=%s\nSTRIPE_HOST=%s\nSTRIPE_PORT=%s\nRATE_LIMIT_ALLOWLISTED_IPS=%s\n' \
+  printf 'STRIPE_WEBHOOK_SECRET=%s\nSTRIPE_HOST=%s\nSTRIPE_PORT=%s\nRATE_LIMIT_ALLOWLISTED_IPS=%s\nPOSTHOG_ENABLED=false\n' \
     "$mock_secret" "$MOCK_HOST" "$MOCK_PORT" "$ips" \
     | kubectl set env deployment/booking-api -n "$NAMESPACE" --env=- >/dev/null
+  kubectl set env deployment/scheduler-worker -n "$NAMESPACE" POSTHOG_ENABLED=false >/dev/null
   kubectl scale deployment/payment-mock -n "$NAMESPACE" --replicas="$LOADTEST_MOCK_REPLICAS"
   set_admission_rate "$rate"
   kubectl rollout status deployment/booking-api -n "$NAMESPACE" --timeout=300s
@@ -92,7 +94,8 @@ mode_off() {
   if [[ $has_literal == true ]]; then
     kubectl patch deploy booking-api -n "$NAMESPACE" --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/$idx\",\"value\":{\"name\":\"STRIPE_WEBHOOK_SECRET\",\"valueFrom\":{\"secretKeyRef\":{\"name\":\"tickets-app-secrets\",\"key\":\"stripe-webhook-secret\"}}}}]"
   fi
-  kubectl set env deployment/booking-api -n "$NAMESPACE" STRIPE_HOST- STRIPE_PORT- RATE_LIMIT_ALLOWLISTED_IPS- >/dev/null
+  kubectl set env deployment/booking-api -n "$NAMESPACE" STRIPE_HOST- STRIPE_PORT- RATE_LIMIT_ALLOWLISTED_IPS- POSTHOG_ENABLED- >/dev/null
+  kubectl set env deployment/scheduler-worker -n "$NAMESPACE" POSTHOG_ENABLED- >/dev/null
   kubectl scale deployment/payment-mock -n "$NAMESPACE" --replicas="$NORMAL_MOCK_REPLICAS"
   set_admission_rate "$DEFAULT_ADMISSION_RATE"
   kubectl rollout status deployment/booking-api -n "$NAMESPACE" --timeout=300s

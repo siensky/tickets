@@ -13,6 +13,7 @@
  * biljetter utan att någonsin skriva händelsen som får
  * notification-worker att skicka bekräftelsemejlet.
  */
+import type { ServerAnalytics } from '@tickets/analytics/server';
 import {
   getPoolForEvent,
   isUniqueViolation,
@@ -43,10 +44,12 @@ import {
   releaseConflictedSeat,
 } from '../repositories/reservation-repository.js';
 import { getTicketedSeatIds, insertTicket } from '../repositories/tickets-repository.js';
+import { trackPaymentSucceeded } from './payment-analytics.js';
+import type { OrderForPayment } from '../types/payment.js';
 import { createQrToken } from './qr-token.js';
 import {
-  refundAndNotify,
   refundSeatsAndNotify,
+  refundWholeOrder,
   type RefundedSeat,
 } from './payment-refund-service.js';
 
@@ -62,6 +65,7 @@ export interface PaymentConsumerDeps {
   readonly qrTokenSecret: string;
   readonly logger: Logger;
   readonly oversellMetrics: OversellMetrics;
+  readonly analytics: ServerAnalytics;
 }
 
 /**
@@ -97,7 +101,13 @@ export function parsePaymentSucceededPayload(payload: unknown): PaymentSucceeded
 type ProcessOutcome =
   | { readonly kind: 'duplicate' }
   | { readonly kind: 'refund_needed' }
-  | { readonly kind: 'converted'; readonly refundedSeats: readonly RefundedSeat[] };
+  | {
+      readonly kind: 'converted';
+      readonly refundedSeats: readonly RefundedSeat[];
+      readonly userId: string;
+      readonly totalCents: number;
+      readonly ticketCount: number;
+    };
 
 export async function processPaymentSucceeded(
   deps: PaymentConsumerDeps,
@@ -113,10 +123,17 @@ export async function processPaymentSucceeded(
     convertReservationOrFlagRefund(client, deps, payload, messageId),
   );
   if (outcome.kind === 'refund_needed') {
-    await refundAndNotify(deps.stripe, pool, payload);
+    await refundWholeOrder(deps, pool, payload);
     return;
   }
   if (outcome.kind === 'converted') {
+    // Efter commit och bara i den leverans som konverterade: en dubbel webhook hamnar i
+    // 'duplicate' nedan och ger aldrig en andra händelse.
+    await trackPaymentSucceeded(deps, payload, {
+      userId: outcome.userId,
+      seatCount: outcome.ticketCount,
+      totalCents: outcome.totalCents,
+    });
     if (outcome.refundedSeats.length > 0) {
       await refundSeatsAndNotify(deps.stripe, pool, payload, outcome.refundedSeats);
     }
@@ -135,7 +152,7 @@ export async function processPaymentSucceeded(
     // efter utgången reservation"). `refundAndNotify` är säker att köra
     // flera gånger (Stripes idempotencyKey + det villkorade UPDATE:et
     // nedan).
-    await refundAndNotify(deps.stripe, pool, payload);
+    await refundWholeOrder(deps, pool, payload);
     return;
   }
   if (currentStatus === 'succeeded') {
@@ -188,6 +205,22 @@ async function flagPaymentForRefund(
   return { kind: 'refund_needed' };
 }
 
+function convertedOutcome(
+  order: OrderForPayment,
+  ticketCount: number,
+  refundedSeats: readonly RefundedSeat[],
+): ProcessOutcome {
+  return {
+    kind: 'converted',
+    refundedSeats,
+    userId: order.userId,
+    // Bara det som faktiskt blev biljetter: återbetalade stolar räknas inte som köp.
+    totalCents:
+      order.totalCents - refundedSeats.reduce((sum, seat) => sum + seat.priceCents, 0),
+    ticketCount,
+  };
+}
+
 async function convertReservationOrFlagRefund(
   client: PoolClient,
   deps: PaymentConsumerDeps,
@@ -227,7 +260,11 @@ async function convertReservationOrFlagRefund(
     return flagPaymentForRefund(client, payload);
   }
 
-  const { ticketIds, refundedSeats } = await convertOrderAndMintTickets(client, deps, payload);
+  const { ticketIds, refundedSeats, order } = await convertOrderAndMintTickets(
+    client,
+    deps,
+    payload,
+  );
   if (ticketIds.length === 0) {
     // Every reserved seat lost the tickets_valid_seat_unique race —
     // pathological (a held/pending_payment reservation should make this
@@ -237,7 +274,7 @@ async function convertReservationOrFlagRefund(
     // still "pending" here, exactly what refundAndNotify's cancel expects.
     return flagPaymentForRefund(client, payload);
   }
-  return { kind: 'converted', refundedSeats };
+  return convertedOutcome(order, ticketIds.length, refundedSeats);
 }
 
 async function mintTicketsForSeats(
@@ -296,7 +333,7 @@ async function convertOrderAndMintTickets(
   client: PoolClient,
   deps: PaymentConsumerDeps,
   payload: PaymentSucceededPayload,
-): Promise<{ ticketIds: string[]; refundedSeats: RefundedSeat[] }> {
+): Promise<{ ticketIds: string[]; refundedSeats: RefundedSeat[]; order: OrderForPayment }> {
   const order = await getOrderForPayment(client, payload.eventId, payload.orderId);
   if (order === undefined) {
     throw new InternalError('Order not found while converting a paid reservation', {
@@ -308,7 +345,7 @@ async function convertOrderAndMintTickets(
   if (ticketIds.length === 0) {
     // Caller treats this as a full refund — order stays "pending" so its
     // own cancel transition still applies cleanly.
-    return { ticketIds, refundedSeats };
+    return { ticketIds, refundedSeats, order };
   }
 
   const orderMarked = await markOrderStatus(
@@ -336,5 +373,5 @@ async function convertOrderAndMintTickets(
     payload: confirmedPayload,
   });
 
-  return { ticketIds, refundedSeats };
+  return { ticketIds, refundedSeats, order };
 }

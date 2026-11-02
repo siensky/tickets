@@ -19,6 +19,7 @@ import type Stripe from 'stripe';
 import { insertOutboxEvent } from '../repositories/outbox-repository.js';
 import { markOrderStatus } from '../repositories/orders-repository.js';
 import { markPaymentStatus } from '../repositories/payments-repository.js';
+import { trackPaymentLateRefunded, type PaymentAnalyticsDeps } from './payment-analytics.js';
 
 export interface RefundedSeat {
   readonly seatId: string;
@@ -26,6 +27,9 @@ export interface RefundedSeat {
 }
 
 /**
+ * Returnerar `true` bara för den körning som faktiskt flippade statusen (och därmed skrev
+ * outbox-händelsen) — anroparen använder det för att skicka analytics exakt en gång.
+ *
  * Skyddsnätet (docs/plan.md "Betalning som landar efter utgången
  * reservation"): frysningen löste det normala fallet, men hann den gå
  * ut INNAN betalningen bekräftades är pengarna redan dragna och
@@ -43,12 +47,12 @@ export async function refundAndNotify(
   stripe: Stripe,
   pool: Pool,
   payload: PaymentSucceededPayload,
-): Promise<void> {
+): Promise<boolean> {
   await stripe.refunds.create(
     { payment_intent: payload.providerChargeRef },
     { idempotencyKey: `refund:${payload.paymentId}` },
   );
-  await withTransaction(pool, async (client) => {
+  return withTransaction(pool, async (client) => {
     // Villkorat UPDATE: gör hela funktionen säker att köra flera
     // gånger (se anropsplatsen i processPaymentSucceeded). Har ett
     // tidigare försök redan hunnit flippa statusen till "refunded"
@@ -61,7 +65,7 @@ export async function refundAndNotify(
       'refunded',
     );
     if (!statusFlipped) {
-      return;
+      return false;
     }
     await markOrderStatus(client, payload.eventId, payload.orderId, 'pending', 'cancelled');
     const refundedPayload: OrderRefundedPayload = {
@@ -75,6 +79,7 @@ export async function refundAndNotify(
       type: OUTBOX_EVENT_TYPES.ORDER_REFUNDED,
       payload: refundedPayload,
     });
+    return true;
   });
 }
 
@@ -120,4 +125,16 @@ export async function refundSeatsAndNotify(
       payload: seatRefundedPayload,
     });
   });
+}
+
+/** Full återbetalning + `payment_late_refunded`, bara från den körning som gjorde återbetalningen. */
+export async function refundWholeOrder(
+  deps: PaymentAnalyticsDeps & { readonly stripe: Stripe },
+  pool: Pool,
+  payload: PaymentSucceededPayload,
+): Promise<void> {
+  const didRefund = await refundAndNotify(deps.stripe, pool, payload);
+  if (didRefund) {
+    await trackPaymentLateRefunded(deps, payload);
+  }
 }

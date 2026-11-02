@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Verifier } from '@pact-foundation/pact';
+import { NOOP_SERVER_ANALYTICS } from '@tickets/analytics/server';
 import { createQueueTokenSecret, type Auth0Verifier } from '@tickets/auth';
 import type { Logger } from '@tickets/observability';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -21,6 +22,7 @@ import { registerEventRoutes } from '../../src/routes/events.js';
 import { registerMyTicketsRoutes } from '../../src/routes/my-tickets.js';
 import { registerOrderRoutes } from '../../src/routes/orders.js';
 import { registerReservationRoutes } from '../../src/routes/reservations.js';
+import { registerScanRoutes } from '../../src/routes/scans.js';
 import { registerSeatmapRoutes } from '../../src/routes/seatmap.js';
 import { registerWebhookRoutes } from '../../src/routes/webhooks.js';
 import {
@@ -35,12 +37,15 @@ import {
 import { createStateHandlers, USER_SUB, type StateContext } from './provider-states.js';
 
 const PACTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../pacts');
-const PACT_FILES = ['web-booking-api.json', 'payment-mock-booking-api.json'].map((name) =>
-  resolve(PACTS_DIR, name),
-);
+const PACT_FILES = [
+  'web-booking-api.json',
+  'payment-mock-booking-api.json',
+  'scanner-booking-api.json',
+].map((name) => resolve(PACTS_DIR, name));
 const LOGGER = SILENT_LOGGER as unknown as Logger;
 const WEBHOOK_SECRET = 'whsec_contract_provider';
 const CONSUMER_TOKEN = 'contract-user';
+const STAFF_TOKEN = 'contract-staff';
 
 // Auth0 ersätts av en fast tokenlista: kontraktet bryr sig om formen, inte om Auth0.
 const verifier: Auth0Verifier = {
@@ -48,7 +53,12 @@ const verifier: Auth0Verifier = {
     Promise.resolve(
       token === CONSUMER_TOKEN
         ? { kind: 'valid', payload: { sub: USER_SUB, email: 'buyer@example.test' } }
-        : { kind: 'invalid', reason: 'unknown contract token' },
+        : token === STAFF_TOKEN
+          ? {
+              kind: 'valid',
+              payload: { sub: 'auth0|contract-staff', permissions: ['scan:tickets'] },
+            }
+          : { kind: 'invalid', reason: 'unknown contract token' },
     ),
 };
 
@@ -112,7 +122,7 @@ describe('booking-api provider verification', () => {
     await Promise.all([stopTestDatabase(db), stopTestRedis(redis)]);
   });
 
-  it('uppfyller kontrakten från web och payment-mock', async () => {
+  it('uppfyller kontrakten från web, payment-mock och scanner', async () => {
     const queueTokenSecret = createQueueTokenSecret(
       'contract-test-secret-at-least-32-bytes!!',
     );
@@ -147,6 +157,7 @@ describe('booking-api provider verification', () => {
     );
     registerMyTicketsRoutes(app, { shardPools, logger: LOGGER }, verifier);
     registerOrderRoutes(app, { shardPools }, verifier);
+    registerScanRoutes(app, { shardPools, analytics: NOOP_SERVER_ANALYTICS }, verifier);
     registerWebhookRoutes(app, { shardPools, stripe, webhookSecret: WEBHOOK_SECRET });
     await app.listen({ port: 0, host: '127.0.0.1' });
     const address = app.server.address();

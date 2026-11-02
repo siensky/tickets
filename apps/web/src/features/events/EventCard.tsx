@@ -10,8 +10,10 @@ import { Card } from '../../components/ui/Card.js';
 import type { EventSummary } from '../../lib/api-client.js';
 import { CATEGORY_LABELS } from '../../lib/categories.js';
 import { formatPrice, getEventDateParts } from '../../lib/format.js';
+import { Badge } from '../../components/ui/Badge.js';
 import { AvailabilityBadge, isBookable } from './AvailabilityBadge.js';
 import { EventImage } from './EventImage.js';
+import { useSeatsLeftFlag } from './use-seats-left-flag.js';
 
 function DateBlock({ iso }: { iso: string }): JSX.Element {
   const { day, month } = getEventDateParts(iso);
@@ -25,6 +27,8 @@ function DateBlock({ iso }: { iso: string }): JSX.Element {
 
 export function EventCard({ event }: { event: EventSummary }): JSX.Element {
   const bookable = isBookable(event.availability);
+  // Feature-flaggan show_seats_left_badge (docs/plan.md 7.7): mäts mot event_viewed → queue_joined.
+  const showSeatsLeft = useSeatsLeftFlag() && bookable;
   return (
     <Card interactive className="flex h-full flex-col overflow-hidden p-0!">
       <EventImage event={event}>
@@ -39,6 +43,9 @@ export function EventCard({ event }: { event: EventSummary }): JSX.Element {
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <AvailabilityBadge availability={event.availability} />
+          {showSeatsLeft ? (
+            <Badge tone="ghost">{event.availableSeats} platser kvar</Badge>
+          ) : null}
           {event.minPriceCents === null ? null : (
             <span className="text-sm font-medium tabular-nums">
               från {formatPrice(event.minPriceCents)}

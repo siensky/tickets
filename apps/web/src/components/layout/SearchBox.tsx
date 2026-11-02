@@ -5,6 +5,7 @@
 import { Search } from 'lucide-react';
 import { useState, type FormEvent, type JSX } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { track } from '../../lib/analytics.js';
 
 export function SearchBox({
   initialQuery,
@@ -19,6 +20,9 @@ export function SearchBox({
   function handleSubmit(event: FormEvent): void {
     event.preventDefault();
     const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      track('search_performed', {});
+    }
     void navigate(trimmed.length > 0 ? `/?q=${encodeURIComponent(trimmed)}` : '/');
     onSubmitted?.();
   }

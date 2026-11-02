@@ -14,6 +14,7 @@ import { useQueueAdmission } from '../../hooks/use-queue-admission.js';
 import { ApiError, type QueueStatusResult } from '../../lib/api-client.js';
 import { ConnectionBanner } from './ConnectionBanner.js';
 import { QueuePosition } from './QueuePosition.js';
+import { useQueueAnalytics } from './use-queue-analytics.js';
 
 function Centered({ children }: { children: ReactNode }): JSX.Element {
   return <div className="flex flex-col items-center gap-6 py-6 text-center">{children}</div>;
@@ -71,6 +72,7 @@ export function QueueScreen({
 }): JSX.Element {
   const navigate = useNavigate();
   const { status, isJoining, error } = useQueueAdmission(eventId);
+  useQueueAnalytics(eventId, isJoining, status);
   const isAdmitted = status?.status === 'admitted';
   // Efter att kötoken löpt ut svarar servern 401/404 i stället för `not_found`; pollingen
   // behåller då gamla `waiting`-data. Det är "platsen har gått ut", inte en tappad anslutning.

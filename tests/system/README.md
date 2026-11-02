@@ -20,9 +20,10 @@ config-rad.
 | `f4-duplicate-webhook`  | Dubbel webhook ger en order och två biljetter                      |
 | `f5-reservation-expiry` | Reservation med 1 minuts hållning går ut (tar ca 1,5 min)          |
 | `f6-order-security`     | En annan användares order ger 404                                  |
+| `f7-scanning`           | Skanning: ok, redan skannad, fel event, 403 utan permission        |
 | `invariants`            | Invarianter över alla events systemtesterna skapat                 |
 
-F7 (skanning) tillkommer med scannern (Fas 7 steg 9).
+F7 kräver också personalkontot (`SYSTEMTEST_STAFF_EMAIL`/`SYSTEMTEST_STAFF_PASSWORD`, rollen staff).
 
 ## Köra lokalt
 
@@ -35,7 +36,8 @@ F7 (skanning) tillkommer med scannern (Fas 7 steg 9).
 4. Exportera Auth0-uppgifterna för den egna CI-appen "CI System Tests" (docs/plan.md 7.17):
    `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_CI_CLIENT_ID`, `AUTH0_CI_CLIENT_SECRET`,
    `AUTH0_TEST_USER_EMAIL`, `AUTH0_TEST_USER_PASSWORD`, `SYSTEMTEST_USER2_EMAIL`,
-   `SYSTEMTEST_USER2_PASSWORD`.
+   `SYSTEMTEST_USER2_PASSWORD`, och för F7 `SYSTEMTEST_STAFF_EMAIL`/`SYSTEMTEST_STAFF_PASSWORD`
+   (ett konto med rollen staff).
 5. `pnpm --filter @tickets/system-tests test:system`
 
 Valfria variabler: `SYSTEM_API_URL` (standard `http://localhost:3000`),

@@ -10,6 +10,8 @@ import { Button } from '../../components/ui/Button.js';
 import { Card } from '../../components/ui/Card.js';
 import type { MyTicket, MyTicketOrder } from '../../lib/api-client.js';
 import { formatEventDate, formatPrice } from '../../lib/format.js';
+import { useEventContext } from '../analytics/use-event-context.js';
+import { useTrackOnce } from '../analytics/use-track-once.js';
 import { QrModal } from './QrModal.js';
 
 const TICKET_STATUS_LABEL: Record<string, string> = {
@@ -26,12 +28,16 @@ const ORDER_STATUS_LABEL: Record<string, string> = {
 
 function TicketRow({
   ticket,
+  eventId,
   eventTitle,
 }: {
   ticket: MyTicket;
+  eventId: string;
   eventTitle: string;
 }): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
+  const eventContext = useEventContext(eventId, isOpen);
+  useTrackOnce('ticket_viewed', isOpen ? eventContext : undefined);
   const caption = `${ticket.sectionName}, rad ${ticket.row}, plats ${ticket.number}`;
   return (
     <li className="flex items-center justify-between gap-3 py-3">
@@ -83,7 +89,12 @@ export function TicketCard({ order }: { order: MyTicketOrder }): JSX.Element {
         </header>
         <ul className="divide-y divide-base-300">
           {order.tickets.map((ticket) => (
-            <TicketRow key={ticket.ticketId} ticket={ticket} eventTitle={order.eventTitle} />
+            <TicketRow
+              key={ticket.ticketId}
+              ticket={ticket}
+              eventId={order.eventId}
+              eventTitle={order.eventTitle}
+            />
           ))}
         </ul>
         <p className="mt-2 text-right text-sm text-muted tabular-nums">

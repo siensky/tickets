@@ -17,6 +17,7 @@ import { CheckoutReview } from '../features/checkout/CheckoutReview.js';
 import { CheckoutSteps } from '../features/checkout/CheckoutSteps.js';
 import { ReservationExpiredModal } from '../features/checkout/ReservationExpiredModal.js';
 import { useReservationCheckout } from '../features/checkout/use-reservation-checkout.js';
+import { track } from '../lib/analytics.js';
 import { getEvent, type ReservationView } from '../lib/api-client.js';
 import { isAuth0Configured } from '../lib/auth-provider.js';
 import { getStoredQueueToken } from '../lib/queue-token-storage.js';
@@ -68,6 +69,13 @@ function ActiveCheckout({
     if (!isAuthenticated) {
       void loginWithRedirect({ appState: { returnTo: window.location.pathname } });
       return;
+    }
+    if (eventQuery.data !== undefined) {
+      track('checkout_started', {
+        event_id: eventId,
+        category: eventQuery.data.category,
+        total_sek: reservation.totalCents / 100,
+      });
     }
     checkout.mutate();
   }

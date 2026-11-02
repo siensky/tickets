@@ -14,15 +14,17 @@
  * bevisar frontend/API-kontraktet, inte timer-schemaläggningen.
  *
  * Auth0-inloggningen automatiserar den RIKTIGA, hostade
- * Universal-Login-sidan (inget mockat) — jag har inte kunnat köra detta
- * steg mot en riktig tenant under utvecklingen, så selektorerna nedan
- * följer Auth0:s dokumenterade standardfält (`name="username"`,
- * `name="password"`, `button[type="submit"]`) men är overifierade tills
- * en riktig CI-körning bekräftar dem.
+ * Universal-Login-sidan (inget mockat), se helpers/auth0-login.ts — jag har inte
+ * kunnat köra detta steg mot en riktig tenant under utvecklingen, så selektorerna
+ * följer Auth0:s dokumenterade standardfält men är overifierade tills en riktig
+ * CI-körning bekräftar dem.
  */
 import { expect, test, type Page } from '@playwright/test';
 import { E2E_EVENTS } from '../seed.js';
 import { openSectionA, selectSeat } from '../helpers/booking-steps.js';
+import { loginViaAuth0, requireEnv } from '../helpers/auth0-login.js';
+import { setConsent } from '../helpers/consent.js';
+import { capturePostHog, type CapturedEvents } from '../helpers/posthog.js';
 import { passTheQueue } from '../helpers/queue.js';
 
 const EVENT = E2E_EVENTS.booking;
@@ -33,7 +35,11 @@ const APP_ORIGIN = new URL(process.env['E2E_BASE_URL'] ?? 'http://localhost:5173
 // artifact (traces/screenshots) was never actually reachable (wrong
 // path in e2e.yml, now fixed, but this gives a result in THIS run's
 // plain log too, no artifact download needed).
-test.beforeEach(({ page }) => {
+let postHogEvents: CapturedEvents;
+
+test.beforeEach(async ({ page }) => {
+  await setConsent(page, 'granted');
+  postHogEvents = await capturePostHog(page);
   page.on('console', (msg) => {
     process.stdout.write(`[browser:${msg.type()}] ${msg.text()}\n`);
   });
@@ -52,39 +58,6 @@ test.afterEach(async ({ page }, testInfo) => {
     process.stdout.write(`[on-failure] visible page text:\n${bodyText}\n`);
   }
 });
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (value === undefined || value === '') {
-    throw new Error(`${name} must be set to run this test`);
-  }
-  return value;
-}
-
-/** Fills in Auth0's real hosted Universal Login form and waits for the redirect back. */
-async function loginWithTestUser(page: Page): Promise<void> {
-  const email = requireEnv('E2E_AUTH0_TEST_USER_EMAIL');
-  const password = requireEnv('E2E_AUTH0_TEST_USER_PASSWORD');
-
-  await page.waitForURL((url) => url.origin !== APP_ORIGIN, { timeout: 15_000 });
-
-  const usernameField = page.locator('input[name="username"], input[name="email"]').first();
-  await usernameField.waitFor({ state: 'visible', timeout: 15_000 });
-  await usernameField.fill(email);
-
-  const passwordField = page.locator('input[name="password"]').first();
-  // "Identifier first" tenants show the username alone, then a SEPARATE
-  // screen for the password — submit once more if password isn't on
-  // the same screen yet.
-  if (!(await passwordField.isVisible().catch(() => false))) {
-    await page.locator('button[type="submit"]').first().click();
-    await passwordField.waitFor({ state: 'visible', timeout: 15_000 });
-  }
-  await passwordField.fill(password);
-  await page.locator('button[type="submit"]').first().click();
-
-  await page.waitForURL((url) => url.origin === APP_ORIGIN, { timeout: 20_000 });
-}
 
 async function reserveOneSeat(page: Page): Promise<void> {
   // Startsida → eventkort → eventsida → "Boka biljetter" → kön.
@@ -113,6 +86,11 @@ async function reserveOneSeat(page: Page): Promise<void> {
   await expect(page.getByText('Rad A, plats 1')).toBeVisible();
   await expect(page.getByRole('timer')).toBeVisible();
   await expect(page.getByText('Totalt')).toBeVisible();
+
+  // PostHog (docs/plan.md 7.7): bokningsflödet skickar sina händelser till /ingest.
+  await expect
+    .poll(() => postHogEvents.names(), { timeout: 15_000 })
+    .toEqual(expect.arrayContaining(['queue_joined', 'reservation_created']));
 }
 
 test('bokar en plats, loggar in och betalar: hela flödet fram till biljetten', async ({
@@ -121,7 +99,10 @@ test('bokar en plats, loggar in och betalar: hela flödet fram till biljetten', 
   await reserveOneSeat(page);
 
   await page.getByRole('button', { name: 'Logga in och betala' }).click();
-  await loginWithTestUser(page);
+  await loginViaAuth0(page, APP_ORIGIN, {
+    email: requireEnv('E2E_AUTH0_TEST_USER_EMAIL'),
+    password: requireEnv('E2E_AUTH0_TEST_USER_PASSWORD'),
+  });
 
   // Tillbaka på checkoutsidan, nu inloggad — knappens text byter när isAuthenticated blir true.
   const payButton = page.getByRole('button', { name: 'Betala med Stripe' });
@@ -132,6 +113,9 @@ test('bokar en plats, loggar in och betalar: hela flödet fram till biljetten', 
   // 302 till success_url med event_id och order_id (docs/plan.md 7.13 E6/E8). Betalningen är
   // redan schemalagd server-sidan (payment-mock skickar sin webhook automatiskt).
   await page.waitForURL((url) => url.pathname === '/checkout/success', { timeout: 10_000 });
+  await expect
+    .poll(() => postHogEvents.names(), { timeout: 15_000 })
+    .toContain('checkout_started');
 
   // Bekräftelsesidan pollar ordern och visar "klart" först när backend säger `paid`.
   await expect(page.getByRole('heading', { name: 'Tack för ditt köp!' })).toBeVisible({

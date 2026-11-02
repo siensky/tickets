@@ -12,6 +12,8 @@ declare module 'fastify' {
       readonly queueTokenId: string;
       readonly eventId: string;
     };
+    /** Auth0 `sub` för inloggad personal, satt av `createRequirePermission`. */
+    staffSub?: string;
     auth0User?: {
       readonly auth0Sub: string;
       readonly email: string;

@@ -3,10 +3,13 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App.js';
+import { initAnalytics } from './lib/analytics.js';
 import { AppAuthProvider } from './lib/auth-provider.js';
 import { queryClient } from './lib/query-client.js';
 import { registerServiceWorker } from './lib/service-worker-registration.js';
 import './styles/globals.css';
+
+initAnalytics();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

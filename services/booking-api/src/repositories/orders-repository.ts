@@ -149,3 +149,16 @@ export async function getOrderForUser(
     ticketCount: Number(row.ticket_count),
   };
 }
+
+/** Köparen bakom en order, för analytics (docs/plan.md 7.7). */
+export async function getOrderUserId(
+  pool: Pool,
+  eventId: string,
+  orderId: string,
+): Promise<string | undefined> {
+  const { rows } = await pool.query<{ user_id: string }>(
+    'SELECT user_id FROM orders WHERE event_id = $1 AND id = $2',
+    [eventId, orderId],
+  );
+  return rows[0]?.user_id;
+}

@@ -35,7 +35,9 @@ import { TooManyRequestsError } from '@tickets/domain';
 import type { FastifyInstance } from 'fastify';
 
 const STRIPE_WEBHOOK_PATH_PREFIX = '/webhooks/stripe';
-const EXEMPT_PATH_PREFIXES = ['/health/', '/metrics'];
+// /scans: grindarna sitter ofta bakom samma NAT-IP och routen är skyddad av auth
+// (docs/plan.md 7.13 E7).
+const EXEMPT_PATH_PREFIXES = ['/health/', '/metrics', '/scans'];
 
 export function registerRateLimitHook(
   app: FastifyInstance,

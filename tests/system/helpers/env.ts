@@ -32,7 +32,13 @@ export function authEnv(): {
   };
 }
 
-export function userCredentials(which: 1 | 2): { email: string; password: string } {
+export function userCredentials(which: 1 | 2 | 'staff'): { email: string; password: string } {
+  if (which === 'staff') {
+    return {
+      email: required('SYSTEMTEST_STAFF_EMAIL'),
+      password: required('SYSTEMTEST_STAFF_PASSWORD'),
+    };
+  }
   return which === 1
     ? {
         email: required('AUTH0_TEST_USER_EMAIL'),

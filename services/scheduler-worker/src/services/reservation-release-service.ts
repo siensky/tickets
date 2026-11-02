@@ -7,10 +7,12 @@
  * again, but a seat nobody asks for again still needs to come back on
  * sale — that's this job, for either reason a reservation went stale.
  */
+import type { ServerAnalytics } from '@tickets/analytics/server';
 import { withTransaction, type ShardPools } from '@tickets/db';
 import type { Logger } from '@tickets/observability';
 import type { Pool, PoolClient } from 'pg';
 import {
+  type ExpiredReservation,
   expireDueFrozenReservationsBatch,
   expireDueReservationsBatch,
   releaseSeatsForReservations,
@@ -23,22 +25,51 @@ import {
 // loop if reservations kept becoming due faster than they're drained.
 const MAX_BATCHES_PER_TICK = 20;
 
-type ExpireBatchFn = (client: PoolClient) => Promise<string[]>;
+type ExpireBatchFn = (client: PoolClient) => Promise<ExpiredReservation[]>;
 
-async function releaseOneBatch(pool: Pool, expireBatch: ExpireBatchFn): Promise<number> {
+async function releaseOneBatch(
+  pool: Pool,
+  expireBatch: ExpireBatchFn,
+): Promise<readonly ExpiredReservation[]> {
   return withTransaction(pool, async (client) => {
-    const expiredIds = await expireBatch(client);
-    await releaseSeatsForReservations(client, expiredIds);
-    return expiredIds.length;
+    const expired = await expireBatch(client);
+    await releaseSeatsForReservations(
+      client,
+      expired.map((reservation) => reservation.id),
+    );
+    return expired;
   });
 }
 
-async function drainForPool(pool: Pool, expireBatch: ExpireBatchFn): Promise<void> {
+/**
+ * Reservationen hör till en anonym kötoken (inloggning sker först vid checkout), så händelsen är
+ * personlös med kötoken-id som `distinct_id` (docs/plan.md 7.7). Skickas efter commit.
+ */
+function trackExpired(
+  analytics: ServerAnalytics,
+  expired: readonly ExpiredReservation[],
+): void {
+  for (const reservation of expired) {
+    analytics.track(
+      reservation.queueTokenId,
+      'reservation_expired',
+      { event_id: reservation.eventId },
+      { personless: true },
+    );
+  }
+}
+
+async function drainForPool(
+  pool: Pool,
+  expireBatch: ExpireBatchFn,
+  analytics: ServerAnalytics,
+): Promise<void> {
   for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
-    const released = await releaseOneBatch(pool, expireBatch);
-    if (released === 0) {
+    const expired = await releaseOneBatch(pool, expireBatch);
+    if (expired.length === 0) {
       return;
     }
+    trackExpired(analytics, expired);
   }
 }
 
@@ -50,6 +81,7 @@ export interface ReservationReleaseJob {
 export function startReservationReleaseJob(
   shardPools: ShardPools,
   logger: Logger,
+  analytics: ServerAnalytics,
   intervalMs = 5000,
 ): ReservationReleaseJob {
   let tickInFlight: Promise<void> | null = null;
@@ -57,8 +89,8 @@ export function startReservationReleaseJob(
   const runTick = async (): Promise<void> => {
     for (const pool of shardPools.pools) {
       try {
-        await drainForPool(pool, expireDueReservationsBatch);
-        await drainForPool(pool, expireDueFrozenReservationsBatch);
+        await drainForPool(pool, expireDueReservationsBatch, analytics);
+        await drainForPool(pool, expireDueFrozenReservationsBatch, analytics);
       } catch (error) {
         logger.warn({ error }, 'reservation release job failed, will retry next tick');
       }
