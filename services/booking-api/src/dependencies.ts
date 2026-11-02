@@ -3,6 +3,7 @@
  * rader/fil-gränsen) — rena konstruktionsfunktioner, ingen Fastify-
  * routing eller livscykel här.
  */
+import { createServerAnalyticsFromEnv, type ServerAnalytics } from '@tickets/analytics/server';
 import {
   createAuth0Verifier,
   createQueueTokenSecret,
@@ -36,6 +37,7 @@ export interface Dependencies {
   readonly rateLimitAllowlistedIps: ReadonlySet<string>;
   readonly businessMetrics: BusinessMetrics;
   readonly publicAssetBaseUrl: string;
+  readonly analytics: ServerAnalytics;
 }
 
 /**
@@ -101,5 +103,8 @@ export function loadDependencies(
     ),
     businessMetrics,
     publicAssetBaseUrl: readAssetBaseUrl(),
+    analytics: createServerAnalyticsFromEnv(process.env, (error) => {
+      logger.warn({ error }, 'posthog error');
+    }),
   };
 }

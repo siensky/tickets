@@ -1,3 +1,4 @@
+import type { ServerAnalytics } from '@tickets/analytics/server';
 import type { ShardPools } from '@tickets/db';
 import { createLogger } from '@tickets/observability';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,8 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   });
   return { promise, resolve };
 }
+
+const analytics = { track: vi.fn(), shutdown: vi.fn() } satisfies ServerAnalytics;
 
 describe('startReservationReleaseJob', () => {
   afterEach(() => {
@@ -25,7 +28,7 @@ describe('startReservationReleaseJob', () => {
     // pattern and rationale in shared/db/src/__tests__/transaction.test.ts.
     const shardPools = { pools: [failingPool, failingPool] } as unknown as ShardPools;
 
-    const job = startReservationReleaseJob(shardPools, logger, 1000);
+    const job = startReservationReleaseJob(shardPools, logger, analytics, 1000);
     await vi.advanceTimersByTimeAsync(1000);
 
     expect(warn).toHaveBeenCalled();
@@ -47,7 +50,9 @@ describe('startReservationReleaseJob', () => {
       if (sql.includes("status = 'active'")) {
         const ids = activeBatches[activeCall] ?? [];
         activeCall++;
-        return Promise.resolve({ rows: ids.map((id) => ({ id })) });
+        return Promise.resolve({
+          rows: ids.map((id) => ({ id, event_id: 'event-1', queue_token_id: `token-${id}` })),
+        });
       }
       return Promise.resolve({ rows: [] });
     });
@@ -58,7 +63,7 @@ describe('startReservationReleaseJob', () => {
     // already covered by the other tests in this file.
     const shardPools = { pools: [pool] } as unknown as ShardPools;
 
-    const job = startReservationReleaseJob(shardPools, logger, 1000);
+    const job = startReservationReleaseJob(shardPools, logger, analytics, 1000);
     await vi.advanceTimersByTimeAsync(1000);
     await job.stop();
 
@@ -75,7 +80,12 @@ describe('startReservationReleaseJob', () => {
     const query = vi.fn().mockImplementation((sql: string, params: unknown[]) => {
       if (sql.includes("status = 'pending_payment'")) {
         frozenCall++;
-        return Promise.resolve({ rows: frozenCall === 1 ? [{ id: 'frozen-res-1' }] : [] });
+        return Promise.resolve({
+          rows:
+            frozenCall === 1
+              ? [{ id: 'frozen-res-1', event_id: 'event-1', queue_token_id: 'token-frozen' }]
+              : [],
+        });
       }
       if (sql.includes('UPDATE seats')) {
         releasedSeatCalls.push(params);
@@ -88,11 +98,17 @@ describe('startReservationReleaseJob', () => {
     const pool = { connect: vi.fn().mockResolvedValue(client) };
     const shardPools = { pools: [pool] } as unknown as ShardPools;
 
-    const job = startReservationReleaseJob(shardPools, logger, 1000);
+    const job = startReservationReleaseJob(shardPools, logger, analytics, 1000);
     await vi.advanceTimersByTimeAsync(1000);
     await job.stop();
 
     expect(releasedSeatCalls).toContainEqual([['frozen-res-1']]);
+    expect(analytics.track).toHaveBeenCalledWith(
+      'token-frozen',
+      'reservation_expired',
+      { event_id: 'event-1' },
+      { personless: true },
+    );
   });
 
   it('stop() waits for an in-flight tick to finish before resolving', async () => {
@@ -105,7 +121,7 @@ describe('startReservationReleaseJob', () => {
     const pool = { connect: vi.fn().mockResolvedValue(client) };
     const shardPools = { pools: [pool] } as unknown as ShardPools;
 
-    const job = startReservationReleaseJob(shardPools, logger, 1000);
+    const job = startReservationReleaseJob(shardPools, logger, analytics, 1000);
     await vi.advanceTimersByTimeAsync(1000); // tick starts, stuck mid-batch
 
     let stopResolved = false;

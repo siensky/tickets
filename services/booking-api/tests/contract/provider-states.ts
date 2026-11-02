@@ -23,6 +23,8 @@ const WEBHOOK_RESERVATION_ID = '7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a';
 const WEBHOOK_SESSION_ID = 'cs_mock_contract';
 
 export const USER_SUB = 'auth0|contract-user';
+// Samma värde som apps/scanner/tests/contract/ids.ts.
+export const SCAN_QR_TOKEN = 'c0ffee00'.repeat(8);
 const SEAT_PRICE_CENTS = 39_500;
 
 export interface StateContext {
@@ -35,7 +37,7 @@ export interface StateContext {
 
 async function reset(ctx: StateContext): Promise<void> {
   await ctx.pool.query(
-    `TRUNCATE tickets, payments, orders, outbox, processed_messages, idempotency_keys,
+    `TRUNCATE ticket_scans, tickets, payments, orders, outbox, processed_messages, idempotency_keys,
               reservations, seats, events, venues, venue_sections, venue_seats, users CASCADE`,
   );
   await ctx.redis.flushdb();
@@ -138,6 +140,25 @@ async function seedPaidOrder(ctx: StateContext): Promise<void> {
   );
 }
 
+/** En betald order med en giltig biljett vars `qr_token` scannerns kontrakt skannar. */
+async function seedScannableTicket(
+  ctx: StateContext,
+  options: { alreadyScanned: boolean },
+): Promise<void> {
+  await seedPaidOrder(ctx);
+  await ctx.pool.query('UPDATE tickets SET qr_token = $1 WHERE event_id = $2', [
+    SCAN_QR_TOKEN,
+    EVENT_ID,
+  ]);
+  if (options.alreadyScanned) {
+    await ctx.pool.query(
+      `INSERT INTO ticket_scans (event_id, ticket_id, gate, scanned_by)
+       SELECT event_id, id, 'Grind A', 'auth0|contract-staff' FROM tickets WHERE event_id = $1`,
+      [EVENT_ID],
+    );
+  }
+}
+
 async function seedPendingWebhookPayment(ctx: StateContext): Promise<void> {
   const userId = randomUUID();
   await ctx.pool.query(
@@ -188,6 +209,12 @@ export function createStateHandlers(ctx: StateContext): Record<string, () => Pro
     }),
     'an active reservation with one seat exists': withReset(() => seedActiveReservation(ctx)),
     'a paid order with one ticket exists for the user': withReset(() => seedPaidOrder(ctx)),
+    'a valid ticket exists for scanning': withReset(() =>
+      seedScannableTicket(ctx, { alreadyScanned: false }),
+    ),
+    'an already scanned ticket exists': withReset(() =>
+      seedScannableTicket(ctx, { alreadyScanned: true }),
+    ),
     'a pending payment exists for the checkout session': withReset(() =>
       seedPendingWebhookPayment(ctx),
     ),

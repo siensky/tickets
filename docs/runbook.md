@@ -47,6 +47,13 @@ hittat live efter den första riktiga deployen. En vanlig R2 "Custom Domain" dö
    att även lägga till `Account | Workers R2 Storage | Edit` på samma token — det är
    overifierat om Workers Scripts-behörigheten ensam räcker för en R2-binding.
 
+Samma script (`workers/frontend-proxy.js`) körs också som `tickets-scanner-proxy` för
+`scan.<domän>` (bindingen `PREFIX=scanner`, docs/plan.md 7.8). På apex har den dessutom
+bindingen `POSTHOG_PROXY=true`, som vidarebefordrar `/ingest/static/*` till
+`eu-assets.i.posthog.com` och övriga `/ingest/*` till `eu.i.posthog.com` (docs/plan.md 7.7);
+inga andra sökvägar skickas vidare. Kontroll efter `terraform apply`:
+`curl -sI https://tikknet.se/ingest/static/array.js` ger 200, och `curl -s -o /dev/null -w '%{http_code}' https://tikknet.se/ingestx` ger inte ett svar från PostHog.
+
 ## cdn-Workern: `cdn.<domän>` (Fas 7)
 
 `cdn.<domän>` serveras av en egen Worker (`infra/terraform/workers/cdn-proxy.js`) som läser
@@ -111,12 +118,83 @@ lokalt enligt `tests/system/README.md`. De kräver en egen Auth0-applikation (sk
 4. GitHub-secrets: `AUTH0_CI_CLIENT_ID`, `AUTH0_CI_CLIENT_SECRET`, `SYSTEMTEST_USER2_EMAIL`,
    `SYSTEMTEST_USER2_PASSWORD`. Samma testkonto som e2e (`AUTH0_TEST_USER_EMAIL/PASSWORD`)
    används som användare 1.
+5. F7 (skanning) loggar in som personal via samma CI-app: lägg även `SYSTEMTEST_STAFF_EMAIL` och
+   `SYSTEMTEST_STAFF_PASSWORD` i `tests/system`-miljön (i CI återanvänds `E2E_STAFF_EMAIL`/
+   `E2E_STAFF_PASSWORD`, se "Biljettscannern" nedan).
 
 **Kontraktstester (Pact, utan broker)**: `pnpm test:contract` i repo-roten tömmer `pacts/`,
-kör konsumenttesterna (`web`, `payment-mock`, `notification-worker`, `realtime-gateway`) som
+kör konsumenttesterna (`web`, `scanner`, `payment-mock`, `notification-worker`, `realtime-gateway`) som
 skriver pact-filerna dit, och kör sedan providerverifieringen i `booking-api` (HTTP + meddelanden)
 och `scheduler-worker` (`ws:*`). Kräver Docker (Testcontainers). `pacts/` är genererat och
 gitignorerat. Kör även i CI (`test.yml`).
+
+## PostHog — produktanalys (Fas 7, steg 8)
+
+Koden fungerar utan nycklar (analytics är då av). Så här slår du på den (docs/plan.md 7.7):
+
+1. Skapa ett konto på **https://eu.posthog.com** (EU-regionen) och ett projekt, t.ex. "tikknet".
+2. Kopiera projektnyckeln: **Settings → Project → Project API key** (börjar med `phc_`, publik).
+3. Skapa flaggan: **Feature flags → New feature flag**, key `show_seats_left_badge`, release
+   condition **Roll out to 50 % of users**, spara och aktivera.
+4. GitHub-secrets (**Settings → Secrets and variables → Actions**): `VITE_POSTHOG_KEY` (byggs in i
+   webbappen) och `POSTHOG_KEY` (läggs i `tickets-app-secrets` och läses av booking-api och
+   scheduler-worker). Samma nyckel i båda.
+5. Efter en deploy: gör en bokning på `https://tikknet.se` (godkänn cookies i bannern) och kontrollera
+   **Activity → Live events**. Händelserna går via `https://tikknet.se/ingest` (Workern vidarebefordrar
+   bara `/ingest/*` till PostHog EU).
+6. Dashboards i PostHog (skapas för hand när de första händelserna kommit in):
+   - **Bokningstratt**: Insights → New insight → Funnel, sju steg `event_viewed` → `queue_joined` →
+     `queue_admitted` → `seats_selected` → `reservation_created` → `checkout_started` →
+     `payment_succeeded`, breakdown på property `category`.
+   - **Kö-avhopp**: trend av `queue_left`, med `wait_seconds` som genomsnitt.
+   - **Reservationer som löper ut**: trend av `reservation_expired`.
+   - Flaggans effekt: Experiments / flaggans insikt mot konverteringen `event_viewed → queue_joined`.
+
+Under `scripts/loadtest-mode.sh on` sätts `POSTHOG_ENABLED=false` på booking-api och scheduler-worker
+(och tas bort av `off`), så att k6-trafiken inte hamnar i analysdatan. Utan samtycke körs PostHog
+cookielöst och flaggan utvärderas inte; valet ändras via "Cookie-inställningar" i navbaren.
+
+## Biljettscannern (Fas 7, steg 9)
+
+Webbappen `apps/scanner` serveras på `https://scan.tikknet.se` (Workern `tickets-scanner-proxy`,
+prefixet `scanner/` i R2). Engångssteg (docs/plan.md 7.17):
+
+1. **Auth0 → Applications → Create Application → Single Page Web Applications**, namn "Scanner".
+   Under **Settings**: Allowed Callback URLs, Allowed Logout URLs och Allowed Web Origins =
+   `https://scan.tikknet.se, http://localhost:5174`. Kopiera **Client ID**.
+2. **Applications → APIs →** API:t (samma audience som webbappen) → **Settings → RBAC Settings**:
+   slå på **Enable RBAC** och **Add Permissions in the Access Token**.
+3. Samma API, fliken **Permissions**: lägg till `scan:tickets`.
+4. **User Management → Roles → Create Role** `staff`; fliken **Permissions → Add Permissions**: välj
+   API:t och `scan:tickets`.
+5. **User Management → Users**: skapa ett staff-testkonto (e-post + lösenord) och tilldela rollen
+   under **Roles → Assign Roles**. Tilldela även rollen till ditt riktiga konto för demon.
+6. GitHub-secrets: `AUTH0_SCANNER_CLIENT_ID`, `E2E_STAFF_EMAIL`, `E2E_STAFF_PASSWORD`.
+7. Efter merge: `terraform apply` (Workern och domänen `scan.tikknet.se`), därefter en deploy
+   (`deploy-frontend` bygger och laddar upp scannern). CORS för `https://scan.tikknet.se` sätts i
+   `infra/k8s/base/booking-api/deployment.yaml`.
+8. Prov på en riktig telefon: öppna `https://scan.tikknet.se`, logga in, välj event och grind och
+   skanna en riktig biljett (Mina biljetter → Visa QR-kod): första skanningen blir grön, andra röd
+   "Redan skannad".
+
+Anställda skapas manuellt i Auth0 och får rollen `staff`; alla med rollen får skanna alla events.
+Det finns ingen offline-kö och ingen manuell inmatning (biljettnummer visas inte för köparen).
+
+## Loki: felsökning (Fas 7)
+
+Symptom: Grafana Explore visar inga loggrader. Orsak vi har sett: Loki-chartet har `auth_enabled: true`
+som standard (multi-tenant) och Alloy skickar ingen `X-Scope-OrgID`, så varje loggbatch får `401`.
+Vi kör en tenant, så `loki.auth_enabled = false` i `helm_release.loki` (`observability.tf`).
+
+1. Alloys logg: `kubectl logs -n observability -l app.kubernetes.io/name=alloy --tail=50`. Finns
+   `401 Unauthorized: no org id` är auth påslaget igen.
+2. Grafana → Explore → datakälla Loki → `{namespace="ticketing"}` ska visa rader.
+3. Lokis labels-API ska lista `namespace` och `pod`:
+   `kubectl exec -n observability <loki-pod> -- wget -qO- http://localhost:3100/loki/api/v1/labels`.
+4. Larmet `AlloyLogEntriesDropped` (i `prometheusrule.yaml`) ska ta tyst loggförlust. Det kräver att
+   Alloys ServiceMonitor är påslagen; kontrollera måttet `loki_write_dropped_entries_total` i Prometheus.
+5. Applicera ändringar med
+   `terraform apply -target=helm_release.loki -target=helm_release.alloy`.
 
 ## Grafana-inloggning via Auth0 (Fas 4)
 

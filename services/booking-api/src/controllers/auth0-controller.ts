@@ -12,7 +12,7 @@
  * fungerar utan att en extra /userinfo-rundtripp behövs i
  * checkout-kritisk väg.
  */
-import { UnauthorizedError } from '@tickets/domain';
+import { ForbiddenError, UnauthorizedError } from '@tickets/domain';
 import type { Auth0Verifier } from '@tickets/auth';
 import type { JWTPayload } from 'jose';
 import type { FastifyRequest } from 'fastify';
@@ -58,5 +58,27 @@ export function createRequireAuth0User(verifier: Auth0Verifier) {
       email,
       name: typeof name === 'string' ? name : undefined,
     };
+  };
+}
+
+/**
+ * Kräver att access-tokenet bär en viss permission (docs/plan.md 7.13 E7: `scan:tickets`, satt
+ * av Auth0 RBAC med "Add Permissions in the Access Token"). Kräver INTE email-claimet: staff
+ * behöver bara `sub`. Saknad permission är 403, ogiltigt token 401.
+ */
+export function createRequirePermission(verifier: Auth0Verifier, permission: string) {
+  return async (request: FastifyRequest): Promise<void> => {
+    const result = await verifier.verify(readBearerToken(request));
+    if (result.kind === 'invalid') {
+      throw new UnauthorizedError(result.reason);
+    }
+    const { sub, permissions } = result.payload as JWTPayload & { permissions?: unknown };
+    if (typeof sub !== 'string') {
+      throw new UnauthorizedError('Auth0 token is missing the sub claim');
+    }
+    if (!Array.isArray(permissions) || !permissions.includes(permission)) {
+      throw new ForbiddenError(`missing permission ${permission}`);
+    }
+    request.staffSub = sub;
   };
 }

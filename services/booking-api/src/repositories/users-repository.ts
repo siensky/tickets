@@ -25,6 +25,21 @@ export async function getUserByAuth0Sub(
   return rows[0];
 }
 
+/**
+ * Omvänd uppslagning för analytics (docs/plan.md 7.7): servern känner bara `orders.user_id`, men
+ * PostHogs `distinct_id` är Auth0 `sub`. Läser bara, skapar aldrig en användare.
+ */
+export async function getAuth0SubByUserId(
+  pool: Pool,
+  userId: string,
+): Promise<string | undefined> {
+  const { rows } = await pool.query<{ auth0_sub: string }>(
+    'SELECT auth0_sub FROM users WHERE id = $1',
+    [userId],
+  );
+  return rows[0]?.auth0_sub;
+}
+
 export async function ensureUser(
   pool: Pool,
   params: { auth0Sub: string; email: string; name: string | undefined },

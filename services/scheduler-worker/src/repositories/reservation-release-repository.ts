@@ -16,8 +16,26 @@ import type { PoolClient } from 'pg';
 
 const BATCH_SIZE = 500;
 
-export async function expireDueReservationsBatch(client: PoolClient): Promise<string[]> {
-  const { rows } = await client.query<{ id: string }>(
+export interface ExpiredReservation {
+  readonly id: string;
+  readonly eventId: string;
+  readonly queueTokenId: string;
+}
+
+interface ExpiredReservationRow {
+  id: string;
+  event_id: string;
+  queue_token_id: string;
+}
+
+function toExpiredReservation(row: ExpiredReservationRow): ExpiredReservation {
+  return { id: row.id, eventId: row.event_id, queueTokenId: row.queue_token_id };
+}
+
+export async function expireDueReservationsBatch(
+  client: PoolClient,
+): Promise<ExpiredReservation[]> {
+  const { rows } = await client.query<ExpiredReservationRow>(
     `WITH due AS (
        SELECT id FROM reservations
        WHERE status = 'active' AND release_after < now()
@@ -28,10 +46,10 @@ export async function expireDueReservationsBatch(client: PoolClient): Promise<st
      UPDATE reservations
      SET status = 'expired'
      WHERE id IN (SELECT id FROM due)
-     RETURNING id`,
+     RETURNING id, event_id, queue_token_id`,
     [BATCH_SIZE],
   );
-  return rows.map((row) => row.id);
+  return rows.map(toExpiredReservation);
 }
 
 /**
@@ -42,8 +60,10 @@ export async function expireDueReservationsBatch(client: PoolClient): Promise<st
  * (automatisk återbetalning) — denna frågan vet ingenting om det, den
  * bara friger stolarna.
  */
-export async function expireDueFrozenReservationsBatch(client: PoolClient): Promise<string[]> {
-  const { rows } = await client.query<{ id: string }>(
+export async function expireDueFrozenReservationsBatch(
+  client: PoolClient,
+): Promise<ExpiredReservation[]> {
+  const { rows } = await client.query<ExpiredReservationRow>(
     `WITH due AS (
        SELECT id FROM reservations
        WHERE status = 'pending_payment' AND payment_frozen_until < now()
@@ -54,10 +74,10 @@ export async function expireDueFrozenReservationsBatch(client: PoolClient): Prom
      UPDATE reservations
      SET status = 'expired'
      WHERE id IN (SELECT id FROM due)
-     RETURNING id`,
+     RETURNING id, event_id, queue_token_id`,
     [BATCH_SIZE],
   );
-  return rows.map((row) => row.id);
+  return rows.map(toExpiredReservation);
 }
 
 export async function releaseSeatsForReservations(

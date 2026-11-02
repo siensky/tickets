@@ -51,6 +51,7 @@ import { registerOrderRoutes } from './routes/orders.js';
 import { registerQueueRoutes } from './routes/queue.js';
 import { registerRateLimitHook } from './routes/rate-limit.js';
 import { registerReservationRoutes } from './routes/reservations.js';
+import { registerScanRoutes } from './routes/scans.js';
 import { registerSeatMarkRoutes } from './routes/seat-marks.js';
 import { registerSeatmapRoutes } from './routes/seatmap.js';
 import { registerWebhookRoutes } from './routes/webhooks.js';
@@ -94,6 +95,36 @@ function registerRedMetricsHook(app: FastifyApp, httpMetrics: HttpMetrics): void
   });
 }
 
+/** Routes bakom Auth0-inloggning eller en Auth0-permission (checkout, biljetter, order, skanning). */
+function registerAuthenticatedRoutes(
+  app: FastifyApp,
+  deps: Dependencies,
+  stripe: ReturnType<typeof createStripeClient>,
+  logger: Logger,
+): void {
+  registerCheckoutRoutes(
+    app,
+    {
+      shardPools: deps.shardPools,
+      redis: deps.redis,
+      queueTokenSecret: deps.queueTokenSecret,
+      logger,
+      stripe,
+      paymentFrozenMinutes: deps.paymentFrozenMinutes,
+      successUrl: deps.successUrl,
+      cancelUrl: deps.cancelUrl,
+    },
+    deps.auth0Verifier,
+  );
+  registerMyTicketsRoutes(app, { shardPools: deps.shardPools, logger }, deps.auth0Verifier);
+  registerOrderRoutes(app, { shardPools: deps.shardPools }, deps.auth0Verifier);
+  registerScanRoutes(
+    app,
+    { shardPools: deps.shardPools, analytics: deps.analytics },
+    deps.auth0Verifier,
+  );
+}
+
 function registerRoutes(
   app: FastifyApp,
   registry: Parameters<typeof registerMetricsRoutes>[1],
@@ -121,22 +152,7 @@ function registerRoutes(
   registerQueueRoutes(app, deps);
   registerReservationRoutes(app, deps);
   registerSeatMarkRoutes(app, deps);
-  registerCheckoutRoutes(
-    app,
-    {
-      shardPools: deps.shardPools,
-      redis: deps.redis,
-      queueTokenSecret: deps.queueTokenSecret,
-      logger,
-      stripe,
-      paymentFrozenMinutes: deps.paymentFrozenMinutes,
-      successUrl: deps.successUrl,
-      cancelUrl: deps.cancelUrl,
-    },
-    deps.auth0Verifier,
-  );
-  registerMyTicketsRoutes(app, { shardPools: deps.shardPools, logger }, deps.auth0Verifier);
-  registerOrderRoutes(app, { shardPools: deps.shardPools }, deps.auth0Verifier);
+  registerAuthenticatedRoutes(app, deps, stripe, logger);
   registerWebhookRoutes(app, {
     shardPools: deps.shardPools,
     stripe,
@@ -166,6 +182,7 @@ async function startPaymentConsumer(
           qrTokenSecret: deps.qrTokenSecret,
           logger,
           oversellMetrics,
+          analytics: deps.analytics,
         },
         parsePaymentSucceededPayload(payload),
         messageId,
@@ -223,6 +240,8 @@ function createShutdownHandler(
     resources.paymentConsumerState.stopped = true;
     await resources.app.close();
     await resources.paymentConsumerState.consumer?.close();
+    // Töm PostHog-bufferten innan processen dör, annars tappas händelser vid varje deploy.
+    await resources.deps.analytics.shutdown();
     await closeShardPools(resources.deps.shardPools);
     await closeRedisClient(resources.deps.redis);
     await shutdownTracing();

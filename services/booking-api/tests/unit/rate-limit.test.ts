@@ -39,4 +39,18 @@ describe('registerRateLimitHook', () => {
 
     expect(response.statusCode).toBe(200);
   });
+
+  it('exempts /scans (gates share a NAT ip, docs/plan.md 7.13 E7) while other routes still get 429', async () => {
+    const app = Fastify();
+    registerErrorHandler(app);
+    app.post('/scans', () => ({ ok: true }));
+    app.get('/events', () => ({ ok: true }));
+    registerRateLimitHook(app, fakeRedis(), 0, logger);
+
+    const scans = await app.inject({ method: 'POST', url: '/scans' });
+    const events = await app.inject({ method: 'GET', url: '/events' });
+
+    expect(scans.statusCode).toBe(200);
+    expect(events.statusCode).toBe(429);
+  });
 });

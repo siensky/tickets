@@ -123,6 +123,7 @@ jobs:
           VITE_AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
           VITE_AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
           VITE_AUTH0_CLIENT_ID: ${{ secrets.AUTH0_WEB_CLIENT_ID }}
+          VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
         run: pnpm --filter @tickets/web run build
 
       - name: Upload static files to R2
@@ -135,6 +136,29 @@ jobs:
             -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="${{ secrets.R2_SECRET_ACCESS_KEY }}" \
             -e RCLONE_CONFIG_R2_ENDPOINT="${{ secrets.R2_ENDPOINT }}" \
             rclone/rclone:1.75.2 sync /data "r2:${{ secrets.R2_BUCKET }}/frontend/"
+
+      # docs/plan.md 7.8: biljettscannern (apps/scanner) serveras på scan.<domän> av en Worker som
+      # läser prefixet scanner/ (infra/terraform/cloudflare-frontend.tf).
+      - name: Build the scanner app
+        env:
+          VITE_API_BASE_URL: https://api.tikknet.se
+          VITE_AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
+          VITE_AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
+          VITE_AUTH0_CLIENT_ID: ${{ secrets.AUTH0_SCANNER_CLIENT_ID }}
+        run: pnpm --filter @tickets/scanner run build
+
+      - name: Upload scanner files to R2
+        run: |
+          # Saknas mappen skapar docker -v en tom katalog och sync tömmer scanner/ tyst.
+          test -d apps/scanner/dist
+          docker run --rm -v "$PWD/apps/scanner/dist:/data" \
+            -e RCLONE_CONFIG_R2_TYPE=s3 \
+            -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+            -e RCLONE_CONFIG_R2_ENV_AUTH=false \
+            -e RCLONE_CONFIG_R2_ACCESS_KEY_ID="${{ secrets.R2_ACCESS_KEY_ID }}" \
+            -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="${{ secrets.R2_SECRET_ACCESS_KEY }}" \
+            -e RCLONE_CONFIG_R2_ENDPOINT="${{ secrets.R2_ENDPOINT }}" \
+            rclone/rclone:1.75.2 sync /data "r2:${{ secrets.R2_BUCKET }}/scanner/"
 
       # docs/plan.md 7.19: varumärkesfiler serveras även från cdn.<domän> (Workern
       # cdn-proxy läser bara prefixen brand/ och images/). Egen mapp som källa, så
@@ -282,6 +306,7 @@ jobs:
             --from-literal=auth0-audience="${{ secrets.AUTH0_AUDIENCE }}" \
             --from-literal=stripe-secret-key="${{ secrets.STRIPE_SECRET_KEY }}" \
             --from-literal=stripe-webhook-secret="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+            --from-literal=posthog-key="${{ secrets.POSTHOG_KEY }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       # Fas 4 (docs/plan.md "Backups"): R2-bucketen/kontot är inget klustret

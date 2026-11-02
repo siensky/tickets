@@ -1,3 +1,4 @@
+import type { ServerAnalytics } from '@tickets/analytics/server';
 import type { ShardPools } from '@tickets/db';
 import type { PaymentSucceededPayload } from '@tickets/domain';
 import type { Logger, OversellMetrics } from '@tickets/observability';
@@ -44,6 +45,7 @@ function fakeDeps(options: FakeOptions): {
     qrTokenSecret: string;
     logger: Logger;
     oversellMetrics: OversellMetrics;
+    analytics: ServerAnalytics;
   };
   calls: {
     refundsCreate: ReturnType<typeof vi.fn>;
@@ -53,6 +55,7 @@ function fakeDeps(options: FakeOptions): {
     outboxPayloads: Record<string, unknown>[];
     oversellPreventedInc: ReturnType<typeof vi.fn>;
     loggerWarn: ReturnType<typeof vi.fn>;
+    analyticsTrack: ReturnType<typeof vi.fn>;
   };
 } {
   const refundsCreate = vi.fn().mockResolvedValue({ id: 're_test_1' });
@@ -85,6 +88,9 @@ function fakeDeps(options: FakeOptions): {
     // finding 0 rows) has its own dedicated test below.
     if (sql.includes('UPDATE payments SET status = $4')) {
       return Promise.resolve({ rows: [], rowCount: options.paymentStatusFlips ?? 1 });
+    }
+    if (sql.includes('SELECT auth0_sub FROM users')) {
+      return Promise.resolve({ rows: [{ auth0_sub: 'auth0|buyer-1' }], rowCount: 1 });
     }
     if (sql.includes('FROM orders')) {
       return Promise.resolve({
@@ -179,8 +185,18 @@ function fakeDeps(options: FakeOptions): {
     oversellPreventedTotal: { inc: oversellPreventedInc },
   } as unknown as OversellMetrics;
 
+  const analyticsTrack = vi.fn();
+  const analytics = { track: analyticsTrack, shutdown: vi.fn() } as unknown as ServerAnalytics;
+
   return {
-    deps: { shardPools, stripe, qrTokenSecret: 'qr-secret', logger, oversellMetrics },
+    deps: {
+      shardPools,
+      stripe,
+      qrTokenSecret: 'qr-secret',
+      logger,
+      oversellMetrics,
+      analytics,
+    },
     calls: {
       refundsCreate,
       insertedTicketSeatIds,
@@ -189,6 +205,7 @@ function fakeDeps(options: FakeOptions): {
       outboxPayloads,
       oversellPreventedInc,
       loggerWarn,
+      analyticsTrack,
     },
   };
 }
@@ -231,6 +248,62 @@ describe('processPaymentSucceeded', () => {
     );
     expect(calls.outboxTypes).toContain('order.refunded');
     expect(calls.outboxTypes).not.toContain('order.confirmed');
+  });
+
+  it('skickar payment_succeeded en gång med köparens sub, och inte igen på en redelivery', async () => {
+    const { deps, calls } = fakeDeps({
+      reservationConverts: true,
+      seatIds: ['seat-1', 'seat-2'],
+    });
+    await processPaymentSucceeded(deps, PAYLOAD, 'outbox-event-1');
+
+    const redelivery = fakeDeps({ reservationConverts: true, alreadyProcessed: true });
+    await processPaymentSucceeded(redelivery.deps, PAYLOAD, 'outbox-event-1');
+
+    expect(calls.analyticsTrack).toHaveBeenCalledTimes(1);
+    expect(calls.analyticsTrack).toHaveBeenCalledWith('auth0|buyer-1', 'payment_succeeded', {
+      order_id: 'order-1',
+      event_id: 'event-1',
+      seat_count: 2,
+      total_sek: 20,
+    });
+    expect(redelivery.calls.analyticsTrack).not.toHaveBeenCalled();
+  });
+
+  it('skickar payment_late_refunded när reservationen redan gått ut', async () => {
+    const { deps, calls } = fakeDeps({ reservationConverts: false });
+    await processPaymentSucceeded(deps, PAYLOAD, 'outbox-event-1');
+
+    expect(calls.analyticsTrack).toHaveBeenCalledWith(
+      'auth0|buyer-1',
+      'payment_late_refunded',
+      {
+        order_id: 'order-1',
+        event_id: 'event-1',
+      },
+    );
+  });
+
+  it('skickar ingen analytics när återbetalningen redan gjorts av ett tidigare försök', async () => {
+    const { deps, calls } = fakeDeps({
+      reservationConverts: false,
+      alreadyProcessed: true,
+      currentPaymentStatus: 'refund_needed',
+      paymentStatusFlips: 0,
+    });
+    await processPaymentSucceeded(deps, PAYLOAD, 'outbox-event-1');
+    expect(calls.analyticsTrack).not.toHaveBeenCalled();
+  });
+
+  it('låter en analytics-krasch aldrig fälla betalningshanteringen', async () => {
+    const { deps, calls } = fakeDeps({ reservationConverts: true });
+    calls.analyticsTrack.mockImplementation(() => {
+      throw new Error('posthog down');
+    });
+    await expect(
+      processPaymentSucceeded(deps, PAYLOAD, 'outbox-event-1'),
+    ).resolves.toBeUndefined();
+    expect(calls.loggerWarn).toHaveBeenCalled();
   });
 
   it('throws instead of silently proceeding when the outbox message has no messageId', async () => {

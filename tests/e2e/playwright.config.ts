@@ -17,5 +17,10 @@ export default defineConfig({
   use: {
     baseURL: process.env['E2E_BASE_URL'] ?? 'http://localhost:5173',
     trace: 'retain-on-failure',
+    // PostHog filtrerar bort headless-webbläsare ("HeadlessChrome" i user-agent) som botar och
+    // skickar då inga händelser, vilket e2e-testen av /ingest (docs/plan.md 7.15) förutsätter.
+    // (navigator.webdriver åtgärdas i helpers/posthog.ts.)
+    userAgent:
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
   },
 });

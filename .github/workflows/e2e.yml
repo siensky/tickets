@@ -43,6 +43,14 @@ on:
         required: true
       SYSTEMTEST_USER2_PASSWORD:
         required: true
+      # Biljettscannern (docs/plan.md 7.8, 7.17): SPA-appen "Scanner" i Auth0 och ett konto med
+      # rollen staff (permissionen scan:tickets).
+      AUTH0_SCANNER_CLIENT_ID:
+        required: true
+      E2E_STAFF_EMAIL:
+        required: true
+      E2E_STAFF_PASSWORD:
+        required: true
 
 jobs:
   e2e:
@@ -54,7 +62,7 @@ jobs:
       E2E_REDIS_URL: redis://localhost:6379
       QUEUE_TOKEN_SECRET: e2e-test-queue-token-secret-at-least-32-bytes!!
       RATE_LIMIT_PER_SECOND: '1000'
-      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:5174
       # payment-mocks GET /mock-checkout/:id svarar med 302 till dessa (docs/plan.md 7.13 E8),
       # så webbläsaren i e2e landar tillbaka i webbappen i stället för på example.test.
       CHECKOUT_SUCCESS_URL: http://localhost:5173/checkout/success
@@ -87,7 +95,14 @@ jobs:
       VITE_AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
       VITE_AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
       VITE_AUTH0_CLIENT_ID: ${{ secrets.AUTH0_WEB_CLIENT_ID }}
+      # PostHog (docs/plan.md 7.15): dummynyckel, och värden är appens egen origin. Playwright
+      # svarar själv på /ingest, så ingen trafik når PostHog.
+      VITE_POSTHOG_KEY: phc_e2e_dummy
+      VITE_POSTHOG_HOST: http://localhost:5173/ingest
       E2E_BASE_URL: http://localhost:5173
+      E2E_SCANNER_URL: http://localhost:5174
+      E2E_STAFF_EMAIL: ${{ secrets.E2E_STAFF_EMAIL }}
+      E2E_STAFF_PASSWORD: ${{ secrets.E2E_STAFF_PASSWORD }}
       E2E_AUTH0_TEST_USER_EMAIL: ${{ secrets.AUTH0_TEST_USER_EMAIL }}
       E2E_AUTH0_TEST_USER_PASSWORD: ${{ secrets.AUTH0_TEST_USER_PASSWORD }}
       # Systemtesterna (tests/system) loggar in via en EGEN Auth0-app (docs/plan.md 7.14).
@@ -97,6 +112,9 @@ jobs:
       AUTH0_TEST_USER_PASSWORD: ${{ secrets.AUTH0_TEST_USER_PASSWORD }}
       SYSTEMTEST_USER2_EMAIL: ${{ secrets.SYSTEMTEST_USER2_EMAIL }}
       SYSTEMTEST_USER2_PASSWORD: ${{ secrets.SYSTEMTEST_USER2_PASSWORD }}
+      # F7 (skanning) loggar in som personal via samma CI-app.
+      SYSTEMTEST_STAFF_EMAIL: ${{ secrets.E2E_STAFF_EMAIL }}
+      SYSTEMTEST_STAFF_PASSWORD: ${{ secrets.E2E_STAFF_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
 
@@ -240,6 +258,24 @@ jobs:
           done
           cat web.log >&2
           echo "web app never became ready" >&2
+          exit 1
+
+      - name: Build the scanner app
+        env:
+          VITE_AUTH0_CLIENT_ID: ${{ secrets.AUTH0_SCANNER_CLIENT_ID }}
+        run: pnpm --filter @tickets/scanner run build
+
+      - name: Start the scanner app in the background
+        run: pnpm --filter @tickets/scanner run preview > scanner.log 2>&1 &
+
+      - name: Wait for the scanner app to respond
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5174 > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat scanner.log >&2
+          echo "scanner app never became ready" >&2
           exit 1
 
       - name: Run the e2e suite

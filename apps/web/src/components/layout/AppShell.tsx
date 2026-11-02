@@ -4,6 +4,7 @@
  */
 import type { JSX, ReactNode } from 'react';
 import { Toaster } from 'sonner';
+import { ConsentBanner } from '../../features/analytics/ConsentBanner.js';
 import { Navbar } from './Navbar.js';
 import { OfflineBanner } from './OfflineBanner.js';
 
@@ -22,6 +23,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
         {children}
       </main>
       <Toaster position="top-center" closeButton />
+      <ConsentBanner />
     </div>
   );
 }

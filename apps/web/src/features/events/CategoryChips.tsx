@@ -1,6 +1,7 @@
 /** Kategorichips ovanför eventgridet: "Alla" + de fyra kategorierna, via `?category=`. */
 import type { JSX } from 'react';
 import { Link } from 'react-router-dom';
+import { track } from '../../lib/analytics.js';
 import {
   CATEGORY_LABELS,
   EVENT_CATEGORIES,
@@ -39,6 +40,7 @@ export function CategoryChips({
             <li key={category}>
               <Link
                 to={`/?category=${category}`}
+                onClick={() => track('category_filtered', { category })}
                 className={chipClass(activeCategory === category)}
                 aria-current={activeCategory === category ? 'page' : undefined}
               >

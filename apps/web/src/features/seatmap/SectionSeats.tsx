@@ -13,6 +13,7 @@ import {
   type SeatGeometry,
   type SeatStatusEntry,
 } from '../../lib/api-client.js';
+import { useTrackSeatsSelected } from '../analytics/use-track-seats-selected.js';
 import { BookingSummaryPanel } from '../booking/BookingSummaryPanel.js';
 import { MobileSummaryBar } from '../booking/MobileSummaryBar.js';
 import { useReservationSubmit } from '../booking/use-reservation-submit.js';
@@ -45,6 +46,7 @@ function SeatSelector({
     seatStatuses,
   );
   const submit = useReservationSubmit(eventId, queueToken, selection.seatIds);
+  useTrackSeatsSelected(eventId, selection.seatIds.length);
   const summaryProps = {
     eventTitle,
     seats: selection.summarySeats,

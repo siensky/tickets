@@ -1,5 +1,5 @@
 /**
- * Seeds one venue/section and six events (one per spec) with seats as the fixture for the e2e suite
+ * Seeds one venue/section and eight events (one per spec) with seats as the fixture for the e2e suite
  * (docs/plan.md "Domän och användarflöde"). Runs once against the
  * long-lived Postgres the CI job starts via docker-compose.yml — not
  * Testcontainers, which booking-api's own integration tests use instead
@@ -37,6 +37,8 @@ const E2E_EVENT_DEFINITIONS = [
   { key: 'expiry', number: 6, title: 'E2E Expiry Show' },
   { key: 'taken', number: 7, title: 'E2E Seat Taken Show' },
   { key: 'a11y', number: 8, title: 'E2E A11y Show' },
+  { key: 'consent', number: 9, title: 'E2E Consent Show' },
+  { key: 'scanner', number: 10, title: 'E2E Scanner Show' },
 ] as const;
 
 export type E2eEventKey = (typeof E2E_EVENT_DEFINITIONS)[number]['key'];

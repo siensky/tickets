@@ -14,6 +14,8 @@ import { Container } from '../components/ui/Container.js';
 import { Spinner } from '../components/ui/Spinner.js';
 import { CheckoutSteps } from '../features/checkout/CheckoutSteps.js';
 import { PaymentStatusPoller } from '../features/checkout/PaymentStatusPoller.js';
+import { useEventContext } from '../features/analytics/use-event-context.js';
+import { useTrackOnce } from '../features/analytics/use-track-once.js';
 import { getReservation } from '../lib/api-client.js';
 import { isAuth0Configured } from '../lib/auth-provider.js';
 import { getStoredQueueToken } from '../lib/queue-token-storage.js';
@@ -100,6 +102,11 @@ export function CheckoutCancelPage(): JSX.Element {
     enabled: eventId !== '' && reservationId !== '' && queueToken !== undefined,
   });
   const isActive = reservationQuery.data?.status === 'active';
+  const eventContext = useEventContext(eventId);
+  useTrackOnce(
+    'checkout_returned',
+    eventContext === undefined ? undefined : { ...eventContext, status: 'aborted' },
+  );
 
   return (
     <Shell>

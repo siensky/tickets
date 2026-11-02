@@ -25,11 +25,24 @@ resource "cloudflare_workers_script" "frontend_proxy" {
 
   compatibility_date = "2026-01-01"
 
-  bindings = [{
-    name        = "FRONTEND_BUCKET"
-    type        = "r2_bucket"
-    bucket_name = var.r2_bucket_name
-  }]
+  bindings = [
+    {
+      name        = "FRONTEND_BUCKET"
+      type        = "r2_bucket"
+      bucket_name = var.r2_bucket_name
+    },
+    {
+      name = "PREFIX"
+      type = "plain_text"
+      text = "frontend"
+    },
+    # /ingest/* → PostHog EU (docs/plan.md 7.7). Bara på apex.
+    {
+      name = "POSTHOG_PROXY"
+      type = "plain_text"
+      text = "true"
+    },
+  ]
 }
 
 # Skapar sin egen DNS-post åt zonen (till skillnad från en Workers
@@ -76,4 +89,37 @@ resource "cloudflare_workers_custom_domain" "cdn" {
   zone_id    = data.cloudflare_zone.this.zone_id
   hostname   = "cdn.${var.domain_name}"
   service    = cloudflare_workers_script.cdn_proxy.script_name
+}
+
+# scan.<domän> (docs/plan.md 7.8): biljettscannern. Samma script som apex, med prefixet
+# "scanner/" och utan PostHog-proxy. Workern läser bara det prefixet, så backuperna i
+# samma bucket är lika onåbara här som på apex.
+resource "cloudflare_workers_script" "scanner_proxy" {
+  account_id     = var.cloudflare_account_id
+  script_name    = "tickets-scanner-proxy"
+  content_file   = "${path.module}/workers/frontend-proxy.js"
+  content_sha256 = filesha256("${path.module}/workers/frontend-proxy.js")
+  main_module    = "frontend-proxy.js"
+
+  compatibility_date = "2026-01-01"
+
+  bindings = [
+    {
+      name        = "FRONTEND_BUCKET"
+      type        = "r2_bucket"
+      bucket_name = var.r2_bucket_name
+    },
+    {
+      name = "PREFIX"
+      type = "plain_text"
+      text = "scanner"
+    },
+  ]
+}
+
+resource "cloudflare_workers_custom_domain" "scanner" {
+  account_id = var.cloudflare_account_id
+  zone_id    = data.cloudflare_zone.this.zone_id
+  hostname   = "scan.${var.domain_name}"
+  service    = cloudflare_workers_script.scanner_proxy.script_name
 }

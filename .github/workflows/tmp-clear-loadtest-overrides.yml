@@ -36,7 +36,8 @@ jobs:
           if [ "$HAS_VALUE" = "true" ]; then
             kubectl patch deploy booking-api -n ticketing --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/$IDX\",\"value\":{\"name\":\"STRIPE_WEBHOOK_SECRET\",\"valueFrom\":{\"secretKeyRef\":{\"name\":\"tickets-app-secrets\",\"key\":\"stripe-webhook-secret\"}}}}]"
           fi
-          kubectl set env deployment/booking-api -n ticketing STRIPE_HOST- STRIPE_PORT- RATE_LIMIT_ALLOWLISTED_IPS-
+          kubectl set env deployment/booking-api -n ticketing STRIPE_HOST- STRIPE_PORT- RATE_LIMIT_ALLOWLISTED_IPS- POSTHOG_ENABLED-
+          kubectl set env deployment/scheduler-worker -n ticketing POSTHOG_ENABLED-
           kubectl scale deployment/payment-mock -n ticketing --replicas=1
           kubectl rollout status deployment/booking-api -n ticketing --timeout=180s
 

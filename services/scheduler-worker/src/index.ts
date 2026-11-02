@@ -8,6 +8,7 @@
  * replicas MUST stay at exactly 1 (see src/services/heartbeat.ts) — both
  * jobs would double their effect with a second copy running.
  */
+import { createServerAnalyticsFromEnv, type ServerAnalytics } from '@tickets/analytics/server';
 import { closeShardPools, createShardPools, type ShardPools } from '@tickets/db';
 import {
   createBusinessMetrics,
@@ -84,6 +85,7 @@ function createShutdownHandler(
     businessMetrics: BusinessMetricsJob;
     shardPools: ShardPools;
     redis: RedisClient;
+    analytics: ServerAnalytics;
   },
 ): (signal: string) => void {
   const shutdown = async (signal: string): Promise<void> => {
@@ -94,6 +96,8 @@ function createShutdownHandler(
     await resources.outboxRelay.stop();
     await resources.queueAdmission.stop();
     await resources.businessMetrics.stop();
+    // Töm PostHog-bufferten innan processen dör, annars tappas händelser vid varje deploy.
+    await resources.analytics.shutdown();
     await closeShardPools(resources.shardPools);
     await closeRedisClient(resources.redis);
     await shutdownTracing();
@@ -142,7 +146,10 @@ export async function start(): Promise<void> {
       logger.warn({ shardIndex, error }, 'shard connection error');
     },
   });
-  const reservationRelease = startReservationReleaseJob(shardPools, logger);
+  const analytics = createServerAnalyticsFromEnv(process.env, (error) => {
+    logger.warn({ error }, 'posthog error');
+  });
+  const reservationRelease = startReservationReleaseJob(shardPools, logger, analytics);
   const outboxRelay = startOutboxRelay(
     shardPools,
     process.env['RABBITMQ_URL'] ?? 'amqp://localhost',
@@ -161,6 +168,7 @@ export async function start(): Promise<void> {
     businessMetrics: businessMetricsJob,
     shardPools,
     redis,
+    analytics,
   });
   process.on('SIGTERM', () => shutdownOrCrash('SIGTERM'));
   process.on('SIGINT', () => shutdownOrCrash('SIGINT'));

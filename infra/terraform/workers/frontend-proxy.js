@@ -8,6 +8,12 @@
  * läser objekt via sin egen R2-binding (FRONTEND_BUCKET), vilket aldrig
  * kräver att bucketen görs publik — backuperna förblir onåbara via
  * tikknet.se oavsett vad någon begär.
+ *
+ * Samma script körs för både apex (PREFIX=frontend) och scan.<domän> (PREFIX=scanner,
+ * docs/plan.md 7.8) — se cloudflare-frontend.tf. Med bindingen POSTHOG_PROXY=true
+ * (bara apex) vidarebefordras också /ingest/* till PostHogs EU-moln (docs/plan.md 7.7):
+ * utan en proxy på egen domän blockerar adblockers en stor andel av händelserna.
+ * Inga andra sökvägar skickas någonsin vidare.
  */
 
 const CONTENT_TYPES = {
@@ -38,8 +44,8 @@ function guessContentType(key) {
 }
 
 /** Vite lägger alltid sina hashade, evigt cachebara filer under /assets/. */
-function cacheControlFor(key) {
-  return key.startsWith('frontend/assets/')
+function cacheControlFor(key, prefix) {
+  return key.startsWith(`${prefix}/assets/`)
     ? 'public, max-age=31536000, immutable'
     : 'no-cache';
 }
@@ -49,14 +55,55 @@ function hasFileExtension(pathname) {
   return lastSegment.includes('.');
 }
 
+const INGEST_PATH = '/ingest';
+const POSTHOG_ASSETS_HOST = 'eu-assets.i.posthog.com';
+const POSTHOG_API_HOST = 'eu.i.posthog.com';
+const INGEST_METHODS = new Set(['GET', 'HEAD', 'POST', 'OPTIONS']);
+
+function isIngestPath(pathname) {
+  return pathname === INGEST_PATH || pathname.startsWith(`${INGEST_PATH}/`);
+}
+
+async function proxyToPostHog(request, url) {
+  if (!INGEST_METHODS.has(request.method)) {
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+  const upstreamHost = url.pathname.startsWith(`${INGEST_PATH}/static/`)
+    ? POSTHOG_ASSETS_HOST
+    : POSTHOG_API_HOST;
+  const upstream = new URL(`https://${upstreamHost}`);
+  upstream.pathname = url.pathname.slice(INGEST_PATH.length) || '/';
+  upstream.search = url.search;
+
+  const headers = new Headers(request.headers);
+  headers.set('host', upstreamHost);
+  headers.delete('cookie');
+  const clientIp = request.headers.get('cf-connecting-ip');
+  if (clientIp !== null) {
+    headers.set('x-forwarded-for', clientIp);
+  }
+  const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
+  return fetch(upstream, {
+    method: request.method,
+    headers,
+    body: hasBody ? request.body : undefined,
+    redirect: 'manual',
+  });
+}
+
 export default {
   async fetch(request, env) {
+    const requestUrl = new URL(request.url);
+    if (env.POSTHOG_PROXY === 'true' && isIngestPath(requestUrl.pathname)) {
+      return proxyToPostHog(request, requestUrl);
+    }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response('Method Not Allowed', { status: 405 });
     }
 
-    const { pathname } = new URL(request.url);
-    const requestedKey = `frontend${pathname === '/' ? '/index.html' : pathname}`;
+    const { pathname } = requestUrl;
+    const prefix = env.PREFIX ?? 'frontend';
+    const requestedKey = `${prefix}${pathname === '/' ? '/index.html' : pathname}`;
 
     let object = await env.FRONTEND_BUCKET.get(requestedKey);
     let key = requestedKey;
@@ -66,7 +113,7 @@ export default {
     // Cloudflare Pages' egen SPA-fallback (R2 Custom Domains saknar
     // detta inbyggt, därför Workern).
     if (object === null && !hasFileExtension(pathname)) {
-      key = 'frontend/index.html';
+      key = `${prefix}/index.html`;
       object = await env.FRONTEND_BUCKET.get(key);
     }
 
@@ -82,7 +129,7 @@ export default {
     const headers = new Headers();
     object.writeHttpMetadata(headers);
     headers.set('content-type', object.httpMetadata?.contentType ?? guessContentType(key));
-    headers.set('cache-control', cacheControlFor(key));
+    headers.set('cache-control', cacheControlFor(key, prefix));
     headers.set('etag', object.httpEtag);
 
     return new Response(request.method === 'HEAD' ? null : object.body, { headers });

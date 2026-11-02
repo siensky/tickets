@@ -1,6 +1,7 @@
 /** Kategorilänkar i navbaren och drawern. Aktiv kategori markeras med `aria-current`. */
 import type { JSX } from 'react';
 import { Link } from 'react-router-dom';
+import { track } from '../../lib/analytics.js';
 import {
   CATEGORY_LABELS,
   EVENT_CATEGORIES,
@@ -23,6 +24,7 @@ export function CategoryLinks({
           <li key={category}>
             <Link
               to={`/?category=${category}`}
+              onClick={() => track('category_filtered', { category })}
               aria-current={isActive ? 'page' : undefined}
               className={`flex min-h-11 items-center rounded-field px-3 text-sm font-medium transition-colors ${
                 isActive ? 'bg-base-200 text-primary' : 'hover:bg-base-200'

@@ -1,0 +1,49 @@
+/**
+ * Tailwind 4 med Preflight, daisyUI och det delade temat `tikknet` (shared/ui-theme/theme.css,
+ * samma som webbappen). Inga färgkoder utanför temat.
+ */
+@import 'tailwindcss';
+@plugin "daisyui" {
+  themes: false;
+}
+@import '../../../../shared/ui-theme/theme.css';
+
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/plus-jakarta-sans';
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    line-height: 1.6;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

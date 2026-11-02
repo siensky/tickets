@@ -100,7 +100,7 @@ spec:
             # origin (tikknet.se vs api.tikknet.se) — utan detta blockerar
             # webbläsaren varje svar till PWA:n.
             - name: CORS_ALLOWED_ORIGINS
-              value: 'https://tikknet.se'
+              value: 'https://tikknet.se,https://scan.tikknet.se'
             # Inte hemliga — rena URL:er. Byts till apps/webs riktiga
             # domän den dagen fas 5 bygger PWA:n.
             - name: CHECKOUT_SUCCESS_URL
@@ -139,6 +139,13 @@ spec:
                 secretKeyRef:
                   name: tickets-app-secrets
                   key: stripe-webhook-secret
+            # PostHog (docs/plan.md 7.7). Tom nyckel = analytics av. loadtest-mode on sätter
+            # POSTHOG_ENABLED=false.
+            - name: POSTHOG_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-app-secrets
+                  key: posthog-key
             - name: QUEUE_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:

@@ -12,6 +12,7 @@ import { Button } from '../ui/Button.js';
 import { Container } from '../ui/Container.js';
 import { Modal } from '../ui/Modal.js';
 import { CategoryLinks } from './CategoryLinks.js';
+import { ConsentSettingsButton } from './ConsentSettingsButton.js';
 import { SearchBox } from './SearchBox.js';
 import { UserMenu } from './UserMenu.js';
 
@@ -46,6 +47,7 @@ function MobileDrawer({
         <SearchBox key={query} initialQuery={query} onSubmitted={onClose} />
         <CategoryLinks activeCategory={activeCategory} orientation="vertical" />
         <UserMenu variant="drawer" />
+        <ConsentSettingsButton className="justify-start" />
       </div>
     </Modal>
   );
@@ -83,7 +85,8 @@ export function Navbar(): JSX.Element {
           <div className="hidden w-72 sm:block">
             <SearchBox key={query} initialQuery={query} />
           </div>
-          <div className="hidden lg:block">
+          <div className="hidden items-center gap-2 lg:flex">
+            <ConsentSettingsButton />
             <UserMenu variant="bar" />
           </div>
         </div>

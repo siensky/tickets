@@ -6,9 +6,12 @@
 import { authEnv, userCredentials } from './env.js';
 import { asRecord, str } from './json.js';
 
-const tokens = new Map<1 | 2, string>();
+/** `staff` är kontot med rollen staff (permissionen scan:tickets), för F7. */
+type Account = 1 | 2 | 'staff';
 
-export async function getAccessToken(which: 1 | 2): Promise<string> {
+const tokens = new Map<Account, string>();
+
+export async function getAccessToken(which: Account): Promise<string> {
   const cached = tokens.get(which);
   if (cached !== undefined) {
     return cached;

@@ -8,6 +8,7 @@
 import { Auth0Provider, type AppState } from '@auth0/auth0-react';
 import type { JSX, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AnalyticsBridge } from '../features/analytics/AnalyticsBridge.js';
 
 const AUTH0_DOMAIN = import.meta.env.VITE_AUTH0_DOMAIN;
 const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID;
@@ -60,6 +61,7 @@ export function AppAuthProvider({ children }: { children: ReactNode }): JSX.Elem
       cacheLocation="localstorage"
     >
       {children}
+      <AnalyticsBridge />
     </Auth0Provider>
   );
 }

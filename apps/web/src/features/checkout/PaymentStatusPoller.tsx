@@ -12,6 +12,8 @@ import { ErrorState } from '../../components/ui/ErrorState.js';
 import { Spinner } from '../../components/ui/Spinner.js';
 import { getOrder, type OrderView } from '../../lib/api-client.js';
 import { useAccessToken } from '../../lib/use-access-token.js';
+import { useEventContext } from '../analytics/use-event-context.js';
+import { useTrackOnce } from '../analytics/use-track-once.js';
 import { OrderConfirmation } from './OrderConfirmation.js';
 
 export const ORDER_POLL_MS = 2000;
@@ -124,6 +126,15 @@ export function PaymentStatusPoller({
 }): JSX.Element {
   const { order, isError, refetch, timedOut } = useOrderPolling(eventId, orderId);
   const isPaid = order?.status === 'paid';
+  const eventContext = useEventContext(eventId);
+  const returnedStatus =
+    order?.status === 'pending' ? (timedOut ? 'timeout' : undefined) : order?.status;
+  useTrackOnce(
+    'checkout_returned',
+    eventContext === undefined || returnedStatus === undefined
+      ? undefined
+      : { ...eventContext, status: returnedStatus },
+  );
   useEffect(() => {
     if (isPaid) {
       onPaid?.();

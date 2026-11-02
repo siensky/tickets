@@ -60,6 +60,13 @@ spec:
                   key: password
             - name: RABBITMQ_URL
               value: 'amqp://app:$(RABBITMQ_PASSWORD)@rabbitmq.data.svc.cluster.local:5672'
+            # PostHog (docs/plan.md 7.7). Tom nyckel = analytics av. loadtest-mode on sätter
+            # POSTHOG_ENABLED=false.
+            - name: POSTHOG_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tickets-app-secrets
+                  key: posthog-key
           resources:
             requests:
               cpu: 50m
