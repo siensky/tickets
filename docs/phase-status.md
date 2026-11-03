@@ -3,6 +3,13 @@
 Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
 Läs båda innan en ny fas påbörjas.
 
+## Efter Fas 8 — sessionsklocka, retention, `reservation.created` (`feature/adjustments`)
+
+- **Bokningsfönster från insläpp:** ny config `queue_booking_window_minutes` (10, migration `global/…8000`, koden har standardvärde om nyckeln saknas). `admitted:*` får slutdatumet som värde (ms) och TTL = min(inaktivitet, fönster); `touchAdmittedActivity` läser slutdatumet och klipper förnyelsen. Äldre nycklar med värdet `'1'` (före deploy) behandlas som utan slutdatum. Kötokenens `exp` = (längsta kötid + fönster + 15 min) i `queueTokenTtlSeconds`. `admitNextBatch`/`joinOrAdmitWaitingRoom` fick en extra parameter (fönstret i sekunder).
+- **Retention:** `reservation-retention-service.ts` (kör vid start och varje timme, 30 dagar, bara `converted`/`expired`/`cancelled`). Outbox, `processed_messages` och `idempotency_keys` rensas fortfarande inte.
+- **`reservation.created` borttagen:** ingen kö var bunden till routing keyn, så meddelandet kastades av brokern, och det kostade en INSERT i reservationstransaktionen. Konstanten och payload-typen är borta; relay-testerna använder strängen bara som exempel.
+- **Ej gjort:** en synlig nedräkning för bokningsfönstret i webbappen, och e2e/systemtester mot riktig Auth0 (körs i CI).
+
 ## Fas 8 — efterarbete (`feature/fas8`, en branch, en PR, merge efter försvaret 4/11)
 
 - **Steg 0 (demo-event):** `scheduler-worker` `remove-demo-events` (ids …0201–0205), torrkörning som standard, `--apply` exporterar raderna (`~/demo-events-export-*.json`, 0600) före DELETE och nekar om betalda/väntande ordrar eller aktiva reservationer finns. Integrationstest `remove-demo-events.test.ts`.
@@ -399,3 +406,14 @@ dem bara till `otelcol.exporter.debug` (loggas, visas ingenstans) tills Tempo ko
 in efter VG — `alloy.stabilityLevel: experimental` i Helm-values är satt enbart för
 den placeholdern och bör sänkas till default när den byts mot en riktig
 Tempo-exportör.
+
+
+## Efter Fas 8 — buggar i produktion (`feature/adjustments`)
+
+- **Gammal stolskarta i andra webbläsaren:** svaret bar `cache-control: public, max-age=14400` fast API:t skickar `max-age=1`; Cloudflares zon-inställning "Browser Cache TTL" höjde värdet, så webbläsarens egen cache serverade pollingen i timmar. Åtgärd: `browser_ttl = { mode = "respect_origin" }` på stolsstatus- och sammanfattningsreglerna i `cloudflare.tf` (kräver `terraform apply`) och `cache: 'no-store'` i klienten (gäller direkt vid frontend-deploy).
+- **Låst efter avbruten bokning:** unikt index på en aktiv reservation per kötoken gav 409 för användaren som lämnade bokningen och kom tillbaka (kötoken ligger kvar i localStorage). Nu ersätter en ny reservation den egna aktiva, `DELETE /events/:id/reservations/:reservationId` släpper stolarna (NOWAIT-lås, id-baserad), och kartan släpper bara den reservation som just den här fliken skapade (sessionStorage) när den öppnas.
+- **Nedräkning på upptagna stolar:** `heldUntil` i stolsstatusen (LEFT JOIN på reservationen) och `HeldSeatNotice` med live-timer vid klick på en upptagen stol.
+- **Bakåtpilar:** kösidan, kartans översikt, checkout ("Tillbaka till stolsval", "Avbryt bokningen") och betalningen-avbröts-sidan.
+- **"Väntrummet" utan trafik:** produktionen direktsläpper. Kösidan hette "Väntrum" och en sparad, utgången token gav "din plats har gått ut". Sidan heter nu "Till bokningen", och en utgången sparad plats ersätts tyst med en ny (en gång).
+
+**Code review av ovanstående (subagent) och åtgärder:** `browser_ttl` låg på fel regel i `cloudflare.tf` (flyttad till stolsstatusregeln); ABBA-deadlock mellan avbokning och lazy expiry (NOWAIT + id-ordning, retry, 409); kartan kunde avbryta en annan flik eller en nyare reservation (nu id-baserat och per flik); `heldUntil` saknades i en gammal pods svar (typeof-kontroll) och i Pact; Avbryt låstes inte medan betalningen startade; live region för nedräkningen; tydligare felmeddelande; partiellt index för retention (migration `sharded/…16000`). Medvetet ej gjort: kötokenens svans (`RESERVATION_TAIL_SECONDS`) följer fortfarande inte `reservation_hold_minutes` live.

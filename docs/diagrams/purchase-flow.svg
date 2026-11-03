@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1740 975" width="1740" height="975" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="p-black" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#222"/></marker>
+    <marker id="p-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4f8f3e"/></marker>
+    <marker id="p-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d98a2b"/></marker>
+    <style>
+      .t { font-size: 14px; font-weight: 700; fill: #1d2128; text-anchor: middle; }
+      .ph { font-size: 13px; font-weight: 700; fill: #1d2128; }
+      .m { font-size: 11.5px; fill: #1d2128; text-anchor: middle; paint-order: stroke; stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; }
+      .v { font-size: 11.5px; fill: #3b4150; paint-order: stroke; stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; }
+    </style>
+  </defs>
+  <rect width="1740" height="975" fill="#ffffff"/>
+  <text x="20" y="36" font-size="20" font-weight="700" fill="#1d2128">Köp: från väntrum till biljett</text>
+
+  <!-- Faser -->
+  <rect x="20" y="140" width="1700" height="160" rx="8" fill="#fdf8e6"/>
+  <rect x="20" y="310" width="1700" height="125" rx="8" fill="#f1f6ec"/>
+  <rect x="20" y="445" width="1700" height="195" rx="8" fill="#f6f0fa"/>
+  <rect x="20" y="650" width="1700" height="265" rx="8" fill="#fdf4e8"/>
+  <text x="32" y="160" class="ph">1 · Väntrum (anonymt, kötoken)</text>
+  <text x="32" y="330" class="ph">2 · Reservation</text>
+  <text x="32" y="465" class="ph">3 · Betalning (inloggning krävs)</text>
+  <text x="32" y="670" class="ph">4 · Efter betalningen (asynkront: outbox → RabbitMQ)</text>
+
+  <!-- Livslinjer -->
+  <g stroke="#a3a8b1" stroke-width="1.2" stroke-dasharray="5 5">
+    <path d="M115,114 V925"/><path d="M330,114 V925"/><path d="M545,114 V925"/><path d="M760,114 V925"/>
+    <path d="M975,114 V925"/><path d="M1190,114 V925"/><path d="M1405,114 V925"/><path d="M1620,114 V925"/>
+  </g>
+
+  <!-- Deltagare -->
+  <rect x="20" y="60" width="190" height="54" rx="10" fill="#fdf0c2" stroke="#d4a72c" stroke-width="1.5"/><text x="115" y="92" class="t">Webbapp</text>
+  <rect x="235" y="60" width="190" height="54" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/><text x="330" y="92" class="t">booking-api</text>
+  <rect x="450" y="60" width="190" height="54" rx="10" fill="#dcecd5" stroke="#5c9a4a" stroke-width="1.5"/><text x="545" y="92" class="t">Postgres</text>
+  <rect x="665" y="60" width="190" height="54" rx="10" fill="#dcecd5" stroke="#5c9a4a" stroke-width="1.5"/><text x="760" y="92" class="t">Redis</text>
+  <rect x="880" y="60" width="190" height="54" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/><text x="975" y="92" class="t">scheduler-worker</text>
+  <rect x="1095" y="60" width="190" height="54" rx="10" fill="#f9dcb4" stroke="#d98a2b" stroke-width="1.5"/><text x="1190" y="92" class="t">RabbitMQ</text>
+  <rect x="1310" y="60" width="190" height="54" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/><text x="1405" y="92" class="t">notification-worker</text>
+  <rect x="1525" y="60" width="190" height="54" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/><text x="1620" y="92" class="t">Stripe</text>
+
+  <!-- Steg -->
+  <g fill="none" stroke-width="1.7">
+    <path d="M115,190 H330" stroke="#222" marker-end="url(#p-black)"/>
+    <path d="M330,225 H760" stroke="#4f8f3e" marker-end="url(#p-green)"/>
+    <path d="M975,260 H760" stroke="#4f8f3e" marker-end="url(#p-green)"/>
+    <path d="M115,290 H330" stroke="#222" marker-end="url(#p-black)"/>
+
+    <path d="M115,360 H330" stroke="#222" marker-end="url(#p-black)"/>
+    <path d="M330,395 H545" stroke="#4f8f3e" marker-end="url(#p-green)"/>
+    <path d="M330,425 H115" stroke="#222" stroke-dasharray="6 4" marker-end="url(#p-black)"/>
+
+    <path d="M115,495 H330" stroke="#222" marker-end="url(#p-black)"/>
+    <path d="M330,530 H1620" stroke="#222" marker-end="url(#p-black)"/>
+    <path d="M115,565 H1620" stroke="#222" marker-end="url(#p-black)"/>
+    <path d="M1620,600 H330" stroke="#222" marker-end="url(#p-black)"/>
+    <path d="M330,630 H545" stroke="#4f8f3e" marker-end="url(#p-green)"/>
+
+    <path d="M975,700 H545" stroke="#4f8f3e" marker-end="url(#p-green)"/>
+    <path d="M975,735 H1190" stroke="#d98a2b" stroke-width="2" marker-end="url(#p-orange)"/>
+    <path d="M1190,770 H330" stroke="#d98a2b" stroke-width="2" marker-end="url(#p-orange)"/>
+    <path d="M330,805 H545" stroke="#4f8f3e" marker-end="url(#p-green)"/>
+    <path d="M975,840 H1190" stroke="#d98a2b" stroke-width="2" marker-end="url(#p-orange)"/>
+    <path d="M1190,875 H1405" stroke="#d98a2b" stroke-width="2" marker-end="url(#p-orange)"/>
+    <path d="M115,905 H330" stroke="#222" marker-end="url(#p-black)"/>
+  </g>
+  <text x="222" y="183" class="m">1  POST /queue/join → kötoken</text>
+  <text x="545" y="218" class="m">2  Lua: direkt in eller ställ i kön (ZSET)</text>
+  <text x="868" y="253" class="m">3  släpper in i takt</text>
+  <text x="222" y="283" class="m">4  GET /queue/status → admitted</text>
+
+  <text x="222" y="353" class="m">5  POST /reservations</text>
+  <text x="438" y="388" class="m">6  FOR UPDATE NOWAIT</text>
+  <text x="222" y="418" class="m">7  201: reservation i 5 min</text>
+  <text x="1010" y="388" class="v">max 5 platser · Idempotency-Key · låser platserna i sorterad ordning, så två köpare aldrig låser i kors</text>
+
+  <text x="222" y="488" class="m">8  POST checkout (Auth0)</text>
+  <text x="975" y="523" class="m">9  skapa Checkout-session</text>
+  <text x="867" y="558" class="m">10  kunden betalar på Stripes sida (kortet når aldrig oss)</text>
+  <text x="975" y="593" class="m">11  webhook checkout.session.completed (signerad)</text>
+  <text x="438" y="623" class="m">12  outbox-rad</text>
+  <text x="1010" y="623" class="v">webhooken svarar 200 direkt · inget tungt jobb görs här</text>
+
+  <text x="760" y="693" class="m">13  relay läser outbox (SKIP LOCKED)</text>
+  <text x="1083" y="728" class="m">14  publicerar</text>
+  <text x="760" y="763" class="m">15  payment.succeeded</text>
+  <text x="438" y="798" class="m">16  biljetter + paid</text>
+  <text x="1083" y="833" class="m">17  order.confirmed</text>
+  <text x="1298" y="868" class="m">18  → mejl</text>
+  <text x="222" y="898" class="m">19  GET /orders/:id</text>
+  <text x="1440" y="808" class="v">16 sker i EN transaktion:</text>
+  <text x="1440" y="824" class="v">biljetter, order = paid och ny</text>
+  <text x="1440" y="840" class="v">outbox-rad order.confirmed</text>
+  <text x="1440" y="900" class="v">mejlet är simulerat (loggas)</text>
+  <text x="560" y="898" class="v">pollar tills ordern är paid → QR-koden finns i Mina biljetter</text>
+
+  <text x="20" y="955" class="v">Svart = HTTP · grön = databas eller Redis · orange = RabbitMQ · streckad = svar. Steg 13–18 tål krascher: outboxen tappar aldrig en händelse, och processed_messages gör att en dubblett inte skapar dubbla biljetter.</text>
+</svg>

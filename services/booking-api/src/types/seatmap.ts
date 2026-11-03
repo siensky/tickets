@@ -16,6 +16,8 @@ export interface SeatStatusRow {
   readonly venueSeatId: string;
   readonly status: SeatStatus;
   readonly priceCents: number;
+  /** Utgångstid för en aktiv reservation på stolen; `null` annars (ledig, såld eller i betalning). */
+  readonly heldUntil: Date | null;
 }
 
 export interface SeatStatusEntry {
@@ -23,6 +25,8 @@ export interface SeatStatusEntry {
   readonly venueSeatId: string;
   readonly status: SeatStatus;
   readonly priceCents: number;
+  /** ISO-tid då den aktiva reservationen går ut; `null` när ingen sådan finns. */
+  readonly heldUntil: string | null;
 }
 
 /** Aggregat per sektion över ett events stolar (docs/plan.md 7.13 E2). */

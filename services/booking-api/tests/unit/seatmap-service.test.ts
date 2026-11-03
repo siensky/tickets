@@ -41,7 +41,13 @@ describe('getSectionSeatStatus', () => {
     );
 
     expect(result).toEqual([
-      { seatId: 'seat-1', venueSeatId: 'venue-seat-1', status: 'available', priceCents: 1000 },
+      {
+        seatId: 'seat-1',
+        venueSeatId: 'venue-seat-1',
+        status: 'available',
+        priceCents: 1000,
+        heldUntil: null,
+      },
     ]);
   });
 
@@ -59,8 +65,62 @@ describe('getSectionSeatStatus', () => {
     );
 
     expect(result).toEqual([
-      { seatId: 'seat-1', venueSeatId: 'venue-seat-1', status: 'available', priceCents: 1000 },
+      {
+        seatId: 'seat-1',
+        venueSeatId: 'venue-seat-1',
+        status: 'available',
+        priceCents: 1000,
+        heldUntil: null,
+      },
     ]);
+  });
+
+  it('ger heldUntil som ISO-tid för en upptagen stol och null annars', async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [
+          {
+            ...SEAT_ROW,
+            id: 'a',
+            status: 'held',
+            held_until: new Date('2030-01-01T12:05:00Z'),
+          },
+          { ...SEAT_ROW, id: 'b', status: 'available', held_until: null },
+        ],
+      }),
+    } as unknown as Pool;
+    const redis = {
+      get: vi.fn().mockResolvedValue(null),
+      set: vi.fn().mockResolvedValue('OK'),
+    } as unknown as RedisClient;
+
+    const result = await getSectionSeatStatus(
+      { shardPools: fakeShardPools(pool), redis, logger: SILENT_LOGGER },
+      'event-1',
+      'section-1',
+    );
+
+    expect(result.map((entry) => entry.heldUntil)).toEqual(['2030-01-01T12:05:00.000Z', null]);
+  });
+
+  it('behandlar en cachepost utan heldUntil (äldre podd) som cachemiss', async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [SEAT_ROW] });
+    const pool = { query } as unknown as Pool;
+    const stale = JSON.stringify([
+      { seatId: 'seat-1', venueSeatId: 'venue-seat-1', status: 'held', priceCents: 1000 },
+    ]);
+    const redis = {
+      get: vi.fn().mockResolvedValue(stale),
+      set: vi.fn().mockResolvedValue('OK'),
+    } as unknown as RedisClient;
+
+    await getSectionSeatStatus(
+      { shardPools: fakeShardPools(pool), redis, logger: SILENT_LOGGER },
+      'event-1',
+      'section-1',
+    );
+
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it('behandlar en cachepost utan priceCents (skriven av en äldre podd) som cachemiss', async () => {

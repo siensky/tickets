@@ -1,0 +1,219 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1900 1300" width="1900" height="1300" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="c-black" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#222"/></marker>
+    <marker id="c-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f6fdb"/></marker>
+    <marker id="c-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8e5bb5"/></marker>
+    <marker id="c-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4f8f3e"/></marker>
+    <marker id="c-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a8f98"/></marker>
+    <style>
+      .t { font-size: 15px; font-weight: 700; fill: #1d2128; text-anchor: middle; }
+      .s { font-size: 11.5px; fill: #3b4150; text-anchor: middle; }
+      .n { font-size: 15px; font-weight: 700; fill: #1d2128; }
+      .nd { font-size: 11px; fill: #4a505c; }
+      .pt { font-size: 12.5px; font-weight: 700; fill: #1d2128; text-anchor: middle; }
+      .ps { font-size: 10.5px; fill: #3b4150; text-anchor: middle; }
+      .l { font-size: 10.5px; fill: #555b66; }
+      .h { font-size: 13px; font-weight: 700; fill: #1d2128; }
+      .v { font-size: 11.5px; fill: #3b4150; }
+    </style>
+  </defs>
+
+  <rect width="1900" height="1300" fill="#ffffff"/>
+  <text x="60" y="38" font-size="20" font-weight="700" fill="#1d2128">tikknet — Kubernetes-klustret</text>
+
+  <!-- Rad 1: vem som når klustret -->
+  <rect x="100" y="60" width="420" height="80" rx="10" fill="#fdf0c2" stroke="#d4a72c" stroke-width="1.5"/>
+  <text x="310" y="90" class="t">Användare</text>
+  <text x="310" y="112" class="s">webbläsare och mobiler · tikknet.se, api., grafana.</text>
+
+  <rect x="980" y="60" width="420" height="80" rx="10" fill="#fdf0c2" stroke="#d4a72c" stroke-width="1.5"/>
+  <text x="1190" y="90" class="t">Admin-dator + GitHub Actions</text>
+  <text x="1190" y="112" class="s">kubectl, terraform apply · deploy.yml vid merge till main</text>
+
+  <g fill="none" stroke-width="1.6">
+    <path d="M310,140 V190" stroke="#222" marker-end="url(#c-black)"/>
+    <path d="M1190,140 V190" stroke="#8e5bb5" stroke-dasharray="7 5" marker-end="url(#c-purple)"/>
+  </g>
+
+  <!-- Rad 2: Cloudflare och Tailscale -->
+  <rect x="60" y="190" width="700" height="62" rx="10" fill="#eceef1" stroke="#8a8f98" stroke-width="1.5"/>
+  <text x="410" y="216" class="t">Cloudflare-proxy</text>
+  <text x="410" y="237" class="s">TLS · DDoS-skydd · döljer IP · DNS round-robin mot båda nodernas IP (ingen lastbalanserare)</text>
+
+  <rect x="840" y="190" width="700" height="62" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/>
+  <text x="1190" y="216" class="t">Tailscale (WireGuard-VPN)</text>
+  <text x="1190" y="237" class="s">privat nät för kubectl mot API-servern :6443 · porten är aldrig öppen mot internet</text>
+
+  <!-- Hetzner-ramen -->
+  <rect x="40" y="290" width="1520" height="870" rx="14" fill="#fafbfc" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="9 6"/>
+  <text x="430" y="314" font-size="14" font-weight="700" fill="#5b616c">Hetzner Cloud · fsn1 (Falkenstein) · skapas av Terraform</text>
+
+  <g fill="none" stroke-width="1.6">
+    <path d="M410,252 V330" stroke="#222" marker-end="url(#c-black)"/>
+    <path d="M1190,252 V410" stroke="#8e5bb5" stroke-dasharray="7 5" marker-end="url(#c-purple)"/>
+  </g>
+
+  <!-- Brandvägg -->
+  <rect x="70" y="330" width="1460" height="44" rx="8" fill="#fbe5e2" stroke="#c9534a" stroke-width="1.5"/>
+  <text x="800" y="357" class="s" font-size="12.5"><tspan font-weight="700">hcloud_firewall</tspan> — 443 bara från Cloudflare (och loadgen-VM:arna) · 22 bara från admin-IP · 6443 aldrig öppen</text>
+
+  <g fill="none" stroke-width="1.6">
+    <path d="M410,374 V410" stroke="#222" marker-end="url(#c-black)"/>
+    <path d="M1400,374 V410" stroke="#222" marker-end="url(#c-black)"/>
+  </g>
+
+  <!-- Noder -->
+  <rect x="70" y="410" width="710" height="66" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="425" y="438" class="t">tickets-worker-1 · cpx22 (2 vCPU / 4 GB)</text>
+  <text x="425" y="458" class="s">worker-nod: kör poddar</text>
+
+  <rect x="820" y="410" width="710" height="66" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="1175" y="438" class="t">tickets-cp-1 · cpx22 (2 vCPU / 4 GB)</text>
+  <text x="1175" y="458" class="s">control-plane (API-server, schemaläggare) + kör poddar</text>
+
+  <text x="800" y="500" class="s">k3s v1.31 · privat nätverk mellan noderna · poddarna nedan körs på båda noderna (anti-affinitet sprider booking-api)</text>
+
+
+  <!-- ingress-nginx -->
+  <rect x="70" y="516" width="1460" height="78" rx="10" fill="#eceef1" stroke="#8a8f98" stroke-width="1.5"/>
+  <text x="88" y="546" class="n">ingress-nginx</text>
+  <text x="88" y="564" class="nd">porten in till klustret</text>
+  <rect x="300" y="526" width="1214" height="58" rx="8" fill="#ffffff" stroke="#8a8f98"/>
+  <text x="907" y="550" class="pt">ingress-nginx-controller · DaemonSet: en podd per nod</text>
+  <text x="907" y="568" class="ps">api.tikknet.se och loadtest.tikknet.se → booking-api · /ws → realtime-gateway · grafana.tikknet.se → Grafana</text>
+
+
+  <!-- ticketing -->
+  <rect x="70" y="614" width="1460" height="92" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="88" y="648" class="n">ticketing</text>
+  <text x="88" y="666" class="nd">apparna (stateless)</text>
+  <g fill="#ffffff" stroke="#4a6fa5">
+    <rect x="300" y="630" width="190" height="60" rx="8"/>
+    <rect x="502" y="630" width="190" height="60" rx="8"/>
+    <rect x="704" y="630" width="190" height="60" rx="8"/>
+    <rect x="906" y="630" width="190" height="60" rx="8"/>
+    <rect x="1108" y="630" width="190" height="60" rx="8"/>
+    <rect x="1310" y="630" width="190" height="60" rx="8" stroke-dasharray="5 4"/>
+  </g>
+  <text x="395" y="655" class="pt">booking-api</text><text x="395" y="674" class="ps">Deployment · HPA 2–10</text>
+  <text x="597" y="655" class="pt">realtime-gateway</text><text x="597" y="674" class="ps">Deployment · HPA 2–4</text>
+  <text x="799" y="655" class="pt">scheduler-worker</text><text x="799" y="674" class="ps">Deployment · 1 · Recreate</text>
+  <text x="1001" y="655" class="pt">notification-worker</text><text x="1001" y="674" class="ps">Deployment · KEDA 1–10</text>
+  <text x="1203" y="655" class="pt">payment-mock</text><text x="1203" y="674" class="ps">Deployment · 1 (4 vid lasttest)</text>
+  <text x="1405" y="655" class="pt">migrations</text><text x="1405" y="674" class="ps">Job · körs före varje deploy</text>
+
+  <!-- data -->
+  <rect x="70" y="724" width="1460" height="92" rx="10" fill="#dcecd5" stroke="#5c9a4a" stroke-width="1.5"/>
+  <text x="88" y="758" class="n">data</text>
+  <text x="88" y="776" class="nd">tillståndet (en replik var)</text>
+  <g fill="#ffffff" stroke="#5c9a4a">
+    <rect x="300" y="740" width="190" height="60" rx="8"/>
+    <rect x="502" y="740" width="190" height="60" rx="8"/>
+    <rect x="704" y="740" width="190" height="60" rx="8"/>
+    <rect x="906" y="740" width="190" height="60" rx="8"/>
+    <rect x="1108" y="740" width="190" height="60" rx="8"/>
+  </g>
+  <text x="395" y="765" class="pt">postgres-shard-0</text><text x="395" y="784" class="ps">StatefulSet · + globala tabeller</text>
+  <text x="597" y="765" class="pt">postgres-shard-1</text><text x="597" y="784" class="ps">StatefulSet · egen podd</text>
+  <text x="799" y="765" class="pt">redis</text><text x="799" y="784" class="ps">StatefulSet</text>
+  <text x="1001" y="765" class="pt">rabbitmq</text><text x="1001" y="784" class="ps">StatefulSet · quorum-köer</text>
+  <text x="1203" y="765" class="pt">postgres-backup</text><text x="1203" y="784" class="ps">CronJob · varje natt 02:30</text>
+
+  <!-- observability -->
+  <rect x="70" y="834" width="1460" height="92" rx="10" fill="#f9dcb4" stroke="#d98a2b" stroke-width="1.5"/>
+  <text x="88" y="868" class="n">observability</text>
+  <text x="88" y="886" class="nd">mått, loggar, larm</text>
+  <g fill="#ffffff" stroke="#d98a2b">
+    <rect x="300" y="850" width="190" height="60" rx="8"/>
+    <rect x="502" y="850" width="190" height="60" rx="8"/>
+    <rect x="704" y="850" width="190" height="60" rx="8"/>
+    <rect x="906" y="850" width="190" height="60" rx="8"/>
+    <rect x="1108" y="850" width="190" height="60" rx="8"/>
+    <rect x="1310" y="850" width="190" height="60" rx="8" stroke-dasharray="5 4" fill="#fdf6ec"/>
+  </g>
+  <text x="395" y="875" class="pt">Prometheus</text><text x="395" y="894" class="ps">hämtar /metrics · 10 dagar</text>
+  <text x="597" y="875" class="pt">Alertmanager</text><text x="597" y="894" class="ps">larmregler → Slack</text>
+  <text x="799" y="875" class="pt">Grafana</text><text x="799" y="894" class="ps">dashboards · Auth0-inloggning</text>
+  <text x="1001" y="875" class="pt">Loki</text><text x="1001" y="894" class="ps">loggar · 7 dagar</text>
+  <text x="1203" y="875" class="pt">Alloy</text><text x="1203" y="894" class="ps">DaemonSet · samlar loggar</text>
+  <text x="1405" y="875" class="pt">Tempo</text><text x="1405" y="894" class="ps">byggt, ej applicerat</text>
+
+  <!-- systemtillägg -->
+  <rect x="70" y="944" width="1460" height="92" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/>
+  <text x="88" y="978" class="n">system</text>
+  <text x="88" y="996" class="nd">tillägg via Helm</text>
+  <g fill="#ffffff" stroke="#8e5bb5">
+    <rect x="300" y="960" width="190" height="60" rx="8"/>
+    <rect x="502" y="960" width="190" height="60" rx="8"/>
+    <rect x="704" y="960" width="190" height="60" rx="8"/>
+    <rect x="906" y="960" width="190" height="60" rx="8"/>
+  </g>
+  <text x="395" y="985" class="pt">cert-manager</text><text x="395" y="1004" class="ps">Let's Encrypt · DNS-01</text>
+  <text x="597" y="985" class="pt">keda</text><text x="597" y="1004" class="ps">skalar på ködjup i RabbitMQ</text>
+  <text x="799" y="985" class="pt">kube-system</text><text x="799" y="1004" class="ps">CoreDNS · metrics-server</text>
+  <text x="1001" y="985" class="pt">Hetzner CCM + CSI</text><text x="1001" y="1004" class="ps">noder och volymer i Hetzner</text>
+
+  <!-- Volymer -->
+  <path d="M70,1066 a730,11 0 0 0 1460,0 V1126 a730,11 0 0 1 -1460,0 Z" fill="#dcecd5" stroke="#5c9a4a" stroke-width="1.5"/>
+  <ellipse cx="800" cy="1066" rx="730" ry="11" fill="#e6f2e0" stroke="#5c9a4a" stroke-width="1.5"/>
+  <text x="800" y="1098" class="t">Hetzner-volymer (CSI)</text>
+  <text x="800" y="1118" class="s">Postgres 2 × 10 Gi · Redis 5 Gi · RabbitMQ 5 Gi · Prometheus 10 Gi · datan överlever att en podd startas om</text>
+
+  <!-- Utanför klustret -->
+  <rect x="1600" y="320" width="260" height="96" rx="10" fill="#fdf0c2" stroke="#d4a72c" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="1730" y="346" class="t">loadgen-VM:ar</text>
+  <text x="1730" y="366" class="s">Hetzner, utanför klustret</text>
+  <text x="1730" y="383" class="s">0 i vardagen · kör k6</text>
+  <text x="1730" y="400" class="s">loadtest.tikknet.se, förbi Cloudflare</text>
+
+  <rect x="1600" y="728" width="260" height="84" rx="10" fill="#dcecd5" stroke="#5c9a4a" stroke-width="1.5"/>
+  <text x="1730" y="756" class="t">Cloudflare R2</text>
+  <text x="1730" y="776" class="s">nattliga pg_dump av båda shards</text>
+  <text x="1730" y="793" class="s">+ webbappens och scannerns filer</text>
+
+  <rect x="1600" y="838" width="260" height="84" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/>
+  <text x="1730" y="866" class="t">Slack</text>
+  <text x="1730" y="886" class="s">#tickets-alerts</text>
+  <text x="1730" y="903" class="s">larm från Alertmanager</text>
+
+  <g fill="none" stroke-width="1.6">
+    <path d="M1600,352 H1530" stroke="#222" marker-end="url(#c-black)"/>
+    <path d="M1298,770 H1600" stroke="#4f8f3e" marker-end="url(#c-green)"/>
+    <path d="M1530,880 H1600" stroke="#8a8f98" stroke-dasharray="7 5" marker-end="url(#c-gray)"/>
+  </g>
+
+  <g fill="none" stroke-width="1.6">
+    <path d="M410,476 V526" stroke="#222" marker-end="url(#c-black)"/>
+    <path d="M1400,476 V526" stroke="#222" marker-end="url(#c-black)"/>
+  </g>
+  <g fill="none" stroke-width="1.6">
+    <path d="M395,584 V630" stroke="#222" marker-end="url(#c-black)"/>
+    <path d="M597,584 V630" stroke="#2f6fdb" stroke-width="2.6" marker-end="url(#c-blue)"/>
+  </g>
+
+  <!-- Förklaring -->
+  <text x="60" y="1196" class="h">Pilar och färger</text>
+  <g stroke-width="1.8" fill="none">
+    <path d="M60,1220 H150" stroke="#222" marker-end="url(#c-black)"/>
+    <path d="M60,1248 H150" stroke="#2f6fdb" stroke-width="2.6" marker-end="url(#c-blue)"/>
+    <path d="M60,1276 H150" stroke="#8e5bb5" stroke-dasharray="7 5" marker-end="url(#c-purple)"/>
+    <path d="M560,1220 H650" stroke="#4f8f3e" marker-end="url(#c-green)"/>
+    <path d="M560,1248 H650" stroke="#8a8f98" stroke-dasharray="7 5" marker-end="url(#c-gray)"/>
+  </g>
+  <text x="165" y="1224" class="v">HTTP(S)-trafik</text>
+  <text x="165" y="1252" class="v">WebSocket</text>
+  <text x="165" y="1280" class="v">Administration via Tailscale (kubectl, deploy)</text>
+  <text x="665" y="1224" class="v">Backup / lagring</text>
+  <text x="665" y="1252" class="v">Anrop till extern tjänst</text>
+  <rect x="560" y="1266" width="40" height="18" rx="4" fill="#ffffff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="665" y="1280" class="v">Streckad ruta = finns bara ibland eller är inte utrullad</text>
+
+  <g>
+    <rect x="1060" y="1208" width="22" height="14" rx="3" fill="#dde8f6" stroke="#4a6fa5"/><text x="1092" y="1220" class="v">ticketing: apparna</text>
+    <rect x="1060" y="1236" width="22" height="14" rx="3" fill="#dcecd5" stroke="#5c9a4a"/><text x="1092" y="1248" class="v">data: Postgres, Redis, RabbitMQ</text>
+    <rect x="1060" y="1264" width="22" height="14" rx="3" fill="#f9dcb4" stroke="#d98a2b"/><text x="1092" y="1276" class="v">observability</text>
+    <rect x="1340" y="1208" width="22" height="14" rx="3" fill="#ece1f5" stroke="#8e5bb5"/><text x="1372" y="1220" class="v">system och externa tjänster</text>
+    <rect x="1340" y="1236" width="22" height="14" rx="3" fill="#eceef1" stroke="#8a8f98"/><text x="1372" y="1248" class="v">nätverk: Cloudflare, ingress</text>
+    <rect x="1340" y="1264" width="22" height="14" rx="3" fill="#fdf0c2" stroke="#d4a72c"/><text x="1372" y="1276" class="v">människor och lastgeneratorer</text>
+  </g>
+</svg>

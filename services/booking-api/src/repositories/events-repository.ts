@@ -155,10 +155,12 @@ export async function getEventSalesWindow(
     sales_close_at: Date;
     is_before_open: boolean;
     is_after_close: boolean;
+    seconds_until_close: number;
   }>(
     `SELECT sales_open_at, sales_close_at,
             now() < sales_open_at AS is_before_open,
-            now() > sales_close_at AS is_after_close
+            now() > sales_close_at AS is_after_close,
+            GREATEST(0, CEIL(EXTRACT(EPOCH FROM sales_close_at - now())))::int AS seconds_until_close
      FROM events WHERE id = $1`,
     [eventId],
   );
@@ -171,5 +173,21 @@ export async function getEventSalesWindow(
     salesCloseAt: row.sales_close_at,
     isBeforeOpen: row.is_before_open,
     isAfterClose: row.is_after_close,
+    secondsUntilClose: row.seconds_until_close,
   };
+}
+
+/**
+ * Slutsålt = eventet har platser och ingen av dem är ledig eller hållen (en hållen plats kan bli
+ * ledig igen när reservationen går ut). Samma definition som scheduler-workers motsvarighet, som
+ * tömmer kön.
+ */
+export async function isEventSoldOut(pool: Pool, eventId: string): Promise<boolean> {
+  const { rows } = await pool.query<{ sold_out: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM seats WHERE event_id = $1)
+        AND NOT EXISTS (SELECT 1 FROM seats WHERE event_id = $1 AND status <> 'sold')
+        AS sold_out`,
+    [eventId],
+  );
+  return rows[0]?.sold_out ?? false;
 }

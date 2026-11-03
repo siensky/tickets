@@ -21,7 +21,7 @@ import {
   parseNonNegativeInteger,
   parsePositiveInteger,
 } from '../repositories/config-repository.js';
-import { getEventSalesWindow } from '../repositories/events-repository.js';
+import { getEventSalesWindow, isEventSoldOut } from '../repositories/events-repository.js';
 import type {
   EventSalesWindow,
   JoinQueueInput,
@@ -46,13 +46,10 @@ export interface QueueServiceDeps {
 // för en — försumbart var 5:e sekund.
 async function getCachedQueueConfig(deps: QueueServiceDeps): Promise<QueueConfig> {
   const pool = getGlobalPool(deps.shardPools);
-  const [admissionRate, sessionTotal, sessionInactivity, directAdmitLimit] = await Promise.all(
-    [
+  const [admissionRate, sessionInactivity, directAdmitLimit, bookingWindow] =
+    await Promise.all([
       getCachedConfigValue(deps.redis, 'queue_admission_rate_per_minute', 5, async () =>
         String((await getQueueConfig(pool)).admissionRatePerMinute),
-      ),
-      getCachedConfigValue(deps.redis, 'queue_session_total_minutes', 5, async () =>
-        String((await getQueueConfig(pool)).sessionTotalMinutes),
       ),
       getCachedConfigValue(deps.redis, 'queue_session_inactivity_minutes', 5, async () =>
         String((await getQueueConfig(pool)).sessionInactivityMinutes),
@@ -60,21 +57,41 @@ async function getCachedQueueConfig(deps: QueueServiceDeps): Promise<QueueConfig
       getCachedConfigValue(deps.redis, 'queue_direct_admit_limit', 5, async () =>
         String((await getQueueConfig(pool)).directAdmitLimit),
       ),
-    ],
-  );
+      getCachedConfigValue(deps.redis, 'queue_booking_window_minutes', 5, async () =>
+        String((await getQueueConfig(pool)).bookingWindowMinutes),
+      ),
+    ]);
 
   return {
     admissionRatePerMinute: parsePositiveInteger(
       'queue_admission_rate_per_minute',
       admissionRate,
     ),
-    sessionTotalMinutes: parsePositiveInteger('queue_session_total_minutes', sessionTotal),
     sessionInactivityMinutes: parsePositiveInteger(
       'queue_session_inactivity_minutes',
       sessionInactivity,
     ),
     directAdmitLimit: parseNonNegativeInteger('queue_direct_admit_limit', directAdmitLimit),
+    bookingWindowMinutes: parsePositiveInteger('queue_booking_window_minutes', bookingWindow),
   };
+}
+
+/**
+ * Hur länge efter att bokningsfönstret löpt ut en reservation kan leva kvar och behöva ett giltigt
+ * kötoken (reservationens status och checkout kräver token, inte insläpp): hållet (5 min,
+ * `reservation_hold_minutes`) plus betalningsfrysningen (10 min, `PAYMENT_FROZEN_MINUTES`). Utan marginalen
+ * kunde tokenen gå ut mitt i en betalning som startats i bokningsfönstrets sista minut.
+ */
+const RESERVATION_TAIL_SECONDS = 15 * 60;
+
+/**
+ * Tokenens `exp` sätts en gång vid join och kan inte skrivas om (stateless). Man står i kön så länge
+ * det finns en chans till en plats, alltså som längst till försäljningens slut. Därför räcker tokenen
+ * till `sales_close_at` + bokningsfönstret + marginalen ovan. Själva bokningsfönstret från insläppet
+ * upprätthålls i Redis (`admitted:*`), inte av tokenen.
+ */
+export function queueTokenTtlSeconds(config: QueueConfig, secondsUntilClose: number): number {
+  return secondsUntilClose + config.bookingWindowMinutes * 60 + RESERVATION_TAIL_SECONDS;
 }
 
 function assertSalesWindowOpen(eventId: string, salesWindow: EventSalesWindow): void {
@@ -98,7 +115,7 @@ export async function joinQueue(
   const issued = await issueQueueToken(
     deps.queueTokenSecret,
     input.eventId,
-    config.sessionTotalMinutes * 60,
+    queueTokenTtlSeconds(config, salesWindow.secondsUntilClose),
   );
   // Tomt i kön och under gränsen: direkt in (klientens första statusanrop ger `admitted`).
   await joinOrAdmitWaitingRoom(
@@ -107,6 +124,7 @@ export async function joinQueue(
     issued.queueTokenId,
     config.directAdmitLimit,
     config.sessionInactivityMinutes * 60,
+    config.bookingWindowMinutes * 60,
   );
   // docs/plan.md "Vad som mäts": insläppstakt/konverteringsgrad räknas
   // i Grafana som en kvot mot den här nämnaren.
@@ -122,14 +140,17 @@ export async function getQueueStatus(
 ): Promise<QueueStatusResult> {
   const waitingRoomStatus = await getWaitingRoomStatus(deps.redis, eventId, queueTokenId);
   if (waitingRoomStatus.kind === 'not_found') {
-    // Kön kan ha tömts av scheduler-workers drainClosedSales (docs/plan.md
-    // "Väntrum": "Stängt försäljningsfönster ... kön töms med besked") —
-    // då ska klienten kunna läsa ett tillstånd den förstår här också, inte
-    // bara via det fire-and-forget WS-meddelandet (docs/plan.md "Realtid").
+    // Kön kan ha tömts av scheduler-worker (docs/plan.md "Väntrum": stängt
+    // försäljningsfönster eller slutsålt, "kön töms med besked") — då ska
+    // klienten kunna läsa ett tillstånd den förstår här också, inte bara via
+    // det fire-and-forget WS-meddelandet (docs/plan.md "Realtid").
     const pool = getPoolForEvent(deps.shardPools, eventId);
     const salesWindow = await getEventSalesWindow(pool, eventId);
     if (salesWindow.isAfterClose) {
       return { status: 'sales_closed' };
+    }
+    if (await isEventSoldOut(pool, eventId)) {
+      return { status: 'sold_out' };
     }
     return { status: 'not_found' };
   }

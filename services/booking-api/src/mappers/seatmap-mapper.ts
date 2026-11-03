@@ -21,13 +21,18 @@ export function toSeatStatusEntries(rows: readonly SeatStatusRow[]): SeatStatusE
     venueSeatId: row.venueSeatId,
     status: row.status,
     priceCents: row.priceCents,
+    heldUntil: row.heldUntil === null ? null : row.heldUntil.toISOString(),
   }));
 }
 
 export function parseCachedSeatStatuses(cached: string): SeatStatusEntry[] | undefined {
   const entries = JSON.parse(cached) as SeatStatusEntry[];
-  // En post skriven av en äldre podd under en rullande deploy saknar priceCents: räkna som cachemiss.
-  return entries.every((entry) => typeof entry.priceCents === 'number') ? entries : undefined;
+  // En post skriven av en äldre podd under en rullande deploy saknar priceCents/heldUntil: räkna som cachemiss.
+  return entries.every(
+    (entry) => typeof entry.priceCents === 'number' && entry.heldUntil !== undefined,
+  )
+    ? entries
+    : undefined;
 }
 
 /** Slår ihop sektionens layout (global pool) med dess aggregat (eventets shard). `availability` räknas i servicen. */

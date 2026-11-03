@@ -2,7 +2,32 @@
 
 Översikt över hur systemet hänger ihop. Detaljerna och motiveringarna finns i
 [plan.md](./plan.md), [forsvar.md](./forsvar.md) och ADR:erna i [adr/](./adr/). Diagrammen är
-Mermaid-block som GitHub ritar upp.
+Mermaid-block som GitHub ritar upp. Klustret (noder, namnrymder, poddar) ritas separat i
+[cluster.md](./cluster.md).
+
+## Hela systemet
+
+![Systemdesign: klienter, Cloudflare, ingress, tjänster, RabbitMQ, Postgres och Redis](./diagrams/system-design.svg)
+
+Lagren uppifrån och ned: klienter, Cloudflare, ingress-nginx, tjänsterna, RabbitMQ och sist datalagret.
+Svart pil = HTTP(S), blå = WebSocket, orange = händelse via RabbitMQ, grön = databas/lagring, streckad
+grå = anrop till extern tjänst. Postgres är sanningen, Redis är snabb hjälp som får gå förlorad. Källfilen
+är [diagrams/system-design.svg](./diagrams/system-design.svg).
+
+Händelserna och vem som tar emot dem:
+
+| Event | Skrivs i outbox av | Konsumeras av |
+|---|---|---|
+| `reservation.created` | booking-api, vid reservation | ingen (publiceras, ingen kö binder den) |
+| `payment.succeeded` | booking-api, i Stripe-webhooken | booking-api: biljetter, order `paid`, ev. återbetalning |
+| `order.confirmed` | booking-api, när biljetterna skapats | notification-worker: bekräftelsemejl |
+| `order.refunded` | booking-api, vid hel återbetalning | notification-worker: återbetalningsmejl |
+| `order.seat_refunded` | booking-api, vid återbetalning av enstaka platser | notification-worker |
+
+Varje kö har leveransgräns 5 och en dödkö `<kö>.dead` via `tickets.dlx`. WebSocket-meddelandena
+(`admitted`, `sales_closed`, `sold_out`, `seat_taken`) är fire-and-forget: allt kan också läsas via
+HTTP. Webbappen lyssnar i dag bara på `seat_taken` över WebSocket; kösidan pollar `GET /queue/status`
+var 2:a sekund.
 
 ## Från webbläsare till databas
 
@@ -12,18 +37,7 @@ vidare till en `booking-api`-podd. ingress-nginx och Servicen lastbalanserar öv
 ([ADR-0008](./adr/0008-sharding-per-event.md)). Postgres är sanningen: Redis avgör aldrig om en stol
 får reserveras.
 
-```mermaid
-flowchart LR
-  B[Webbläsare<br/>tikknet.se] -->|HTTPS| CF[Cloudflare<br/>TLS, CDN]
-  CF -->|A-poster mot noderna| IN[ingress-nginx<br/>DaemonSet]
-  IN --> SVC[Service<br/>booking-api]
-  SVC --> API[booking-api-podd<br/>controller → service → repository]
-  API --> R{shard-router<br/>hash event_id}
-  R --> P0[(Postgres shard-0<br/>+ globala tabeller)]
-  R --> P1[(Postgres shard-1)]
-  API -.->|kö, rate limit,<br/>stolsstatus-cache| RE[(Redis)]
-  B -.->|statiska filer| CDN[R2 via Worker<br/>tikknet.se, cdn., scan.]
-```
+![Requestens väg: webbläsare, Cloudflare, ingress-nginx, Service, booking-api, shard-router, Postgres-shards, Redis och R2](./diagrams/request-path.svg)
 
 Statiska filer (webbappen, scannern, eventbilder, loggor) ligger i en R2-bucket och serveras av
 Cloudflare Workers med en vitlista över prefixen, eftersom samma bucket även håller databas-backuperna.
@@ -34,32 +48,7 @@ Kön och reservationen är anonyma (kötoken); inloggning krävs först vid beta
 allt asynkront via transaktionell outbox, så en krasch mellan databasen och RabbitMQ aldrig tappar en
 händelse.
 
-```mermaid
-sequenceDiagram
-  participant W as Webbapp
-  participant A as booking-api
-  participant D as Postgres
-  participant S as scheduler-worker
-  participant R as Redis
-  participant P as payment-mock / Stripe
-  participant M as RabbitMQ
-  participant N as notification-worker
-  W->>A: join queue
-  S->>R: släpper in i takt
-  W->>A: reservera stolar (max 5)
-  A->>D: lås varje stol (FOR UPDATE NOWAIT, sorterade id)
-  A-->>W: reservation, 5 min
-  W->>A: checkout (Auth0)
-  A->>P: skapa session
-  P-->>A: webhook (signerad)
-  A->>D: outbox-rad
-  S->>M: outbox-relay publicerar
-  M->>A: payment.succeeded
-  A->>D: biljetter + order paid + outbox order.confirmed (en transaktion)
-  S->>M: outbox-relay publicerar order.confirmed
-  M->>N: order.confirmed → e-post med QR
-  W->>A: pollar order tills paid
-```
+![Köpflödet i 19 steg: väntrum, reservation, betalning och det asynkrona efterflödet via outbox och RabbitMQ](./diagrams/purchase-flow.svg)
 
 Realtid: `realtime-gateway` håller WebSocket-anslutningar och prenumererar på Redis `ws:*`
 (köposition, "din stol togs"). `scheduler-worker` är exakt en podd (`Recreate`) och äger insläpp,
@@ -71,16 +60,7 @@ En merge till `main` startar hela kedjan. Migrations körs som ett eget Job med 
 shardarna, före koden, och måste därför alltid vara framåtkompatibla. Pipelinen avbryts om något steg
 misslyckas.
 
-```mermaid
-flowchart LR
-  M[Merge till main] --> CI[lint, typecheck,<br/>enhet, integration,<br/>Pact, e2e, system]
-  CI --> IMG[bygg 6 images parallellt<br/>push till GHCR]
-  IMG --> MIG[migrations-Job<br/>båda shardarna]
-  MIG --> APPLY[kubectl apply<br/>kustomize-overlay]
-  APPLY --> ROLL[rullande uppdatering<br/>maxUnavailable 0]
-  ROLL --> VERIFY[rollout status]
-  CI --> FE[deploy-frontend:<br/>bygg webb + scanner,<br/>rclone till R2]
-```
+![Deploykedjan: CI-tester, images till GHCR, frontend till R2, och i klustret hemligheter, datalager, migrations, apply och rullande uppdatering](./diagrams/deploy-pipeline.svg)
 
 Zero-downtime kräver fyra saker samtidigt: `readinessProbe`, `maxUnavailable: 0`, `preStop` med
 `terminationGracePeriodSeconds`, och graceful shutdown i appen. Beviset ligger i
@@ -89,24 +69,7 @@ rolloutar.
 
 ## Observability, skalning och drift
 
-```mermaid
-flowchart TB
-  subgraph ticketing
-    BA[booking-api<br/>HPA 2–10]
-    RG[realtime-gateway<br/>HPA 2–4]
-    SW[scheduler-worker<br/>1]
-    NW[notification-worker<br/>KEDA 1–10]
-  end
-  subgraph observability
-    PR[Prometheus] --> GR[Grafana]
-    AL[Alloy] --> LO[Loki] --> GR
-  end
-  BA & RG & SW & NW -->|/metrics| PR
-  BA & RG & SW & NW -->|loggar| AL
-  IN[ingress-nginx<br/>metrics] --> PR
-  RQ[(RabbitMQ<br/>ködjup)] -->|trigger| NW
-  CJ[Backup-CronJob<br/>pg_dump nattligen] --> R2[(R2)]
-```
+![Observability: källor, Alloy, Prometheus, Loki, Tempo, Alertmanager, Slack, Grafana, autoskalning och backup](./diagrams/observability.svg)
 
 - Autoskalning: HPA på CPU för `booking-api` (mål 70 %, min 2, max 10), på minne för
   `realtime-gateway`, KEDA på ködjup för `notification-worker`.

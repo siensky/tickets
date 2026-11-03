@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1720 830" width="1720" height="830" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="o-black" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#222"/></marker>
+    <marker id="o-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4f8f3e"/></marker>
+    <marker id="o-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f6fdb"/></marker>
+    <marker id="o-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c9534a"/></marker>
+    <marker id="o-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a8f98"/></marker>
+    <style>
+      .t { font-size: 15px; font-weight: 700; fill: #1d2128; text-anchor: middle; }
+      .s { font-size: 11.5px; fill: #3b4150; text-anchor: middle; }
+      .pt { font-size: 12.5px; font-weight: 700; fill: #1d2128; text-anchor: middle; }
+      .ps { font-size: 10.5px; fill: #3b4150; text-anchor: middle; }
+      .l { font-size: 10.5px; fill: #555b66; }
+      .v { font-size: 11.5px; fill: #3b4150; }
+    </style>
+  </defs>
+  <rect width="1720" height="830" fill="#ffffff"/>
+  <text x="60" y="36" font-size="20" font-weight="700" fill="#1d2128">Observability, skalning och drift</text>
+
+  <!-- Källor -->
+  <rect x="60" y="60" width="1600" height="120" rx="10" fill="#eef3fb" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="78" y="112" font-size="15" font-weight="700" fill="#1d2128">Källor</text>
+  <text x="78" y="130" font-size="11" fill="#4a505c">det som mäts</text>
+  <g fill="#ffffff" stroke="#4a6fa5">
+    <rect x="200" y="84" width="210" height="72" rx="8"/>
+    <rect x="432" y="84" width="210" height="72" rx="8"/>
+    <rect x="664" y="84" width="210" height="72" rx="8"/>
+    <rect x="896" y="84" width="210" height="72" rx="8"/>
+    <rect x="1128" y="84" width="210" height="72" rx="8"/>
+    <rect x="1360" y="84" width="270" height="72" rx="8"/>
+  </g>
+  <text x="305" y="112" class="pt">booking-api</text><text x="305" y="132" class="ps">mått · loggar · traces</text>
+  <text x="537" y="112" class="pt">realtime-gateway</text><text x="537" y="132" class="ps">mått · loggar · traces</text>
+  <text x="769" y="112" class="pt">scheduler-worker</text><text x="769" y="132" class="ps">mått + affärsmått · loggar</text>
+  <text x="1001" y="112" class="pt">notification-worker</text><text x="1001" y="132" class="ps">mått · loggar · traces</text>
+  <text x="1233" y="112" class="pt">ingress-nginx</text><text x="1233" y="132" class="ps">requests och 5xx</text>
+  <text x="1495" y="112" class="pt">exporters</text><text x="1495" y="132" class="ps">Postgres · Redis · RabbitMQ · noder</text>
+
+  <!-- Rad 2 -->
+  <rect x="60" y="250" width="800" height="80" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/>
+  <text x="460" y="282" class="t">Alloy — insamlaren (en podd per nod)</text>
+  <text x="460" y="304" class="s">läser alla poddars loggar · tar emot traces via OpenTelemetry och skickar vidare 10 %</text>
+
+  <rect x="920" y="250" width="340" height="80" rx="10" fill="#f9dcb4" stroke="#d98a2b" stroke-width="1.5"/>
+  <text x="1090" y="282" class="t">Prometheus — mått</text>
+  <text x="1090" y="304" class="s">hämtar /metrics själv · 10 dagar · larmregler</text>
+
+  <rect x="1320" y="250" width="340" height="80" rx="10" fill="#fbe5e2" stroke="#c9534a" stroke-width="1.5"/>
+  <text x="1490" y="282" class="t">Alertmanager</text>
+  <text x="1490" y="304" class="s">grupperar larmen och skickar vidare</text>
+
+  <!-- Rad 3 -->
+  <rect x="60" y="400" width="380" height="90" rx="10" fill="#dcecd5" stroke="#5c9a4a" stroke-width="1.5"/>
+  <text x="250" y="434" class="t">Loki — loggar</text>
+  <text x="250" y="456" class="s">sökbara loggrader · 7 dagar</text>
+  <text x="250" y="473" class="s">"vad hände?"</text>
+
+  <rect x="480" y="400" width="380" height="90" rx="10" fill="#eef3fb" stroke="#2f6fdb" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="670" y="434" class="t">Tempo — traces</text>
+  <text x="670" y="456" class="s">en requests väg steg för steg · "var tog tiden vägen?"</text>
+  <text x="670" y="473" class="s">byggt, appliceras efter försvaret</text>
+
+  <rect x="1320" y="400" width="340" height="90" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/>
+  <text x="1490" y="434" class="t">Slack #tickets-alerts</text>
+  <text x="1490" y="456" class="s">HighErrorRate · PostgresDown</text>
+  <text x="1490" y="473" class="s">döda meddelanden · crash-loopar</text>
+
+  <!-- Rad 4 -->
+  <rect x="60" y="560" width="1200" height="80" rx="10" fill="#eceef1" stroke="#8a8f98" stroke-width="1.5"/>
+  <text x="660" y="592" class="t">Grafana — fönstret (grafana.tikknet.se, inloggning via Auth0)</text>
+  <text x="660" y="614" class="s">dashboards: RED · Infrastruktur per shard · Business · Autoscaling &amp; lasttest · Explore för loggar och traces</text>
+
+  <rect x="1320" y="540" width="340" height="120" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="1490" y="568" class="t">Autoskalning</text>
+  <text x="1490" y="590" class="s">HPA: booking-api 2–10 (CPU 70 %)</text>
+  <text x="1490" y="607" class="s">HPA: realtime-gateway 2–4 (minne)</text>
+  <text x="1490" y="624" class="s">KEDA: notification-worker 1–10</text>
+  <text x="1490" y="641" class="s">på RabbitMQ-ködjup, 100 per podd</text>
+
+  <rect x="1320" y="690" width="340" height="100" rx="10" fill="#dcecd5" stroke="#5c9a4a" stroke-width="1.5"/>
+  <text x="1490" y="718" class="t">Backup</text>
+  <text x="1490" y="740" class="s">CronJob 02:30: pg_dump av båda shards → R2</text>
+  <text x="1490" y="757" class="s">RPO upp till 24 h · återställning övad (≈ 3 s)</text>
+
+  <!-- Pilar -->
+  <g fill="none" stroke-width="1.7">
+    <path d="M250,180 V250" stroke="#4f8f3e" marker-end="url(#o-green)"/>
+    <path d="M670,180 V250" stroke="#2f6fdb" stroke-dasharray="7 5" marker-end="url(#o-blue)"/>
+    <path d="M1090,180 V250" stroke="#222" marker-end="url(#o-black)"/>
+    <path d="M1260,290 H1320" stroke="#c9534a" stroke-width="2" marker-end="url(#o-red)"/>
+    <path d="M250,330 V400" stroke="#4f8f3e" marker-end="url(#o-green)"/>
+    <path d="M670,330 V400" stroke="#2f6fdb" stroke-dasharray="7 5" marker-end="url(#o-blue)"/>
+    <path d="M1490,330 V400" stroke="#c9534a" stroke-width="2" marker-end="url(#o-red)"/>
+    <path d="M250,490 V560" stroke="#8a8f98" marker-end="url(#o-gray)"/>
+    <path d="M670,490 V560" stroke="#8a8f98" stroke-dasharray="7 5" marker-end="url(#o-gray)"/>
+    <path d="M1090,330 V560" stroke="#8a8f98" marker-end="url(#o-gray)"/>
+  </g>
+  <text x="258" y="220" class="l">loggar (stdout)</text>
+  <text x="678" y="220" class="l">traces (OTLP)</text>
+  <text x="1098" y="220" class="l">Prometheus hämtar /metrics var 15–30 s</text>
+  <text x="1266" y="282" class="l">larm</text>
+  <text x="1098" y="450" class="l">Grafana frågar</text>
+  <text x="1098" y="464" class="l">Prometheus</text>
+
+  <!-- Förklaring -->
+  <text x="60" y="690" font-size="13" font-weight="700" fill="#1d2128">Pilar</text>
+  <g fill="none" stroke-width="1.8">
+    <path d="M60,712 H140" stroke="#222" marker-end="url(#o-black)"/>
+    <path d="M60,738 H140" stroke="#4f8f3e" marker-end="url(#o-green)"/>
+    <path d="M60,764 H140" stroke="#2f6fdb" stroke-dasharray="7 5" marker-end="url(#o-blue)"/>
+    <path d="M560,712 H640" stroke="#c9534a" stroke-width="2" marker-end="url(#o-red)"/>
+    <path d="M560,738 H640" stroke="#8a8f98" marker-end="url(#o-gray)"/>
+  </g>
+  <text x="155" y="716" class="v">Mått (siffror över tid)</text>
+  <text x="155" y="742" class="v">Loggar (vad hände)</text>
+  <text x="155" y="768" class="v">Traces (var tog tiden vägen), inte utrullat än</text>
+  <text x="655" y="716" class="v">Larm</text>
+  <text x="655" y="742" class="v">Grafana frågar datakällan när du tittar</text>
+  <text x="60" y="805" class="v">Mått säger ATT något är fel, loggar säger VAD, traces säger VAR. Alloy samlar in, Prometheus/Loki/Tempo lagrar, Grafana visar.</text>
+</svg>

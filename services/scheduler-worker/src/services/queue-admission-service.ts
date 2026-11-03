@@ -5,7 +5,8 @@
  * belastningen förutsägbar"), så varje event som har NÅGON i kön
  * bearbetas på varje tick, oavsett ködjup.
  *
- * Stängt försäljningsfönster (docs/plan.md "Väntrum": "kön töms med
+ * Man står i kön så länge det finns en chans till en plats. Stängt
+ * försäljningsfönster och slutsålt (docs/plan.md "Väntrum": "kön töms med
  * besked") hanteras HÄR, inte i booking-apis join/status — det är det
  * här jobbet som äger övergången från "väntar" till "insläppt eller
  * utslängd", och det är billigare att kolla EN gång per tick per event
@@ -21,7 +22,7 @@ import {
   wsChannel,
   type RedisClient,
 } from '@tickets/redis';
-import { getEventSalesWindow } from '../repositories/events-repository.js';
+import { getEventSalesWindow, isEventSoldOut } from '../repositories/events-repository.js';
 import { getQueueConfig } from '../repositories/queue-config-repository.js';
 
 const DEFAULT_TICK_INTERVAL_MS = 1000;
@@ -41,26 +42,23 @@ async function notifyAdmitted(
   );
 }
 
-async function notifySalesClosed(
-  redis: RedisClient,
-  queueTokenIds: readonly string[],
-): Promise<void> {
-  await Promise.all(
-    queueTokenIds.map((queueTokenId) =>
-      publishToChannel(redis, wsChannel(queueTokenId), { type: 'sales_closed' }),
-    ),
-  );
-}
+/** Varför kön töms: försäljningen har stängt, eller det finns inga platser kvar att få. */
+type DrainReason = 'sales_closed' | 'sold_out';
 
-async function drainClosedSales(
+async function drainQueue(
   redis: RedisClient,
   eventId: string,
+  reason: DrainReason,
   logger: Logger,
 ): Promise<void> {
   const drained = await drainWaitingRoom(redis, eventId);
   if (drained.length > 0) {
-    logger.info({ eventId, drained: drained.length }, 'sales window closed, queue drained');
-    await notifySalesClosed(redis, drained);
+    logger.info({ eventId, drained: drained.length, reason }, 'queue drained');
+    await Promise.all(
+      drained.map((queueTokenId) =>
+        publishToChannel(redis, wsChannel(queueTokenId), { type: reason }),
+      ),
+    );
   }
 }
 
@@ -77,25 +75,18 @@ async function admitBatchForEvent(
   redis: RedisClient,
   eventId: string,
   tickIntervalMs: number,
-  logger: Logger,
   businessMetrics: BusinessMetrics,
 ): Promise<readonly string[]> {
   const config = await getQueueConfig(getGlobalPool(shardPools));
   const batchSize = batchSizeForTick(config.admissionRatePerMinute, tickIntervalMs);
   const inactivityTtlSeconds = config.sessionInactivityMinutes * 60;
-  const { admittedQueueTokenIds, remainingDepth, prunedExpiredCount } = await admitNextBatch(
+  const { admittedQueueTokenIds, remainingDepth } = await admitNextBatch(
     redis,
     eventId,
     batchSize,
     inactivityTtlSeconds,
-    config.sessionTotalMinutes,
+    config.bookingWindowMinutes * 60,
   );
-  if (prunedExpiredCount > 0) {
-    logger.info(
-      { eventId, prunedExpiredCount },
-      'queue admission: skipped already-expired queue sessions instead of admitting them',
-    );
-  }
   // docs/plan.md "Vad som mäts": ködjup + insläppstakt.
   businessMetrics.waitingRoomDepth.set({ event_id: eventId }, remainingDepth);
   if (admittedQueueTokenIds.length > 0) {
@@ -118,7 +109,11 @@ async function processEvent(
   const pool = getPoolForEvent(shardPools, eventId);
   const salesWindow = await getEventSalesWindow(pool, eventId);
   if (salesWindow.isAfterClose) {
-    await drainClosedSales(redis, eventId, logger);
+    await drainQueue(redis, eventId, 'sales_closed', logger);
+    return;
+  }
+  if (await isEventSoldOut(pool, eventId)) {
+    await drainQueue(redis, eventId, 'sold_out', logger);
     return;
   }
 
@@ -127,7 +122,6 @@ async function processEvent(
     redis,
     eventId,
     tickIntervalMs,
-    logger,
     businessMetrics,
   );
   if (admittedQueueTokenIds.length > 0) {

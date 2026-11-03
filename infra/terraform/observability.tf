@@ -115,14 +115,20 @@ resource "helm_release" "kube_prometheus_stack" {
           repeat_interval = "3h"
           receiver        = "slack"
         }
-        receivers = [{
-          name = "slack"
-          slack_configs = [{
-            channel       = "#tickets-alerts"
-            send_resolved = true
-            api_url_file  = "/etc/alertmanager/secrets/${kubernetes_secret.alertmanager_slack.metadata[0].name}/url"
-          }]
-        }]
+        # `null` måste finnas: chartets egna underrutter (Watchdog, InfoInhibitor) pekar på den,
+        # och listan här ERSÄTTER chartets mottagare i stället för att slås ihop. Utan den avvisar
+        # operatorn hela konfigurationen ("undefined receiver \"null\"") och Alertmanager startar aldrig.
+        receivers = [
+          { name = "null" },
+          {
+            name = "slack"
+            slack_configs = [{
+              channel       = "#tickets-alerts"
+              send_resolved = true
+              api_url_file  = "/etc/alertmanager/secrets/${kubernetes_secret.alertmanager_slack.metadata[0].name}/url"
+            }]
+          },
+        ]
       }
     }
 

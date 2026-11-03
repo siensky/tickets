@@ -26,3 +26,19 @@ export async function getEventSalesWindow(
   }
   return { salesCloseAt: row.sales_close_at, isAfterClose: row.is_after_close };
 }
+
+/**
+ * Slutsålt = eventet har platser och ingen av dem är ledig eller hållen. En
+ * hållen plats (`held`) kan fortfarande bli ledig när reservationen går ut, så
+ * då finns en chans kvar och kön ska stå kvar (docs/plan.md "Väntrum"). Ett
+ * event utan platser räknas inte som slutsålt (det har aldrig sålts något).
+ */
+export async function isEventSoldOut(pool: Pool, eventId: string): Promise<boolean> {
+  const { rows } = await pool.query<{ sold_out: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM seats WHERE event_id = $1)
+        AND NOT EXISTS (SELECT 1 FROM seats WHERE event_id = $1 AND status <> 'sold')
+        AS sold_out`,
+    [eventId],
+  );
+  return rows[0]?.sold_out ?? false;
+}

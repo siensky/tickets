@@ -51,9 +51,9 @@ export default function () {
   if (token === undefined) {
     return;
   }
-  // 15 min = queue_session_total_minutes default (shared/db/migrations/
-  // global/1700000004000_add-waiting-room-config.ts) — att INTE bli
-  // insläppt inom fönstret är ett giltigt, förväntat utfall för de
-  // flesta av de 50 000 (bara 5 000 biljetter finns), inte ett testfel.
+  // 15 min = testets egen väntegräns (kön har ingen längsta kötid, den töms
+  // vid slutsålt eller stängd försäljning) — att INTE bli insläppt inom
+  // fönstret är ett giltigt, förväntat utfall för de flesta av de 50 000
+  // (bara 5 000 biljetter finns), inte ett testfel.
   waitForAdmissionViaWebSocket(token, 15 * 60);
 }

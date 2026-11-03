@@ -17,6 +17,7 @@ import { authenticateQueueToken } from '../../src/services/queue-auth-service.js
 import { getQueueStatus, joinQueue } from '../../src/services/queue-service.js';
 import { reserveSeats } from '../../src/services/reservation-service.js';
 import {
+  getSeatStatuses,
   seedEventWithSeats,
   SILENT_LOGGER,
   startTestDatabase,
@@ -168,25 +169,60 @@ describe('queue → reservation flow', () => {
       status: 'waiting',
     });
 
-    const admission = await admitNextBatch(redis.client, eventId, 10, 600, 15);
+    const admission = await admitNextBatch(redis.client, eventId, 10, 600, 600);
     expect(admission.admittedQueueTokenIds).toContain(auth.queueTokenId);
     expect(await getQueueStatus(deps, eventId, auth.queueTokenId)).toEqual({
       status: 'admitted',
     });
   }, 60_000);
 
-  it('rejects a second reservation attempt for the same already-reserved queue token', async () => {
+  it("lets a new reservation replace the same queue token's abandoned active one", async () => {
+    const pool = db.shardPools.pools[0];
     const eventId = randomUUID();
     const seatIds = [randomUUID(), randomUUID()];
-    await seedEventWithSeats(db.shardPools.pools[0], { eventId, seatIds });
+    await seedEventWithSeats(pool, { eventId, seatIds });
     const queueTokenId = randomUUID();
 
-    await reserveSeats(db.shardPools, {
+    const first = await reserveSeats(db.shardPools, {
       eventId,
       seatIds: [seatIds[0] as string],
       queueTokenId,
       idempotencyKey: randomUUID(),
     });
+    const second = await reserveSeats(db.shardPools, {
+      eventId,
+      seatIds: [seatIds[1] as string],
+      queueTokenId,
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(second.reservationId).not.toBe(first.reservationId);
+    const statuses = await getSeatStatuses(pool, seatIds);
+    expect(statuses.get(seatIds[0] as string)).toBe('available');
+    expect(statuses.get(seatIds[1] as string)).toBe('held');
+    const { rows } = await pool.query<{ status: string }>(
+      'SELECT status FROM reservations WHERE id = $1',
+      [first.reservationId],
+    );
+    expect(rows[0]?.status).toBe('cancelled');
+  }, 60_000);
+
+  it('still rejects a new reservation while the same queue token has a payment in progress', async () => {
+    const pool = db.shardPools.pools[0];
+    const eventId = randomUUID();
+    const seatIds = [randomUUID(), randomUUID()];
+    await seedEventWithSeats(pool, { eventId, seatIds });
+    const queueTokenId = randomUUID();
+
+    const first = await reserveSeats(db.shardPools, {
+      eventId,
+      seatIds: [seatIds[0] as string],
+      queueTokenId,
+      idempotencyKey: randomUUID(),
+    });
+    await pool.query("UPDATE reservations SET status = 'pending_payment' WHERE id = $1", [
+      first.reservationId,
+    ]);
 
     await expect(
       reserveSeats(db.shardPools, {
@@ -196,6 +232,8 @@ describe('queue → reservation flow', () => {
         idempotencyKey: randomUUID(),
       }),
     ).rejects.toBeInstanceOf(ActiveReservationExistsError);
+    const statuses = await getSeatStatuses(pool, seatIds);
+    expect(statuses.get(seatIds[0] as string)).toBe('held');
   }, 60_000);
 
   it('QueueTokenNotAdmittedError carries the queue token id for the error response context', () => {

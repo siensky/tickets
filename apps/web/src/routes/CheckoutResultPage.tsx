@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState, type JSX, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Alert } from '../components/ui/Alert.js';
+import { BackLink } from '../components/ui/BackLink.js';
 import { Button, buttonClass } from '../components/ui/Button.js';
 import { Container } from '../components/ui/Container.js';
 import { Spinner } from '../components/ui/Spinner.js';
@@ -110,6 +111,7 @@ export function CheckoutCancelPage(): JSX.Element {
 
   return (
     <Shell>
+      {eventId === '' ? null : <BackLink to={`/events/${eventId}`}>Till evenemanget</BackLink>}
       <h1 className="text-2xl sm:text-3xl">Betalningen avbröts</h1>
       <Alert tone="info">Ingen betalning har gjorts.</Alert>
       {isActive ? (

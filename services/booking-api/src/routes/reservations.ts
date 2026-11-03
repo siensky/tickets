@@ -12,6 +12,7 @@ import {
   type QueueAuthDeps,
 } from '../controllers/queue-controller.js';
 import {
+  createCancelReservationHandler,
   createCreateReservationHandler,
   createGetReservationHandler,
 } from '../controllers/reservations-controller.js';
@@ -32,6 +33,11 @@ export function registerReservationRoutes(
       redis: deps.redis,
       logger: deps.logger,
     }),
+  });
+  // Kräver bara ett giltigt kötoken (inte insläpp): även den vars bokningsfönster löpt ut ska kunna släppa sina stolar.
+  app.delete('/events/:eventId/reservations/:reservationId', {
+    preHandler: requireQueueToken,
+    handler: createCancelReservationHandler(deps.shardPools),
   });
   app.get('/events/:eventId/reservations/:reservationId', {
     preHandler: requireQueueToken,
