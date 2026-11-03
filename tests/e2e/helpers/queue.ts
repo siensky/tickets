@@ -12,7 +12,7 @@ const API_BASE_URL = process.env['E2E_API_URL'] ?? 'http://localhost:3000';
 export async function admitWaiting(eventId: string): Promise<void> {
   const redis = createRedisClient(process.env['E2E_REDIS_URL'] ?? 'redis://localhost:6379');
   try {
-    await admitNextBatch(redis, eventId, 10, 600, 15);
+    await admitNextBatch(redis, eventId, 10, 600, 600);
   } finally {
     await redis.quit();
   }

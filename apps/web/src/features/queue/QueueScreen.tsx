@@ -1,7 +1,7 @@
 /**
  * Kösidans innehåll (docs/plan.md 7.11 C). Bara `useQueueAdmission` avgör om användaren släpps
  * in. Tillstånd: ansluter · väntar · insläppt (vidare till kartan) · försäljning stängd ·
- * kötoken utgången · tappad anslutning (banner, platsen behålls).
+ * slutsålt · kötoken utgången · tappad anslutning (banner, platsen behålls).
  */
 import { useEffect, type JSX, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -54,6 +54,14 @@ function QueueState({
           <Alert tone="info">Försäljningen för det här evenemanget är stängd.</Alert>
         </Centered>
       );
+    case 'sold_out':
+      return (
+        <Centered>
+          <Alert tone="info">
+            Evenemanget är slutsålt. Det finns inga platser kvar att få.
+          </Alert>
+        </Centered>
+      );
     case 'not_found':
       return (
         <Centered>
@@ -64,12 +72,24 @@ function QueueState({
   }
 }
 
+/** Anropar `callback` när `condition` blir sann (t.ex. att den sparade platsen har gått ut). */
+function useNotifyWhen(condition: boolean, callback: (() => void) | undefined): void {
+  useEffect(() => {
+    if (condition) {
+      callback?.();
+    }
+  }, [condition, callback]);
+}
+
 export function QueueScreen({
   eventId,
   onRejoin,
+  onExpired,
 }: {
   eventId: string;
   onRejoin: () => void;
+  /** Anropas när den sparade platsen visar sig vara utgången; sidan kan då ställa användaren i kön igen. */
+  onExpired?: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
   const { status, isJoining, error } = useQueueAdmission(eventId);
@@ -80,6 +100,7 @@ export function QueueScreen({
   const isTokenExpired =
     error instanceof ApiError && (error.status === 401 || error.status === 404);
 
+  useNotifyWhen(isTokenExpired || status?.status === 'not_found', onExpired);
   useEffect(() => {
     if (isAdmitted) {
       toast.success('Du är insläppt. Välj dina platser.');

@@ -2,9 +2,11 @@
  * Väntrummets ZSET (docs/plan.md "Väntrum"): ankomsttid som score ger
  * FIFO-ordning, `ZRANK` ger platsen i kön. Insläpp är en separat,
  * tidsbegränsad markering (`admitted:<event>:<token>`) — token är
- * stateless och bär bara sessionens HÅRDA 15-minuterstak (`exp`,
- * shared/auth), medan den här nyckelns TTL är INAKTIVITETS-taket
- * (10 min, docs/plan.md), förnyat vid aktivitet.
+ * stateless och bär bara ett HÅRT slut (`exp`, shared/auth: försäljningens
+ * slut plus bokningsfönstret), medan den här nyckelns TTL är INAKTIVITETS-
+ * taket (10 min, docs/plan.md), förnyat vid aktivitet — men aldrig längre
+ * än bokningsfönstret som startar vid insläpp: nyckelns värde är insläppets
+ * slutdatum (ms sedan epoch) och TTL:en klipps alltid mot det.
  *
  * Tål en Redis-omstart (docs/plan.md "Redis — användningsområden"): kön
  * byggs om genom att klienter joinar igen, inget går förlorat som inte
@@ -17,6 +19,24 @@ import {
   waitingRoomActiveEventsKey,
   waitingRoomKey,
 } from './keys.js';
+
+/** Insläppets slutdatum sparas som värde; allt under detta är ett äldre `'1'` från före bokningsfönstret. */
+const MIN_PLAUSIBLE_DEADLINE_MS = 1_000_000_000_000;
+
+function parseAdmissionDeadline(rawValue: string): number | null {
+  const deadlineMs = Number(rawValue);
+  return Number.isFinite(deadlineMs) && deadlineMs >= MIN_PLAUSIBLE_DEADLINE_MS
+    ? deadlineMs
+    : null;
+}
+
+/** Nyckelns TTL vid insläpp: inaktivitetstaket, men aldrig längre än bokningsfönstret. */
+function admittedTtlSeconds(
+  inactivityTtlSeconds: number,
+  bookingWindowSeconds: number,
+): number {
+  return Math.min(inactivityTtlSeconds, bookingWindowSeconds);
+}
 
 export async function joinWaitingRoom(
   redis: Redis,
@@ -40,7 +60,7 @@ redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[2])
 local waiting = redis.call('ZCARD', KEYS[1])
 local active = redis.call('ZCARD', KEYS[2])
 if waiting == 0 and active < tonumber(ARGV[3]) then
-  redis.call('SET', KEYS[3], '1', 'EX', ARGV[4])
+  redis.call('SET', KEYS[3], ARGV[6], 'EX', ARGV[4])
   redis.call('ZADD', KEYS[2], tonumber(ARGV[2]) + tonumber(ARGV[4]) * 1000, ARGV[1])
   return 1
 end
@@ -55,7 +75,9 @@ export async function joinOrAdmitWaitingRoom(
   queueTokenId: string,
   directAdmitLimit: number,
   inactivityTtlSeconds: number,
+  bookingWindowSeconds: number,
 ): Promise<'admitted' | 'waiting'> {
+  const now = Date.now();
   const raw: unknown = await redis.eval(
     JOIN_OR_ADMIT_SCRIPT,
     4,
@@ -64,10 +86,11 @@ export async function joinOrAdmitWaitingRoom(
     admittedKey(eventId, queueTokenId),
     waitingRoomActiveEventsKey(),
     queueTokenId,
-    Date.now(),
+    now,
     directAdmitLimit,
-    inactivityTtlSeconds,
+    admittedTtlSeconds(inactivityTtlSeconds, bookingWindowSeconds),
     eventId,
+    now + bookingWindowSeconds * 1000,
   );
   if (raw !== 0 && raw !== 1) {
     throw new TypeError(`join-or-admit script returned ${String(raw)}`);
@@ -106,19 +129,39 @@ export async function isAdmitted(
   return exists === 1;
 }
 
-/** Förnyar inaktivitetsfönstret (docs/plan.md: "10 min inaktivitet") — anropas vid varje autentiserad aktivitet från en insläppt klient. */
+/**
+ * Förnyar inaktivitetsfönstret (docs/plan.md: "10 min inaktivitet") — anropas vid varje autentiserad
+ * aktivitet från en insläppt klient. Förnyelsen klipps mot insläppets slutdatum (nyckelns värde), så
+ * bokningsfönstret aldrig kan förlängas genom att hålla sidan öppen. Läs-och-förnya är inte atomärt,
+ * men slutdatumet ändras aldrig, så en förlorad kapplöpning kan som mest förnya en nyss utgången nyckel
+ * (en no-op) — aldrig förlänga den förbi slutdatumet.
+ */
 export async function touchAdmittedActivity(
   redis: Redis,
   eventId: string,
   queueTokenId: string,
   inactivityTtlSeconds: number,
 ): Promise<void> {
-  await redis.expire(admittedKey(eventId, queueTokenId), inactivityTtlSeconds);
+  const key = admittedKey(eventId, queueTokenId);
+  const rawDeadline = await redis.get(key);
+  if (rawDeadline === null) {
+    return;
+  }
+  const deadlineMs = parseAdmissionDeadline(rawDeadline);
+  const ttlSeconds =
+    deadlineMs === null
+      ? inactivityTtlSeconds
+      : Math.min(inactivityTtlSeconds, Math.floor((deadlineMs - Date.now()) / 1000));
+  if (ttlSeconds <= 0) {
+    // Fönstret är slut inom en sekund: nyckelns egen TTL låter den lämna av sig själv.
+    return;
+  }
+  await redis.expire(key, ttlSeconds);
   // `XX`: förnyar bara poster som redan finns i indexet (scheduler-insläpp läggs dit också).
   await redis.zadd(
     admittedIndexKey(eventId),
     'XX',
-    Date.now() + inactivityTtlSeconds * 1000,
+    Date.now() + ttlSeconds * 1000,
     queueTokenId,
   );
 }
@@ -126,7 +169,6 @@ export async function touchAdmittedActivity(
 export interface AdmissionBatchResult {
   readonly admittedQueueTokenIds: readonly string[];
   readonly remainingDepth: number;
-  readonly prunedExpiredCount: number;
 }
 
 /**
@@ -134,65 +176,32 @@ export interface AdmissionBatchResult {
  * `ZPOPMIN` är redan en atomisk Redis-kommando — ingen Lua behövs för
  * själva poppningen.
  *
- * Score = ankomsttid (ms, `Date.now()` i `joinWaitingRoom`) — samma
- * klocka tokenens egen `exp` beräknades från vid JOIN
- * (shared/auth/src/queue-token.ts), så `now() - score` jämfört med
- * `sessionTotalMinutes` återskapar exakt samma gräns utan att tokenen
- * själv behöver avkodas här.
- *
- * Fas 6 (Fas 3-reviewns notering): en poppad post som redan passerat
- * sin sessions-TTL markeras INTE insläppt — annars slösas kvoten på en
- * token ingen längre kan använda. Loopen fortsätter popppa tills
- * `batchSize` LEVANDE poster hittats eller kön är tom, så en djup kö
- * full av redan döda sessioner inte i onödan sänker den faktiska
- * insläppstakten för de som fortfarande är giltiga.
- *
- * Känt avvägning: är HELA den återstående kön död (`queue-storm` långt
- * efter att insläppstakten inte hunnit med) gör detta en engångs-
- * "städning" i en enda tick med många ZPOPMIN-anrop istället för att
- * fördela kostnaden över flera tick — accepterat medvetet, samma princip
- * som NOWAIT-409:orna i reservationstransaktionen (docs/plan.md
- * "Concurrency-kärnan"): korrekthet före finess i ett sällan uppnått
- * värsta fall.
+ * Ingen åldersgräns i kön (docs/plan.md "Väntrum"): man står kvar så länge
+ * det finns en chans till en plats. Kön töms i stället av scheduler-worker
+ * när försäljningen stänger eller eventet är slutsålt (`drainWaitingRoom`),
+ * och kötokenens `exp` räcker alltid till försäljningens slut plus
+ * bokningsfönstret, så en post i kön har aldrig ett utgånget token.
  */
 export async function admitNextBatch(
   redis: Redis,
   eventId: string,
   batchSize: number,
   inactivityTtlSeconds: number,
-  sessionTotalMinutes: number,
+  bookingWindowSeconds: number,
 ): Promise<AdmissionBatchResult> {
   const key = waitingRoomKey(eventId);
-  const sessionTotalMs = sessionTotalMinutes * 60_000;
-  const admittedQueueTokenIds: string[] = [];
-  let prunedExpiredCount = 0;
+  const popped = await redis.zpopmin(key, batchSize);
+  // ZPOPMIN svarar [medlem, score, medlem, score, …]: varannan post är ett kötoken-id.
+  const admittedQueueTokenIds = popped.filter((_, index) => index % 2 === 0);
 
-  let remaining = batchSize;
-  while (remaining > 0) {
-    const popped = await redis.zpopmin(key, remaining);
-    if (popped.length === 0) {
-      break;
-    }
-    const now = Date.now();
-    for (let i = 0; i < popped.length; i += 2) {
-      const queueTokenId = popped[i];
-      const rawScore = popped[i + 1];
-      if (queueTokenId === undefined || rawScore === undefined) {
-        continue;
-      }
-      if (now - Number(rawScore) > sessionTotalMs) {
-        prunedExpiredCount += 1;
-      } else {
-        admittedQueueTokenIds.push(queueTokenId);
-      }
-    }
-    remaining = batchSize - admittedQueueTokenIds.length;
-  }
-
-  const indexExpiry = Date.now() + inactivityTtlSeconds * 1000;
+  // Bokningsfönstret räknas från insläppet, inte från JOIN.
+  const admittedAt = Date.now();
+  const ttlSeconds = admittedTtlSeconds(inactivityTtlSeconds, bookingWindowSeconds);
+  const indexExpiry = admittedAt + ttlSeconds * 1000;
+  const deadline = String(admittedAt + bookingWindowSeconds * 1000);
   await Promise.all(
     admittedQueueTokenIds.flatMap((queueTokenId) => [
-      redis.set(admittedKey(eventId, queueTokenId), '1', 'EX', inactivityTtlSeconds),
+      redis.set(admittedKey(eventId, queueTokenId), deadline, 'EX', ttlSeconds),
       redis.zadd(admittedIndexKey(eventId), indexExpiry, queueTokenId),
     ]),
   );
@@ -200,7 +209,7 @@ export async function admitNextBatch(
   if (remainingDepth === 0) {
     await redis.srem(waitingRoomActiveEventsKey(), eventId);
   }
-  return { admittedQueueTokenIds, remainingDepth, prunedExpiredCount };
+  return { admittedQueueTokenIds, remainingDepth };
 }
 
 export async function listActiveWaitingRoomEvents(redis: Redis): Promise<string[]> {
@@ -209,7 +218,8 @@ export async function listActiveWaitingRoomEvents(redis: Redis): Promise<string[
 
 /**
  * Tömmer HELA kön för ett event (docs/plan.md: "Stängt
- * försäljningsfönster ... kön töms med besked") — till skillnad från
+ * försäljningsfönster ... kön töms med besked", och likadant när eventet
+ * är slutsålt) — till skillnad från
  * `admitNextBatch` markeras ingen av dem som insläppta, de ska bara
  * meddelas och erbjudas väntelistan.
  */

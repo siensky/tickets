@@ -10,7 +10,11 @@ import type { ShardPools } from '@tickets/db';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { readRequiredHeader } from './http-headers.js';
-import { getReservationForQueueToken, reserveSeats } from '../services/reservation-service.js';
+import {
+  cancelReservation,
+  getReservationForQueueToken,
+  reserveSeats,
+} from '../services/reservation-service.js';
 import { notifySeatsTaken, type SeatMarkServiceDeps } from '../services/seat-mark-service.js';
 
 const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
@@ -80,5 +84,27 @@ export function createGetReservationHandler(shardPools: ShardPools) {
       queueAuth.queueTokenId,
     );
     reply.send(view);
+  };
+}
+
+export function createCancelReservationHandler(shardPools: ShardPools) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const paramsResult = reservationRouteParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      throw new ValidationError('route params are not valid UUIDs', {
+        issues: paramsResult.error.issues,
+      });
+    }
+    const queueAuth = request.queueAuth;
+    if (queueAuth === undefined) {
+      throw new ValidationError('missing queue authentication context');
+    }
+    await cancelReservation(
+      shardPools,
+      queueAuth.eventId,
+      paramsResult.data.reservationId,
+      queueAuth.queueTokenId,
+    );
+    reply.code(204).send();
   };
 }

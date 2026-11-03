@@ -47,13 +47,17 @@ function useDragGuard(): {
  */
 function useGuardedToggle(
   onToggleSeat: (id: string) => void,
+  onInspectSeat: ((id: string) => void) | undefined,
   selected: ReadonlySet<string>,
   statusByVenueSeatId: ReadonlyMap<string, SeatStatus>,
 ): (id: string) => void {
   const toggleRef = useRef<(id: string) => void>(onToggleSeat);
   toggleRef.current = (id) => {
-    if (selected.has(id) || statusByVenueSeatId.get(id) === 'available') {
+    const status = statusByVenueSeatId.get(id);
+    if (selected.has(id) || status === 'available') {
       onToggleSeat(id);
+    } else if (status === 'held') {
+      onInspectSeat?.(id);
     }
   };
   return useCallback((id: string) => toggleRef.current(id), []);
@@ -95,6 +99,8 @@ interface SectionViewProps {
   readonly priceByVenueSeatId: ReadonlyMap<string, number>;
   readonly selectedVenueSeatIds: ReadonlySet<string>;
   readonly onToggleSeat: (venueSeatId: string) => void;
+  /** Klick på en upptagen stol (visar när den blir ledig). */
+  readonly onInspectSeat?: (venueSeatId: string) => void;
 }
 
 function SeatLayer({
@@ -104,7 +110,7 @@ function SeatLayer({
   selectedVenueSeatIds,
   activeSeatId,
   onToggle,
-}: Omit<SectionViewProps, 'onToggleSeat'> & {
+}: Omit<SectionViewProps, 'onToggleSeat' | 'onInspectSeat'> & {
   activeSeatId: string | undefined;
   onToggle: (venueSeatId: string) => void;
 }): JSX.Element {
@@ -129,6 +135,7 @@ export function SectionView(props: SectionViewProps): JSX.Element {
   const svgRef = useRef<SVGSVGElement>(null);
   const stableToggle = useGuardedToggle(
     props.onToggleSeat,
+    props.onInspectSeat,
     selectedVenueSeatIds,
     statusByVenueSeatId,
   );

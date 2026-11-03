@@ -239,6 +239,50 @@ export async function getReservationWithSeats(
   };
 }
 
+/**
+ * Avbryter kötokenens EGEN aktiva reservation (inte `pending_payment`: en betalning på väg får aldrig rivas)
+ * och släpper dess stolar. Med `reservationId` avbryts bara just den (ett sent anrop kan då aldrig träffa en
+ * nyare reservation). Används av "avbryt bokningen" och av en ny reservation som ersätter en övergiven.
+ *
+ * Låsordningen är reservation före stolar, men båda låsen tas med NOWAIT: lazy expiry
+ * (`releaseExpiredSeatsAmong`) låser tvärtom stol före reservation, och ett blockerande lås här skulle ge en
+ * ABBA-deadlock. NOWAIT gör att den här sidan aldrig väntar (55P03 → anroparen försöker igen). Stolarna
+ * låses i id-ordning (docs/rules.md §4).
+ */
+export async function cancelActiveReservationForQueueToken(
+  client: PoolClient,
+  eventId: string,
+  queueTokenId: string,
+  reservationId?: string,
+): Promise<number> {
+  const { rows: reservations } = await client.query<{ id: string }>(
+    `SELECT id FROM reservations
+     WHERE event_id = $1 AND queue_token_id = $2 AND status = 'active'
+       AND ($3::uuid IS NULL OR id = $3::uuid)
+     FOR UPDATE NOWAIT`,
+    [eventId, queueTokenId, reservationId ?? null],
+  );
+  if (reservations.length === 0) {
+    return 0;
+  }
+  const reservationIds = reservations.map((row) => row.id);
+  const { rows: seats } = await client.query<{ id: string }>(
+    `SELECT id FROM seats
+     WHERE event_id = $1 AND reservation_id = ANY($2) AND status = 'held'
+     ORDER BY id FOR UPDATE NOWAIT`,
+    [eventId, reservationIds],
+  );
+  await client.query(
+    `UPDATE seats SET status = 'available', reservation_id = NULL, updated_at = now()
+     WHERE event_id = $1 AND id = ANY($2)`,
+    [eventId, seats.map((row) => row.id)],
+  );
+  await client.query(`UPDATE reservations SET status = 'cancelled' WHERE id = ANY($1)`, [
+    reservationIds,
+  ]);
+  return seats.length;
+}
+
 export async function attachSeatsToReservation(
   client: PoolClient,
   eventId: string,

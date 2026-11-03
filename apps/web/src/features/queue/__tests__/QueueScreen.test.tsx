@@ -22,11 +22,14 @@ function mockAdmission(partial: Partial<Admission>): void {
   });
 }
 
-function renderScreen(onRejoin = vi.fn()): ReturnType<typeof renderWithProviders> {
-  return renderWithProviders(<QueueScreen eventId="e1" onRejoin={onRejoin} />, {
-    route: '/events/e1/queue',
-    path: '/events/:eventId/queue',
-  });
+function renderScreen(
+  onRejoin = vi.fn(),
+  onExpired?: () => void,
+): ReturnType<typeof renderWithProviders> {
+  return renderWithProviders(
+    <QueueScreen eventId="e1" onRejoin={onRejoin} onExpired={onExpired} />,
+    { route: '/events/e1/queue', path: '/events/:eventId/queue' },
+  );
 }
 
 const waiting: QueueStatusResult = { status: 'waiting', position: 1234, queueDepth: 3400 };
@@ -84,6 +87,15 @@ describe('QueueScreen, avslutade tillstånd', () => {
     ).toBeInTheDocument();
   });
 
+  it('meddelar att evenemanget är slutsålt', () => {
+    mockAdmission({ status: { status: 'sold_out' } });
+    renderScreen();
+    expect(screen.getByText(/Evenemanget är slutsålt/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Ställ dig i kön igen' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('erbjuder "Ställ dig i kön igen" när kötoken gått ut', async () => {
     mockAdmission({ status: { status: 'not_found' } });
     const onRejoin = vi.fn();
@@ -104,5 +116,21 @@ describe('QueueScreen, avslutade tillstånd', () => {
     mockAdmission({ status: waiting });
     const { container } = renderScreen();
     await expectNoA11yViolations(container);
+  });
+});
+
+describe('QueueScreen, utgången plats', () => {
+  it('meddelar sidan när den sparade platsen har gått ut, så att den kan ställa användaren i kön igen', () => {
+    mockAdmission({ status: { status: 'not_found' } });
+    const onExpired = vi.fn();
+    renderScreen(vi.fn(), onExpired);
+    expect(onExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('meddelar inte sidan så länge användaren väntar eller är insläppt', () => {
+    mockAdmission({ status: waiting });
+    const onExpired = vi.fn();
+    renderScreen(vi.fn(), onExpired);
+    expect(onExpired).not.toHaveBeenCalled();
   });
 });

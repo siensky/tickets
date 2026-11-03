@@ -2,7 +2,95 @@
 
 Översikt över hur systemet hänger ihop. Detaljerna och motiveringarna finns i
 [plan.md](./plan.md), [forsvar.md](./forsvar.md) och ADR:erna i [adr/](./adr/). Diagrammen är
-Mermaid-block som GitHub ritar upp.
+Mermaid-block som GitHub ritar upp. Klustret (noder, namnrymder, poddar) ritas separat i
+[cluster.md](./cluster.md).
+
+## Hela systemet
+
+Pilarnas form visar hur delarna pratar: heldragen pil = HTTP(S), tjock pil = WebSocket, streckad pil =
+RabbitMQ (AMQP) eller Redis pub/sub. Postgres är sanningen, Redis är snabb hjälp som får gå förlorad.
+
+```mermaid
+flowchart LR
+  subgraph Klienter
+    WEB["Webbapp (React PWA)<br/>tikknet.se"]
+    SCAN["Scanner (React-webbapp)<br/>scan.tikknet.se<br/>(Worker ej applicerad)"]
+  end
+
+  subgraph CF["Cloudflare"]
+    EDGE["Proxy: DNS, TLS, DDoS<br/>api.tikknet.se"]
+    WK["Workers + R2<br/>statiska filer, /ingest"]
+    TS["Turnstile"]
+  end
+
+  subgraph EXT["Externa tjänster"]
+    A0["Auth0<br/>inloggning, JWT"]
+    ST["Stripe<br/>Checkout"]
+    PH["PostHog EU"]
+  end
+
+  subgraph K8S["k3s-kluster på Hetzner"]
+    ING["ingress-nginx"]
+    BA["booking-api<br/>HTTP-API + konsument"]
+    RG["realtime-gateway<br/>WebSocket"]
+    SW["scheduler-worker<br/>insläpp, frisläpp,<br/>outbox-relay, mått"]
+    NW["notification-worker<br/>mejl (simulerade)"]
+    PM["payment-mock<br/>bara lasttest"]
+    PG[("Postgres shard-0 + shard-1<br/>md5(event_id) % 2")]
+    RE[("Redis<br/>kö, rate limit, cache,<br/>pub/sub ws:*")]
+    MQ{{"RabbitMQ<br/>exchange domain-events"}}
+  end
+
+  WEB -->|"HTTPS: hämta appen"| WK
+  SCAN -->|"HTTPS: hämta appen"| WK
+  WEB -->|"HTTP: events, kö, karta,<br/>reservation, checkout, biljetter"| EDGE
+  SCAN -->|"HTTP: POST /scans"| EDGE
+  WEB ==>|"WebSocket: admitted,<br/>sales_closed, seat_taken"| EDGE
+  WEB -->|"OIDC-inloggning"| A0
+  SCAN -->|"OIDC-inloggning (staff)"| A0
+  WEB -->|"Turnstile-widget"| TS
+  WEB -->|"betala"| ST
+  WK -->|"/ingest proxy"| PH
+
+  EDGE --> ING
+  ING -->|"HTTP"| BA
+  ING ==>|"WebSocket"| RG
+
+  BA -->|"SQL: lås platser,<br/>outbox i samma transaktion"| PG
+  BA -->|"kö-Lua, rate limit, cache"| RE
+  BA -.->|"pub/sub: seat_taken"| RE
+  BA -->|"HTTP: skapa session, refund"| ST
+  ST -->|"HTTP: webhook<br/>checkout.session.completed"| BA
+  BA -->|"JWKS: verifiera JWT"| A0
+  BA -->|"verifiera Turnstile-svar"| TS
+  BA -->|"serverhändelser"| PH
+
+  SW -->|"SQL: utgångna reservationer,<br/>läs outbox (SKIP LOCKED)"| PG
+  SW -->|"släpp in ur ZSET"| RE
+  SW -.->|"pub/sub: admitted, sales_closed, sold_out"| RE
+  RE -.->|"psubscribe ws:*"| RG
+
+  SW -.->|"AMQP publish: reservation.created,<br/>payment.succeeded, order.confirmed,<br/>order.refunded, order.seat_refunded"| MQ
+  MQ -.->|"payment.succeeded<br/>kö booking-api.payment-succeeded"| BA
+  MQ -.->|"order.*<br/>kö notification-worker.order-events"| NW
+  NW -->|"dedupe-nyckel"| RE
+  PM -.->|"webhook i lasttest<br/>(i stället för Stripe)"| BA
+```
+
+Händelserna och vem som tar emot dem:
+
+| Event | Skrivs i outbox av | Konsumeras av |
+|---|---|---|
+| `reservation.created` | booking-api, vid reservation | ingen (publiceras, ingen kö binder den) |
+| `payment.succeeded` | booking-api, i Stripe-webhooken | booking-api: biljetter, order `paid`, ev. återbetalning |
+| `order.confirmed` | booking-api, när biljetterna skapats | notification-worker: bekräftelsemejl |
+| `order.refunded` | booking-api, vid hel återbetalning | notification-worker: återbetalningsmejl |
+| `order.seat_refunded` | booking-api, vid återbetalning av enstaka platser | notification-worker |
+
+Varje kö har leveransgräns 5 och en dödkö `<kö>.dead` via `tickets.dlx`. WebSocket-meddelandena
+(`admitted`, `sales_closed`, `sold_out`, `seat_taken`) är fire-and-forget: allt kan också läsas via
+HTTP. Webbappen lyssnar i dag bara på `seat_taken` över WebSocket; kösidan pollar `GET /queue/status`
+var 2:a sekund.
 
 ## Från webbläsare till databas
 
@@ -100,9 +188,12 @@ flowchart TB
   subgraph observability
     PR[Prometheus] --> GR[Grafana]
     AL[Alloy] --> LO[Loki] --> GR
+    AL -.-> TE["Tempo<br/>(byggt, ej applicerat)"] -.-> GR
+    PR --> AM[Alertmanager] --> SL[Slack #tickets-alerts]
   end
-  BA & RG & SW & NW -->|/metrics| PR
-  BA & RG & SW & NW -->|loggar| AL
+  BA & RG & SW & NW -->|/metrics, Prometheus hämtar| PR
+  BA & RG & SW & NW -->|loggar stdout| AL
+  BA & RG & SW & NW -->|traces OTLP, 10 %| AL
   IN[ingress-nginx<br/>metrics] --> PR
   RQ[(RabbitMQ<br/>ködjup)] -->|trigger| NW
   CJ[Backup-CronJob<br/>pg_dump nattligen] --> R2[(R2)]

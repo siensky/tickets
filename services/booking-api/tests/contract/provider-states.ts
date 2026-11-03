@@ -103,7 +103,7 @@ async function seedEvent(
 async function issueAdmittedQueueToken(ctx: StateContext): Promise<string> {
   const issued = await issueQueueToken(ctx.queueTokenSecret, EVENT_ID, 3600);
   await joinWaitingRoom(ctx.redis, EVENT_ID, issued.queueTokenId);
-  await admitNextBatch(ctx.redis, EVENT_ID, 10, 600, 15);
+  await admitNextBatch(ctx.redis, EVENT_ID, 10, 600, 600);
   ctx.currentQueueToken = issued.token;
   return issued.queueTokenId;
 }

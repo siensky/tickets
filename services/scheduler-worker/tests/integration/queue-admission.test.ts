@@ -41,6 +41,49 @@ async function seedQueueConfig(
   );
 }
 
+async function seedSeats(
+  infra: TestInfra,
+  eventId: string,
+  statuses: readonly string[],
+): Promise<void> {
+  for (const [index, status] of statuses.entries()) {
+    await infra.shardPools.pools[0].query(
+      `INSERT INTO seats (event_id, venue_seat_id, section_id, row, number, ticket_number, price_cents, status)
+       VALUES ($1, gen_random_uuid(), gen_random_uuid(), 'A', $2, $3, 50000, $4)`,
+      [eventId, index + 1, `T-${index + 1}`, status],
+    );
+  }
+}
+
+/** Startar jobbet, väntar tills `token` fått sitt första meddelande och returnerar det. */
+async function firstMessageAfterTick(
+  infra: TestInfra,
+  redis: TestRedis,
+  token: string,
+): Promise<string> {
+  const notified: string[] = [];
+  const subscription = await subscribeToChannel(redis.client, wsChannel(token), (payload) => {
+    notified.push(JSON.stringify(payload));
+  });
+  const job = startQueueAdmissionJob(
+    infra.shardPools,
+    redis.client,
+    logger,
+    businessMetrics,
+    200,
+  );
+  try {
+    await waitFor(() => Promise.resolve(notified.length > 0), {
+      timeoutMs: 5000,
+      intervalMs: 100,
+    });
+    return notified[0] ?? '';
+  } finally {
+    await job.stop();
+    await subscription.unsubscribe();
+  }
+}
+
 describe('queue admission job', () => {
   let infra: TestInfra;
   let redis: TestRedis;
@@ -147,5 +190,38 @@ describe('queue admission job', () => {
       await job.stop();
       await subscription.unsubscribe();
     }
+  }, 30_000);
+
+  it('drains the queue with "sold_out" once every seat is sold, while the sale is still open', async () => {
+    const eventId = randomUUID();
+    await seedEvent(infra, {
+      eventId,
+      salesOpenAt: new Date(Date.now() - 60_000),
+      salesCloseAt: new Date(Date.now() + 60 * 60_000),
+    });
+    await seedSeats(infra, eventId, ['sold', 'sold']);
+    await seedQueueConfig(infra, 300, 10);
+    await joinWaitingRoom(redis.client, eventId, 'too-late');
+
+    const message = await firstMessageAfterTick(infra, redis, 'too-late');
+
+    expect(message).toContain('sold_out');
+    expect(await redis.client.exists(admittedKey(eventId, 'too-late'))).toBe(0);
+  }, 30_000);
+
+  it('keeps the queue moving while a held seat may still come back', async () => {
+    const eventId = randomUUID();
+    await seedEvent(infra, {
+      eventId,
+      salesOpenAt: new Date(Date.now() - 60_000),
+      salesCloseAt: new Date(Date.now() + 60 * 60_000),
+    });
+    await seedSeats(infra, eventId, ['sold', 'held']);
+    await seedQueueConfig(infra, 300, 10);
+    await joinWaitingRoom(redis.client, eventId, 'hopeful');
+
+    const message = await firstMessageAfterTick(infra, redis, 'hopeful');
+
+    expect(message).toContain('admitted');
   }, 30_000);
 });

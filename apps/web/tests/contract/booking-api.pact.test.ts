@@ -176,6 +176,7 @@ describe('web → booking-api', () => {
             venueSeatId: uuid(),
             status: regex(/^(available|held|sold)$/, 'available'),
             priceCents: integer(39_500),
+            heldUntil: Matchers.nullValue(),
           }),
         });
       })

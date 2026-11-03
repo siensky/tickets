@@ -18,10 +18,13 @@ const CONFIG_KEYS = [
 
 const QUEUE_CONFIG_KEYS = [
   'queue_admission_rate_per_minute',
-  'queue_session_total_minutes',
   'queue_session_inactivity_minutes',
   'queue_direct_admit_limit',
+  'queue_booking_window_minutes',
 ] as const;
+
+/** Bokningsfönstret saknas om migrationen inte hunnit köra än: standardvärdet håller `queue/join` igång. */
+export const DEFAULT_BOOKING_WINDOW_MINUTES = '10';
 
 export async function getReservationConfig(pool: Pool): Promise<ReservationConfig> {
   const { rows } = await pool.query<{ key: string; value: string }>(
@@ -75,12 +78,12 @@ export async function getQueueConfig(pool: Pool): Promise<QueueConfig> {
   const values = new Map(rows.map((row) => [row.key, row.value]));
 
   const admissionRatePerMinute = values.get('queue_admission_rate_per_minute');
-  const sessionTotalMinutes = values.get('queue_session_total_minutes');
   const sessionInactivityMinutes = values.get('queue_session_inactivity_minutes');
   const directAdmitLimit = values.get('queue_direct_admit_limit');
+  const bookingWindowMinutes =
+    values.get('queue_booking_window_minutes') ?? DEFAULT_BOOKING_WINDOW_MINUTES;
   if (
     admissionRatePerMinute === undefined ||
-    sessionTotalMinutes === undefined ||
     sessionInactivityMinutes === undefined ||
     directAdmitLimit === undefined
   ) {
@@ -94,15 +97,15 @@ export async function getQueueConfig(pool: Pool): Promise<QueueConfig> {
       'queue_admission_rate_per_minute',
       admissionRatePerMinute,
     ),
-    sessionTotalMinutes: parsePositiveInteger(
-      'queue_session_total_minutes',
-      sessionTotalMinutes,
-    ),
     sessionInactivityMinutes: parsePositiveInteger(
       'queue_session_inactivity_minutes',
       sessionInactivityMinutes,
     ),
     directAdmitLimit: parseNonNegativeInteger('queue_direct_admit_limit', directAdmitLimit),
+    bookingWindowMinutes: parsePositiveInteger(
+      'queue_booking_window_minutes',
+      bookingWindowMinutes,
+    ),
   };
 }
 

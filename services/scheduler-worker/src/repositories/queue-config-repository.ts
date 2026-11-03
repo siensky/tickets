@@ -1,10 +1,7 @@
 /**
  * Läser väntrummets config-nycklar (docs/plan.md "Väntrum": "ändringsbara
  * live"). Egen, minimal kopia av booking-apis motsvarighet (docs/rules.md
- * §1). Läser numera även `queue_session_total_minutes` — Fas 6
- * (Fas 3-reviewns notering): insläppsjobbet måste kunna räkna ut om en
- * ZSET-post redan är för gammal INNAN den markeras insläppt, annars
- * slösas insläppskvoten på döda sessioner i en djup kö.
+ * §1).
  */
 import { InternalError } from '@tickets/domain';
 import type { Pool } from 'pg';
@@ -13,8 +10,11 @@ import type { QueueConfig } from '../types/queue-config.js';
 const QUEUE_CONFIG_KEYS = [
   'queue_admission_rate_per_minute',
   'queue_session_inactivity_minutes',
-  'queue_session_total_minutes',
+  'queue_booking_window_minutes',
 ] as const;
+
+/** Samma standardvärde som booking-api: saknas nyckeln (migrationen ej körd) fortsätter insläppet. */
+const DEFAULT_BOOKING_WINDOW_MINUTES = '10';
 
 function parsePositiveInteger(key: string, rawValue: string): number {
   const value = Number(rawValue);
@@ -33,12 +33,9 @@ export async function getQueueConfig(pool: Pool): Promise<QueueConfig> {
 
   const admissionRatePerMinute = values.get('queue_admission_rate_per_minute');
   const sessionInactivityMinutes = values.get('queue_session_inactivity_minutes');
-  const sessionTotalMinutes = values.get('queue_session_total_minutes');
-  if (
-    admissionRatePerMinute === undefined ||
-    sessionInactivityMinutes === undefined ||
-    sessionTotalMinutes === undefined
-  ) {
+  const bookingWindowMinutes =
+    values.get('queue_booking_window_minutes') ?? DEFAULT_BOOKING_WINDOW_MINUTES;
+  if (admissionRatePerMinute === undefined || sessionInactivityMinutes === undefined) {
     throw new InternalError('Queue config keys are missing from the config table', {
       foundKeys: [...values.keys()],
     });
@@ -53,9 +50,9 @@ export async function getQueueConfig(pool: Pool): Promise<QueueConfig> {
       'queue_session_inactivity_minutes',
       sessionInactivityMinutes,
     ),
-    sessionTotalMinutes: parsePositiveInteger(
-      'queue_session_total_minutes',
-      sessionTotalMinutes,
+    bookingWindowMinutes: parsePositiveInteger(
+      'queue_booking_window_minutes',
+      bookingWindowMinutes,
     ),
   };
 }

@@ -11,7 +11,6 @@
 export const OUTBOX_EXCHANGE = 'domain-events';
 
 export const OUTBOX_EVENT_TYPES = {
-  RESERVATION_CREATED: 'reservation.created',
   PAYMENT_SUCCEEDED: 'payment.succeeded',
   ORDER_CONFIRMED: 'order.confirmed',
   ORDER_REFUNDED: 'order.refunded',
@@ -19,15 +18,6 @@ export const OUTBOX_EVENT_TYPES = {
 } as const;
 
 export type OutboxEventType = (typeof OUTBOX_EVENT_TYPES)[keyof typeof OUTBOX_EVENT_TYPES];
-
-/** Payload for `reservation.created` — written when a reservation succeeds. */
-export interface ReservationCreatedPayload {
-  readonly reservationId: string;
-  readonly eventId: string;
-  readonly queueTokenId: string;
-  readonly seatIds: readonly string[];
-  readonly expiresAt: string;
-}
 
 /**
  * Payload for `payment.succeeded` — written by the Stripe/payment-mock

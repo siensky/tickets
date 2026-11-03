@@ -12,6 +12,7 @@ interface RawSeatStatusRow {
   venue_seat_id: string;
   status: SeatStatus;
   price_cents: number;
+  held_until: Date | null;
 }
 
 /** `event_id` AND `section_id` both present (docs/rules.md §4: shard-nyckel i varje fråga). */
@@ -21,7 +22,12 @@ export async function listSeatStatusesForSection(
   sectionId: string,
 ): Promise<SeatStatusRow[]> {
   const { rows } = await pool.query<RawSeatStatusRow>(
-    'SELECT id, venue_seat_id, status, price_cents FROM seats WHERE event_id = $1 AND section_id = $2',
+    // `held_until`: när en vanlig (ännu ej betalande) reservation går ut; NULL för lediga, sålda och stolar i betalning.
+    `SELECT s.id, s.venue_seat_id, s.status, s.price_cents, r.expires_at AS held_until
+     FROM seats s
+     LEFT JOIN reservations r
+       ON r.event_id = s.event_id AND r.id = s.reservation_id AND r.status = 'active'
+     WHERE s.event_id = $1 AND s.section_id = $2`,
     [eventId, sectionId],
   );
   return rows.map((row) => ({
@@ -29,6 +35,7 @@ export async function listSeatStatusesForSection(
     venueSeatId: row.venue_seat_id,
     status: row.status,
     priceCents: row.price_cents,
+    heldUntil: row.status === 'held' ? row.held_until : null,
   }));
 }
 

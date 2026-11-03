@@ -6,8 +6,9 @@
 
 export interface QueueConfig {
   readonly admissionRatePerMinute: number;
-  readonly sessionTotalMinutes: number;
   readonly sessionInactivityMinutes: number;
+  /** Tid att boka efter insläpp. Räknas från INSLÄPPET, inte från JOIN. */
+  readonly bookingWindowMinutes: number;
   /** Direktinsläpp: så många per event får vara insläppta utan kö. 0 = alla köar. */
   readonly directAdmitLimit: number;
 }
@@ -17,6 +18,8 @@ export interface EventSalesWindow {
   readonly salesCloseAt: Date;
   readonly isBeforeOpen: boolean;
   readonly isAfterClose: boolean;
+  /** Sekunder kvar till `sales_close_at`, räknat av Postgres (0 om den redan passerats). */
+  readonly secondsUntilClose: number;
 }
 
 export interface JoinQueueInput {
@@ -32,4 +35,5 @@ export type QueueStatusResult =
   | { readonly status: 'waiting'; readonly position: number; readonly queueDepth: number }
   | { readonly status: 'admitted' }
   | { readonly status: 'sales_closed' }
+  | { readonly status: 'sold_out' }
   | { readonly status: 'not_found' };

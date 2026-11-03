@@ -1,9 +1,10 @@
 /**
  * The reservation transaction (docs/plan.md "Concurrency-kärnan"):
- * all-or-nothing seat locking with lazy expiry, idempotency, and a
- * same-transaction outbox write. No HTTP here — Fas 3 adds the
- * controller/route once the real queue token exists; callers for now
- * are the crown-jewel integration tests.
+ * all-or-nothing seat locking with lazy expiry and idempotency. No
+ * HTTP here — the controller/route lives in controllers/ and routes/.
+ * Deliberately NO outbox write: nothing consumes a "reservation created"
+ * event (docs/plan.md "Idempotens": the outbox carries payment and order
+ * events), and the extra INSERT would sit inside the hottest transaction.
  *
  * The idempotency claim/complete calls run OUTSIDE the seat-locking
  * transaction, on their own connection — see
@@ -23,9 +24,7 @@ import {
   ActiveReservationExistsError,
   IdempotencyConflictError,
   NotFoundError,
-  OUTBOX_EVENT_TYPES,
   SeatUnavailableError,
-  type ReservationCreatedPayload,
 } from '@tickets/domain';
 import type { Pool, PoolClient } from 'pg';
 import { getReservationConfig } from '../repositories/config-repository.js';
@@ -35,9 +34,9 @@ import {
   deleteIdempotencyKey,
 } from '../repositories/idempotency-repository.js';
 import { getSectionNames } from '../repositories/venues-repository.js';
-import { insertOutboxEvent } from '../repositories/outbox-repository.js';
 import {
   attachSeatsToReservation,
+  cancelActiveReservationForQueueToken,
   getReservationSeatDetails,
   getReservationWithSeats,
   insertReservation,
@@ -59,6 +58,7 @@ import type {
   ReserveSeatsInput,
 } from '../types/reservation.js';
 
+const CANCEL_ATTEMPTS = 3;
 const IDEMPOTENCY_KEY_TTL_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_QUEUE_TOKEN_CONSTRAINT = 'reservations_active_queue_token_unique';
 // Idempotency keys are scoped to (event, principal, operation) per
@@ -121,6 +121,37 @@ export async function reserveSeats(
   // retries on a transient blip is safe and fixes the common case.
   await completeIdempotencyKeyWithRetries(pool, idempotencyScope, result);
   return result;
+}
+
+/**
+ * `DELETE /reservations/:id`: användaren avbryter sin bokning (bakåtpil/"Avbryt"). Idempotent och
+ * begränsad till den anropande kötokenens egen aktiva reservation med just det id:t; en reservation i
+ * betalning (`pending_payment`) eller redan köpt lämnas orörd. Lås som inte går att ta direkt (en
+ * samtidig reservation/utgång på samma stolar) försöks om några gånger, sedan ett 409 klienten kan upprepa.
+ */
+export async function cancelReservation(
+  shardPools: ShardPools,
+  eventId: string,
+  reservationId: string,
+  queueTokenId: string,
+): Promise<void> {
+  const pool = getPoolForEvent(shardPools, eventId);
+  for (let attempt = 1; attempt <= CANCEL_ATTEMPTS; attempt++) {
+    try {
+      await withTransaction(pool, (client) =>
+        cancelActiveReservationForQueueToken(client, eventId, queueTokenId, reservationId),
+      );
+      return;
+    } catch (error) {
+      if (!isLockNotAvailable(error) && !isDeadlockDetected(error)) {
+        throw error;
+      }
+      if (attempt === CANCEL_ATTEMPTS) {
+        throw new SeatUnavailableError([]);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+    }
+  }
 }
 
 /**
@@ -201,6 +232,10 @@ async function createReservation(
   input: ReserveSeatsInput,
   config: ReservationConfig,
 ): Promise<ReservationResult> {
+  // En ny reservation ersätter kötokenens egen övergivna (eller utgångna men ännu inte städade) aktiva
+  // reservation. Annars låser den gamla, osynliga reservationen ute användaren tills städjobbet hunnit
+  // släppa den. En reservation i betalning (`pending_payment`) rörs inte: indexet ger då fortfarande 409.
+  await cancelActiveReservationForQueueToken(client, input.eventId, input.queueTokenId);
   const { locked, lockFailedSeatIds } = await lockSeats(client, input.eventId, input.seatIds);
 
   const foundIds = new Set(locked.map((row) => row.seatId));
@@ -231,7 +266,6 @@ async function createReservation(
     jitterMaxSeconds: config.releaseJitterMaxSeconds,
   });
   await attachSeatsToReservation(client, input.eventId, reservation.id, input.seatIds);
-  await writeReservationCreatedOutboxEvent(client, input, reservation);
 
   return toReservationResult({
     reservationId: reservation.id,
@@ -239,24 +273,5 @@ async function createReservation(
     queueTokenId: input.queueTokenId,
     seatIds: input.seatIds,
     expiresAt: reservation.expiresAt,
-  });
-}
-
-async function writeReservationCreatedOutboxEvent(
-  client: PoolClient,
-  input: ReserveSeatsInput,
-  reservation: { id: string; expiresAt: Date },
-): Promise<void> {
-  const payload: ReservationCreatedPayload = {
-    reservationId: reservation.id,
-    eventId: input.eventId,
-    queueTokenId: input.queueTokenId,
-    seatIds: input.seatIds,
-    expiresAt: reservation.expiresAt.toISOString(),
-  };
-  await insertOutboxEvent(client, {
-    eventId: input.eventId,
-    type: OUTBOX_EVENT_TYPES.RESERVATION_CREATED,
-    payload,
   });
 }

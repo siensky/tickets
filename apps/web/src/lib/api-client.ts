@@ -6,6 +6,9 @@
  */
 
 import type { EventCategory } from './categories.js';
+import type { MyTicketOrder } from './my-ticket-types.js';
+
+export type { MyTicket, MyTicketOrder } from './my-ticket-types.js';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -31,7 +34,12 @@ interface ErrorBody {
 
 async function request<T>(
   path: string,
-  options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
+  options: {
+    method?: string;
+    body?: unknown;
+    headers?: Record<string, string>;
+    cache?: RequestCache;
+  } = {},
 ): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: options.method ?? 'GET',
@@ -40,6 +48,7 @@ async function request<T>(
       ...options.headers,
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    cache: options.cache,
   });
 
   if (response.status === 204) {
@@ -143,7 +152,8 @@ export interface SectionSummary {
 }
 
 export function getSectionSummary(eventId: string): Promise<SectionSummary> {
-  return request(`/events/${eventId}/sections/summary`);
+  // `no-store`: kartan pollar var 10:e sekund och får aldrig serveras ur webbläsarens egen HTTP-cache.
+  return request(`/events/${eventId}/sections/summary`, { cache: 'no-store' });
 }
 
 export interface SeatGeometry {
@@ -168,13 +178,19 @@ export interface SeatStatusEntry {
   readonly venueSeatId: string;
   readonly status: SeatStatus;
   readonly priceCents: number;
+  /** ISO-tid då en aktiv reservation på stolen går ut; `null` för lediga, sålda och stolar i betalning. */
+  readonly heldUntil: string | null;
 }
 
 export function getSectionSeatStatus(
   eventId: string,
   sectionId: string,
 ): Promise<{ seats: SeatStatusEntry[] }> {
-  return request(`/events/${eventId}/sections/${sectionId}/seats/status`);
+  // `no-store`: Cloudflares "Browser Cache TTL" kan annars höja `max-age=1` till timmar, och då visar
+  // pollingen (var 2:a sekund) en gammal karta ur webbläsarens cache.
+  return request(`/events/${eventId}/sections/${sectionId}/seats/status`, {
+    cache: 'no-store',
+  });
 }
 
 export interface JoinQueueResult {
@@ -194,7 +210,8 @@ export type QueueStatusResult =
   | { readonly status: 'waiting'; readonly position: number; readonly queueDepth: number }
   | { readonly status: 'admitted' }
   | { readonly status: 'not_found' }
-  | { readonly status: 'sales_closed' };
+  | { readonly status: 'sales_closed' }
+  | { readonly status: 'sold_out' };
 
 export function getQueueStatus(
   eventId: string,
@@ -224,6 +241,18 @@ export function createReservation(
     method: 'POST',
     body: { seatIds },
     headers: { 'x-queue-token': queueToken, 'idempotency-key': idempotencyKey },
+  });
+}
+
+/** Avbryter den egna aktiva reservationen och släpper stolarna. Idempotent (204 även när den inte längre är aktiv). */
+export function cancelReservation(
+  eventId: string,
+  reservationId: string,
+  queueToken: string,
+): Promise<void> {
+  return request(`/events/${eventId}/reservations/${reservationId}`, {
+    method: 'DELETE',
+    headers: { 'x-queue-token': queueToken },
   });
 }
 
@@ -316,30 +345,6 @@ export function getOrder(
   return request(`/events/${eventId}/orders/${orderId}`, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
-}
-
-export interface MyTicket {
-  readonly ticketId: string;
-  readonly seatId: string;
-  readonly sectionId: string;
-  readonly sectionName: string;
-  readonly row: string;
-  readonly number: number;
-  readonly status: string;
-  readonly qrToken: string;
-}
-
-export interface MyTicketOrder {
-  readonly orderId: string;
-  readonly eventId: string;
-  readonly eventTitle: string;
-  readonly eventStartsAt: string | null;
-  readonly venueName: string;
-  readonly venueCity: string;
-  readonly status: string;
-  readonly totalCents: number;
-  readonly createdAt: string;
-  readonly tickets: readonly MyTicket[];
 }
 
 export function listMyTickets(accessToken: string): Promise<{ orders: MyTicketOrder[] }> {

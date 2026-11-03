@@ -45,6 +45,10 @@ import {
   startReservationReleaseJob,
   type ReservationReleaseJob,
 } from './services/reservation-release-service.js';
+import {
+  startReservationRetentionJob,
+  type ReservationRetentionJob,
+} from './services/reservation-retention-service.js';
 
 const SERVICE_NAME = 'scheduler-worker';
 
@@ -80,6 +84,7 @@ function createShutdownHandler(
     app: FastifyApp;
     heartbeat: NodeJS.Timeout;
     reservationRelease: ReservationReleaseJob;
+    reservationRetention: ReservationRetentionJob;
     outboxRelay: OutboxRelay;
     queueAdmission: QueueAdmissionJob;
     businessMetrics: BusinessMetricsJob;
@@ -93,6 +98,7 @@ function createShutdownHandler(
     clearInterval(resources.heartbeat);
     await resources.app.close();
     await resources.reservationRelease.stop();
+    await resources.reservationRetention.stop();
     await resources.outboxRelay.stop();
     await resources.queueAdmission.stop();
     await resources.businessMetrics.stop();
@@ -163,6 +169,7 @@ export async function start(): Promise<void> {
     app,
     heartbeat,
     reservationRelease,
+    reservationRetention: startReservationRetentionJob(shardPools, logger),
     outboxRelay,
     queueAdmission,
     businessMetrics: businessMetricsJob,

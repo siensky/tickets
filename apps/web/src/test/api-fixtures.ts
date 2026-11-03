@@ -30,6 +30,7 @@ export const EVENT: api.EventSummary = {
 };
 
 function mockSeatResponses(): void {
+  vi.mocked(api.cancelReservation).mockResolvedValue(undefined);
   vi.mocked(api.getSectionGeometry).mockResolvedValue({
     seats: [
       { id: 'vs1', row: 'A', number: 1, x: 1, y: 1 },
@@ -39,9 +40,21 @@ function mockSeatResponses(): void {
   });
   vi.mocked(api.getSectionSeatStatus).mockResolvedValue({
     seats: [
-      { seatId: 'a', venueSeatId: 'vs1', status: 'available', priceCents: 39_500 },
-      { seatId: 'b', venueSeatId: 'vs2', status: 'held', priceCents: 39_500 },
-      { seatId: 'c', venueSeatId: 'vs3', status: 'sold', priceCents: 39_500 },
+      {
+        seatId: 'a',
+        venueSeatId: 'vs1',
+        status: 'available',
+        priceCents: 39_500,
+        heldUntil: null,
+      },
+      {
+        seatId: 'b',
+        venueSeatId: 'vs2',
+        status: 'held',
+        priceCents: 39_500,
+        heldUntil: '2030-01-01T12:05:00.000Z',
+      },
+      { seatId: 'c', venueSeatId: 'vs3', status: 'sold', priceCents: 39_500, heldUntil: null },
     ],
   });
 }

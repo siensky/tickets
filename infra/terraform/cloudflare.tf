@@ -86,6 +86,11 @@ resource "cloudflare_ruleset" "edge_cache" {
           mode    = "override_origin"
           default = 1
         }
+        # Zonens "Browser Cache TTL" (standard 4 h) höjer annars origins `max-age=1` till `max-age=14400`, och
+        # webbläsaren visar då en gammal stolskarta i timmar. `respect_origin` låter API:ts egen header gälla.
+        browser_ttl = {
+          mode = "respect_origin"
+        }
       }
     },
     {
@@ -99,6 +104,9 @@ resource "cloudflare_ruleset" "edge_cache" {
       action_parameters = {
         cache = true
         edge_ttl = {
+          mode = "respect_origin"
+        }
+        browser_ttl = {
           mode = "respect_origin"
         }
       }

@@ -9,11 +9,15 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { track } from '../../lib/analytics.js';
 import { ApiError, createReservation } from '../../lib/api-client.js';
+import { storeLastReservationId } from '../../lib/reservation-storage.js';
 import { useEventContext } from '../analytics/use-event-context.js';
 
 function describeError(error: Error | null): string | undefined {
   if (error === null) {
     return undefined;
+  }
+  if (error instanceof ApiError && error.code === 'ACTIVE_RESERVATION_EXISTS') {
+    return 'Du har en bokning som redan är på väg att betalas. Vänta några minuter och försök igen.';
   }
   if (error instanceof ApiError && error.status === 409) {
     return 'En eller flera av platserna hann bli upptagna. Välj andra platser.';
@@ -34,6 +38,7 @@ export function useReservationSubmit(
   const mutation = useMutation({
     mutationFn: () => createReservation(eventId, queueToken ?? '', seatIds, idempotencyKey),
     onSuccess: (result) => {
+      storeLastReservationId(eventId, result.reservationId);
       if (eventContext !== undefined) {
         track('reservation_created', { ...eventContext, seat_count: seatIds.length });
       }

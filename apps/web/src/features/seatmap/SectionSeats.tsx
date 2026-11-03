@@ -17,11 +17,21 @@ import { useTrackSeatsSelected } from '../analytics/use-track-seats-selected.js'
 import { BookingSummaryPanel } from '../booking/BookingSummaryPanel.js';
 import { MobileSummaryBar } from '../booking/MobileSummaryBar.js';
 import { useReservationSubmit } from '../booking/use-reservation-submit.js';
+import { useHeldSeatNotice } from './HeldSeatNotice.js';
 import { SeatLegend } from './SeatLegend.js';
 import { SectionView } from './SectionView.js';
 import { useSectionSelection } from './use-section-selection.js';
 
 const SEAT_STATUS_POLL_MS = 2000;
+
+interface SeatSelectorProps {
+  readonly eventId: string;
+  readonly eventTitle: string;
+  readonly sectionName: string;
+  readonly geometry: readonly SeatGeometry[];
+  readonly seatStatuses: readonly SeatStatusEntry[];
+  readonly queueToken: string | undefined;
+}
 
 function SeatSelector({
   eventId,
@@ -30,14 +40,7 @@ function SeatSelector({
   geometry,
   seatStatuses,
   queueToken,
-}: {
-  eventId: string;
-  eventTitle: string;
-  sectionName: string;
-  geometry: readonly SeatGeometry[];
-  seatStatuses: readonly SeatStatusEntry[];
-  queueToken: string | undefined;
-}): JSX.Element {
+}: SeatSelectorProps): JSX.Element {
   const selection = useSectionSelection(
     eventId,
     queueToken,
@@ -46,6 +49,7 @@ function SeatSelector({
     seatStatuses,
   );
   const submit = useReservationSubmit(eventId, queueToken, selection.seatIds);
+  const heldSeat = useHeldSeatNotice(geometry, seatStatuses);
   useTrackSeatsSelected(eventId, selection.seatIds.length);
   const summaryProps = {
     eventTitle,
@@ -59,12 +63,14 @@ function SeatSelector({
     <div className="grid gap-6 pb-24 lg:grid-cols-[1fr_360px] lg:pb-0">
       <div className="flex min-w-0 flex-col gap-4">
         <SeatLegend />
+        {heldSeat.notice}
         <SectionView
           geometry={geometry}
           statusByVenueSeatId={selection.statusByVenueSeatId}
           priceByVenueSeatId={selection.priceByVenueSeatId}
           selectedVenueSeatIds={selection.selected}
           onToggleSeat={selection.toggle}
+          onInspectSeat={heldSeat.inspect}
         />
       </div>
       <aside className="hidden lg:sticky lg:top-24 lg:block lg:self-start">

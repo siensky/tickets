@@ -13,6 +13,7 @@ import { buttonClass } from '../components/ui/Button.js';
 import { Container } from '../components/ui/Container.js';
 import { ErrorState } from '../components/ui/ErrorState.js';
 import { Skeleton } from '../components/ui/Skeleton.js';
+import { BookingNav } from '../features/checkout/BookingNav.js';
 import { CheckoutReview } from '../features/checkout/CheckoutReview.js';
 import { CheckoutSteps } from '../features/checkout/CheckoutSteps.js';
 import { ReservationExpiredModal } from '../features/checkout/ReservationExpiredModal.js';
@@ -113,15 +114,27 @@ function MissingReservation({ eventId }: { eventId: string }): JSX.Element {
 
 function ReservationContent({
   eventId,
+  queueToken,
   reservation,
   checkout,
 }: {
   eventId: string;
+  queueToken: string;
   reservation: ReservationView;
   checkout: ReturnType<typeof useReservationCheckout>['checkoutMutation'];
 }): JSX.Element {
   if (reservation.status === 'active') {
-    return <ActiveCheckout eventId={eventId} reservation={reservation} checkout={checkout} />;
+    return (
+      <>
+        <BookingNav
+          eventId={eventId}
+          reservationId={reservation.reservationId}
+          queueToken={queueToken}
+          isPaying={checkout.isPending}
+        />
+        <ActiveCheckout eventId={eventId} reservation={reservation} checkout={checkout} />
+      </>
+    );
   }
   if (reservation.status === 'expired' || reservation.status === 'cancelled') {
     return <ReservationExpiredModal open eventId={eventId} />;
@@ -184,6 +197,7 @@ export function ReservationPage(): JSX.Element {
       <CheckoutSteps current="Granska" />
       <ReservationContent
         eventId={eventId}
+        queueToken={queueToken}
         reservation={reservationQuery.data}
         checkout={checkoutMutation}
       />
