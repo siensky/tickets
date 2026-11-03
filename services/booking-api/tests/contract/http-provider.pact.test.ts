@@ -144,7 +144,7 @@ describe('booking-api provider verification', () => {
       assetBaseUrl: 'https://cdn.example.test/',
     });
     registerSeatmapRoutes(app, { shardPools, redis: redis.client, logger: LOGGER });
-    registerReservationRoutes(app, { ...queueDeps, shardPools });
+    registerReservationRoutes(app, { ...queueDeps, shardPools, stripe });
     registerQueueRoutes(app, {
       ...queueDeps,
       shardPools,

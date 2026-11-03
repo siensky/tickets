@@ -44,8 +44,10 @@ function useEscapeToGoBack(isActive: boolean, onBack: () => void): void {
  * Kommer användaren till kartan med en reservation som DEN HÄR FLIKEN skapade (bakåt, hem och tillbaka) är
  * den övergiven: släpp stolarna direkt, så att de inte står som upptagna för hen själv tills tiden gått ut.
  * Gäller ett bestämt id och bara denna flik (sessionStorage), så en annan flik eller en nyare reservation
- * aldrig påverkas. En reservation i betalning rörs inte av servern. Misslyckas anropet ersätts reservationen
- * ändå vid nästa reservation.
+ * aldrig påverkas. Gick fliken vidare till Stripe utan att betala låter servern sessionen gå ut och släpper
+ * även den (en betald session rörs aldrig). Misslyckas anropet ersätts en aktiv reservation ändå vid nästa
+ * reservation. En duplicerad flik kopierar sessionStorage och kan därför avbryta originalflikens öppna
+ * betalning: medvetet accepterat, det är samma kund.
  */
 function useReleaseAbandonedReservation(
   eventId: string,
@@ -54,8 +56,11 @@ function useReleaseAbandonedReservation(
   useEffect(() => {
     const reservationId = getLastReservationId(eventId);
     if (queueToken !== undefined && reservationId !== undefined) {
-      clearLastReservationId(eventId);
-      cancelReservation(eventId, reservationId, queueToken).catch(() => undefined);
+      // Glöms först när avbokningen gått igenom: avbryts anropet (t.ex. av en omladdning till en ny version
+      // av appen) görs det om nästa gång kartan öppnas. Avbokningen är idempotent.
+      cancelReservation(eventId, reservationId, queueToken)
+        .then(() => clearLastReservationId(eventId, reservationId))
+        .catch(() => undefined);
     }
   }, [eventId, queueToken]);
 }

@@ -1,5 +1,6 @@
 import { lazy, Suspense, type JSX } from 'react';
 import { Route, Routes } from 'react-router-dom';
+import { useReloadIntoNewVersion } from './hooks/use-reload-into-new-version.js';
 import { AppShell } from './components/layout/AppShell.js';
 import { Container } from './components/ui/Container.js';
 import { Skeleton } from './components/ui/Skeleton.js';
@@ -45,6 +46,7 @@ function RouteFallback(): JSX.Element {
  * flödet. `/events/:eventId/queue` är väntrummet, utflyttat ur arenakartan (7.11 C).
  */
 export function App(): JSX.Element {
+  useReloadIntoNewVersion();
   return (
     <AppShell>
       <Suspense fallback={<RouteFallback />}>

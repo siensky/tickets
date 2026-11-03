@@ -11,10 +11,10 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { readRequiredHeader } from './http-headers.js';
 import {
-  cancelReservation,
-  getReservationForQueueToken,
-  reserveSeats,
-} from '../services/reservation-service.js';
+  cancelReservationOrCheckout,
+  type AbandonedCheckoutDeps,
+} from '../services/abandoned-checkout-service.js';
+import { getReservationForQueueToken, reserveSeats } from '../services/reservation-service.js';
 import { notifySeatsTaken, type SeatMarkServiceDeps } from '../services/seat-mark-service.js';
 
 const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
@@ -27,6 +27,9 @@ export function readIdempotencyKey(request: FastifyRequest): string {
     throw new ValidationError('Idempotency-Key header is required');
   });
 }
+
+// Återexporterad åt routes/reservations.ts (routes får bara bero på controllers, docs/rules.md §1).
+export type { AbandonedCheckoutDeps };
 
 export function createCreateReservationHandler(
   shardPools: ShardPools,
@@ -87,7 +90,7 @@ export function createGetReservationHandler(shardPools: ShardPools) {
   };
 }
 
-export function createCancelReservationHandler(shardPools: ShardPools) {
+export function createCancelReservationHandler(checkoutDeps: AbandonedCheckoutDeps) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const paramsResult = reservationRouteParamsSchema.safeParse(request.params);
     if (!paramsResult.success) {
@@ -99,8 +102,8 @@ export function createCancelReservationHandler(shardPools: ShardPools) {
     if (queueAuth === undefined) {
       throw new ValidationError('missing queue authentication context');
     }
-    await cancelReservation(
-      shardPools,
+    await cancelReservationOrCheckout(
+      checkoutDeps,
       queueAuth.eventId,
       paramsResult.data.reservationId,
       queueAuth.queueTokenId,

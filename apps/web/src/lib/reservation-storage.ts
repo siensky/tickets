@@ -24,8 +24,12 @@ export function storeLastReservationId(eventId: string, reservationId: string): 
   }
 }
 
-export function clearLastReservationId(eventId: string): void {
+/** Med `onlyIf` glöms bara just den reservationen, så ett sent svar aldrig suddar ut en nyare. */
+export function clearLastReservationId(eventId: string, onlyIf?: string): void {
   try {
+    if (onlyIf !== undefined && sessionStorage.getItem(storageKey(eventId)) !== onlyIf) {
+      return;
+    }
     sessionStorage.removeItem(storageKey(eventId));
   } catch {
     // Inget att städa.
