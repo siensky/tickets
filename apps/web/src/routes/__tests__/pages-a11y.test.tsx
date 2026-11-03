@@ -132,7 +132,7 @@ describe('tillgänglighet i bokningsflödet', () => {
     await checkPage(
       <CheckoutCancelPage />,
       { route: '/checkout/cancel?event_id=e1&reservation_id=r1', path: '/checkout/cancel' },
-      'Försök igen',
+      'Välj platser igen',
     );
   });
 

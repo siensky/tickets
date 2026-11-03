@@ -8,6 +8,8 @@ import {
   IdempotencyConflictError,
   InternalError,
   NotFoundError,
+  PaymentProviderUnavailableError,
+  ServiceUnavailableError,
   QueueTokenInvalidError,
   QueueTokenNotAdmittedError,
   ReservationExpiredError,
@@ -70,6 +72,15 @@ describe('BaseError hierarchy', () => {
     expect(error.code).toBe('ACTIVE_RESERVATION_EXISTS');
     expect(error.context).toEqual({ queueTokenId: 'queue-token-1' });
     expect(error instanceof ConflictError).toBe(true);
+  });
+
+  it('PaymentProviderUnavailableError maps to an operational 503', () => {
+    const error = new PaymentProviderUnavailableError({ reservationId: 'r1' });
+    expect(error.httpStatus).toBe(503);
+    expect(error.isOperational).toBe(true);
+    expect(error.code).toBe('PAYMENT_PROVIDER_UNAVAILABLE');
+    expect(error.context).toEqual({ reservationId: 'r1' });
+    expect(error instanceof ServiceUnavailableError).toBe(true);
   });
 
   it('QueueTokenInvalidError carries the invalidation reason', () => {

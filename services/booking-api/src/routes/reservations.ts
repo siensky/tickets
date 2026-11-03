@@ -6,6 +6,7 @@
 import type { ShardPools } from '@tickets/db';
 import { isAdmitted } from '@tickets/redis';
 import type { FastifyInstance } from 'fastify';
+import type Stripe from 'stripe';
 import {
   createRequireAdmittedQueueToken,
   createRequireQueueToken,
@@ -19,8 +20,13 @@ import {
 
 export function registerReservationRoutes(
   app: FastifyInstance,
-  deps: QueueAuthDeps & { readonly shardPools: ShardPools },
+  deps: QueueAuthDeps & { readonly shardPools: ShardPools; readonly stripe: Stripe },
 ): void {
+  const checkoutDeps = {
+    shardPools: deps.shardPools,
+    stripe: deps.stripe,
+    logger: deps.logger,
+  };
   const requireAdmitted = createRequireAdmittedQueueToken({
     ...deps,
     isAdmitted: (eventId, queueTokenId) => isAdmitted(deps.redis, eventId, queueTokenId),
@@ -34,10 +40,11 @@ export function registerReservationRoutes(
       logger: deps.logger,
     }),
   });
-  // Kräver bara ett giltigt kötoken (inte insläpp): även den vars bokningsfönster löpt ut ska kunna släppa sina stolar.
+  // Kräver bara ett giltigt kötoken (inte insläpp): även den vars bokningsfönster löpt ut ska kunna släppa sina
+  // stolar. Avbryter också en betalning som övergivits hos Stripe (services/abandoned-checkout-service.ts).
   app.delete('/events/:eventId/reservations/:reservationId', {
     preHandler: requireQueueToken,
-    handler: createCancelReservationHandler(deps.shardPools),
+    handler: createCancelReservationHandler(checkoutDeps),
   });
   app.get('/events/:eventId/reservations/:reservationId', {
     preHandler: requireQueueToken,

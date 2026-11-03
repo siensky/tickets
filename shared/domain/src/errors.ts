@@ -98,6 +98,19 @@ export class TooManyRequestsError extends BaseError {
   }
 }
 
+/** Ett beroende (t.ex. betalleverantören) svarar inte just nu. Operativt: klienten kan försöka igen. */
+export class ServiceUnavailableError extends BaseError {
+  readonly httpStatus = 503;
+  readonly isOperational = true;
+  constructor(
+    message: string,
+    context?: Record<string, unknown>,
+    code = 'SERVICE_UNAVAILABLE',
+  ) {
+    super(code, message, context);
+  }
+}
+
 /** Reaching this class means something unexpected broke — isOperational=false, always alert. */
 export class InternalError extends BaseError {
   readonly httpStatus = 500;
@@ -185,6 +198,20 @@ export class ActiveReservationExistsError extends ConflictError {
       `Queue token ${queueTokenId} already has an active reservation`,
       { queueTokenId },
       'ACTIVE_RESERVATION_EXISTS',
+    );
+  }
+}
+
+/**
+ * Betalleverantören (Stripe) gick inte att nå eller gav inget säkert svar. Operativt (503): klienten kan
+ * försöka igen, och inget har ändrats. Används när en övergiven betalning inte kunde avbrytas.
+ */
+export class PaymentProviderUnavailableError extends ServiceUnavailableError {
+  constructor(context?: Record<string, unknown>) {
+    super(
+      'The payment provider could not be reached',
+      context,
+      'PAYMENT_PROVIDER_UNAVAILABLE',
     );
   }
 }

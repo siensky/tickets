@@ -148,9 +148,13 @@ FOR UPDATE NOWAIT;
 - **En aktiv reservation per kötoken:** `UNIQUE (queue_token_id) WHERE status IN ('active',
   'pending_payment')`. En ny reservation **ersätter** kötokenens egen aktiva (`active`) reservation
   i samma transaktion, så en övergiven eller utgången men ännu inte städad reservation aldrig låser ute
-  användaren. En reservation i betalning rörs inte (då svarar servern 409). `DELETE
-  /events/:id/reservations/:reservationId` avbryter just den aktiva reservationen och släpper stolarna
-  (bakåtpil och "Avbryt bokningen"); anropet är idempotent, begränsat till den egna kötokenen och tar
+  användaren. En reservation i betalning rörs aldrig av en ny reservation (då svarar servern 409). `DELETE
+  /events/:id/reservations/:reservationId` avbryter just den reservationen och släpper stolarna
+  (bakåtpil, "Avbryt bokningen", avbrytsidan efter Stripe och kartan som släpper flikens senaste
+  reservation). Har den gått vidare till Stripe utan att betalas låter servern först Stripe-sessionen gå
+  ut och släpper stolarna bara om Stripe bekräftar `expired` (en utgången session kan aldrig betalas);
+  betald session ger 409, ett Stripe som inte svarar ger 503 och inget ändras. Anropet är idempotent,
+  begränsat till den egna kötokenen och tar
   reservations- och stollås med NOWAIT (lazy expiry låser i motsatt ordning, så ett väntande lås gav en
   ABBA-deadlock). Ett lås som inte går att ta ger 409 efter tre försök
 - Värdena (reservationstid, jitter, max stolar) ligger i `config`-tabellen

@@ -124,9 +124,10 @@ export async function reserveSeats(
 }
 
 /**
- * `DELETE /reservations/:id`: användaren avbryter sin bokning (bakåtpil/"Avbryt"). Idempotent och
- * begränsad till den anropande kötokenens egen aktiva reservation med just det id:t; en reservation i
- * betalning (`pending_payment`) eller redan köpt lämnas orörd. Lås som inte går att ta direkt (en
+ * Avbryter den anropande kötokenens egen AKTIVA reservation med just det id:t (bakåtpil/"Avbryt").
+ * Idempotent. En reservation i betalning (`pending_payment`) rörs inte här: `DELETE`-routen släpper en
+ * sådan separat, och bara när Stripe bekräftat att sessionen gått ut (abandoned-checkout-service.ts).
+ * Redan köpta lämnas alltid orörda. Lås som inte går att ta direkt (en
  * samtidig reservation/utgång på samma stolar) försöks om några gånger, sedan ett 409 klienten kan upprepa.
  */
 export async function cancelReservation(

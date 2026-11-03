@@ -17,7 +17,7 @@ function describeError(error: Error | null): string | undefined {
     return undefined;
   }
   if (error instanceof ApiError && error.code === 'ACTIVE_RESERVATION_EXISTS') {
-    return 'Du har en bokning som redan är på väg att betalas. Vänta några minuter och försök igen.';
+    return 'Du har en bokning som väntar på betalning, kanske i en annan flik. Slutför eller avbryt den där, eller vänta några minuter.';
   }
   if (error instanceof ApiError && error.status === 409) {
     return 'En eller flera av platserna hann bli upptagna. Välj andra platser.';

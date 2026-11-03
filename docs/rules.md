@@ -85,7 +85,8 @@ BaseError (abstrakt)
   ├─ GoneError              410
   ├─ PreconditionRequiredError 428   (ChallengeRequiredError: botskyddet kräver en utmaning, plan 8.5)
   ├─ TooManyRequestsError   429
-  └─ InternalError          500
+  ├─ InternalError          500
+  └─ ServiceUnavailableError 503   (PaymentProviderUnavailableError: Stripe svarar inte, inget ändrat)
 ```
 
 Domänspecifika fel ärver från dessa och återanvänds i hela systemet:

@@ -158,7 +158,7 @@ function registerRoutes(
     summaryCacheSeconds: deps.apiCacheSeconds > 0 ? SUMMARY_MAX_AGE_SECONDS : 0,
   });
   registerQueueRoutes(app, deps);
-  registerReservationRoutes(app, deps);
+  registerReservationRoutes(app, { ...deps, stripe });
   registerSeatMarkRoutes(app, deps);
   registerAuthenticatedRoutes(app, deps, stripe, logger);
   registerWebhookRoutes(app, {
