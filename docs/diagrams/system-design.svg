@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 1190" width="1760" height="1190" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a-black" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#222"/></marker>
+    <marker id="a-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f6fdb"/></marker>
+    <marker id="a-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d98a2b"/></marker>
+    <marker id="a-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4f8f3e"/></marker>
+    <marker id="a-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a8f98"/></marker>
+    <style>
+      .t { font-size: 15px; font-weight: 700; fill: #1d2128; text-anchor: middle; }
+      .s { font-size: 11.5px; fill: #3b4150; text-anchor: middle; }
+      .l { font-size: 10.5px; fill: #555b66; }
+      .h { font-size: 13px; font-weight: 700; }
+      .k { font-size: 11.5px; font-weight: 700; fill: #b5651d; }
+      .kb { font-size: 11.5px; font-weight: 700; fill: #2f5fa8; }
+      .v { font-size: 11.5px; fill: #3b4150; }
+    </style>
+  </defs>
+
+  <rect width="1760" height="1190" fill="#ffffff"/>
+  <text x="60" y="38" font-size="20" font-weight="700" fill="#1d2128">tikknet — systemdesign</text>
+
+  <!-- Linjer bakom lagren (gröna och orange korsar RabbitMQ-raden) -->
+  <g fill="none" stroke-width="1.6">
+    <!-- Databas / lagring -->
+    <path d="M300,560 V800" stroke="#4f8f3e" marker-end="url(#a-green)"/>
+    <path d="M640,560 V800" stroke="#4f8f3e" marker-end="url(#a-green)"/>
+    <path d="M370,560 V752 H880 V800" stroke="#4f8f3e" marker-end="url(#a-green)"/>
+    <path d="M700,560 V752" stroke="#4f8f3e"/>
+    <path d="M930,800 V560" stroke="#4f8f3e" marker-end="url(#a-green)"/>
+    <path d="M1300,560 V800" stroke="#4f8f3e" marker-end="url(#a-green)"/>
+    <!-- RabbitMQ -->
+    <path d="M560,560 V640" stroke="#d98a2b" stroke-width="2" marker-end="url(#a-orange)"/>
+    <path d="M180,640 V560" stroke="#d98a2b" stroke-width="2" marker-end="url(#a-orange)"/>
+    <path d="M1240,640 V560" stroke="#d98a2b" stroke-width="2" marker-end="url(#a-orange)"/>
+    <!-- Externa anrop från booking-api -->
+    <path d="M360,430 V398 H1605 V430" stroke="#8a8f98" stroke-dasharray="7 5" marker-end="url(#a-gray)"/>
+  </g>
+
+  <!-- Rad 1: klienter och Stripe -->
+  <rect x="100" y="60" width="320" height="90" rx="10" fill="#fdf0c2" stroke="#d4a72c" stroke-width="1.5"/>
+  <text x="260" y="88" class="t">Webbapp (React PWA)</text>
+  <text x="260" y="108" class="s">tikknet.se · kö, platskarta, köp, Mina biljetter</text>
+  <text x="260" y="126" class="s">loggar in via Auth0 · betalar på Stripe Checkout</text>
+
+  <rect x="520" y="60" width="320" height="90" rx="10" fill="#fdf0c2" stroke="#d4a72c" stroke-width="1.5"/>
+  <text x="680" y="88" class="t">Scanner (React-webbapp)</text>
+  <text x="680" y="108" class="s">scan.tikknet.se · personal med rollen staff</text>
+  <text x="680" y="126" class="s">läser QR med mobilkameran → POST /scans</text>
+
+  <rect x="1100" y="60" width="320" height="90" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/>
+  <text x="1260" y="88" class="t">Stripe</text>
+  <text x="1260" y="108" class="s">Checkout-sidan (kortuppgifter når aldrig oss)</text>
+  <text x="1260" y="126" class="s">webhook: checkout.session.completed</text>
+
+  <g fill="none" stroke-width="1.6">
+    <path d="M200,150 V200" stroke="#222" marker-end="url(#a-black)"/>
+    <path d="M330,150 V200" stroke="#2f6fdb" stroke-width="2.6" marker-end="url(#a-blue)"/>
+    <path d="M680,150 V200" stroke="#222" marker-end="url(#a-black)"/>
+    <path d="M1260,150 V200" stroke="#222" marker-end="url(#a-black)"/>
+  </g>
+
+  <!-- Rad 2: Cloudflare -->
+  <rect x="60" y="200" width="1380" height="64" rx="10" fill="#eceef1" stroke="#8a8f98" stroke-width="1.5"/>
+  <text x="750" y="226" class="t">Cloudflare — enda vägen in från internet</text>
+  <text x="750" y="247" class="s">DNS · TLS (Full strict) · DDoS-skydd · döljer serverns IP · Workers + R2 serverar webbapp och scanner · /ingest → PostHog EU · Turnstile</text>
+
+  <g fill="none" stroke-width="1.6">
+    <path d="M250,264 V310" stroke="#222" marker-end="url(#a-black)"/>
+    <path d="M930,264 V310" stroke="#2f6fdb" stroke-width="2.6" marker-end="url(#a-blue)"/>
+  </g>
+
+  <!-- Rad 3: ingress-nginx -->
+  <rect x="60" y="310" width="1380" height="60" rx="10" fill="#eceef1" stroke="#8a8f98" stroke-width="1.5"/>
+  <text x="750" y="335" class="t">ingress-nginx — ingången till k3s-klustret på Hetzner</text>
+  <text x="750" y="355" class="s">api.tikknet.se → booking-api · /ws → realtime-gateway · brandväggen släpper bara in 443 från Cloudflare</text>
+
+  <g fill="none" stroke-width="1.6">
+    <path d="M250,370 V430" stroke="#222" marker-end="url(#a-black)"/>
+    <path d="M930,370 V430" stroke="#2f6fdb" stroke-width="2.6" marker-end="url(#a-blue)"/>
+  </g>
+  <text x="258" y="390" class="l">HTTP: REST + Stripe-webhook</text>
+  <text x="938" y="390" class="l">WebSocket /ws</text>
+  <text x="1290" y="392" class="l" text-anchor="middle">booking-api → Stripe API (session, refund) · Auth0 JWKS · Turnstile · PostHog</text>
+
+  <!-- Rad 4: tjänster -->
+  <rect x="100" y="430" width="300" height="130" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="250" y="458" class="t">booking-api</text>
+  <text x="250" y="479" class="s">HTTP-API: kö, karta, reservation,</text>
+  <text x="250" y="496" class="s">checkout, biljetter, skanning, webhook</text>
+  <text x="250" y="513" class="s">konsumerar payment.succeeded</text>
+  <text x="250" y="538" class="s" font-weight="700">HPA 2–10 (CPU 70 %)</text>
+
+  <rect x="440" y="430" width="300" height="130" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="590" y="458" class="t">scheduler-worker</text>
+  <text x="590" y="479" class="s">släpper in ur kön varje sekund</text>
+  <text x="590" y="496" class="s">frisläpper utgångna reservationer</text>
+  <text x="590" y="513" class="s">outbox-relay → RabbitMQ · affärsmått</text>
+  <text x="590" y="538" class="s" font-weight="700">exakt 1 podd (Recreate)</text>
+
+  <rect x="780" y="430" width="300" height="130" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="930" y="458" class="t">realtime-gateway</text>
+  <text x="930" y="479" class="s">håller WebSocket-anslutningar</text>
+  <text x="930" y="496" class="s">token i första meddelandet, aldrig i URL</text>
+  <text x="930" y="513" class="s">skickar vidare det som kommer på ws:*</text>
+  <text x="930" y="538" class="s" font-weight="700">HPA 2–4 (minne)</text>
+
+  <rect x="1120" y="430" width="300" height="130" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="1270" y="458" class="t">notification-worker</text>
+  <text x="1270" y="479" class="s">konsumerar order.*</text>
+  <text x="1270" y="496" class="s">bekräftelse- och återbetalningsmejl</text>
+  <text x="1270" y="513" class="s">(simulerade, skrivs till loggen)</text>
+  <text x="1270" y="538" class="s" font-weight="700">KEDA 1–10 (ködjup)</text>
+
+  <rect x="1490" y="430" width="230" height="210" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/>
+  <text x="1605" y="458" class="t">Externa tjänster</text>
+  <text x="1605" y="486" class="s" font-weight="700">Auth0</text>
+  <text x="1605" y="502" class="s">inloggning, JWT (JWKS)</text>
+  <text x="1605" y="526" class="s" font-weight="700">Stripe API</text>
+  <text x="1605" y="542" class="s">Checkout-session, refund</text>
+  <text x="1605" y="566" class="s" font-weight="700">Cloudflare Turnstile</text>
+  <text x="1605" y="582" class="s">"är du människa?"</text>
+  <text x="1605" y="606" class="s" font-weight="700">PostHog EU</text>
+  <text x="1605" y="622" class="s">produktanalys via /ingest</text>
+
+  <!-- Rad 5: RabbitMQ -->
+  <rect x="60" y="640" width="1380" height="64" rx="10" fill="#f9dcb4" stroke="#d98a2b" stroke-width="1.5"/>
+  <text x="750" y="666" class="t">RabbitMQ — topic exchange « domain-events »</text>
+  <text x="750" y="687" class="s">routing key = eventnamn · en quorum-kö per konsument · leveransgräns 5 → dödkö (tickets.dlx) · fylls från outbox-tabellen</text>
+
+  <text x="568" y="600" class="l">publicerar</text>
+  <text x="568" y="614" class="l">outbox</text>
+  <text x="188" y="600" class="l">payment.</text>
+  <text x="188" y="614" class="l">succeeded</text>
+  <text x="1248" y="607" class="l">order.*</text>
+  <text x="500" y="780" class="l" text-anchor="middle">kö (ZSET + Lua) · rate limit · cache · publicera till ws:*</text>
+  <text x="940" y="785" class="l">pub/sub ws:*</text>
+  <text x="1308" y="785" class="l">mejl-dedupe</text>
+  <text x="308" y="785" class="l">SQL</text>
+  <text x="648" y="785" class="l">SQL</text>
+
+  <!-- Rad 6: Postgres och Redis -->
+  <path d="M60,812 a360,12 0 0 0 720,0 V908 a360,12 0 0 1 -720,0 Z" fill="#dcecd5" stroke="#5c9a4a" stroke-width="1.5"/>
+  <ellipse cx="420" cy="812" rx="360" ry="12" fill="#e6f2e0" stroke="#5c9a4a" stroke-width="1.5"/>
+  <text x="420" y="846" class="t">PostgreSQL — 2 shards (sanningen)</text>
+  <text x="420" y="866" class="s">md5(event_id) % 2 väljer shard · en bokning korsar aldrig två shards</text>
+  <text x="420" y="883" class="s">FOR UPDATE NOWAIT · UNIQUE(event_id, seat_id) · outbox i samma transaktion</text>
+  <text x="420" y="900" class="s">shard-0 har även de globala tabellerna: users, venues, config</text>
+
+  <path d="M820,812 a310,12 0 0 0 620,0 V908 a310,12 0 0 1 -620,0 Z" fill="#dcecd5" stroke="#5c9a4a" stroke-width="1.5"/>
+  <ellipse cx="1130" cy="812" rx="310" ry="12" fill="#e6f2e0" stroke="#5c9a4a" stroke-width="1.5"/>
+  <text x="1130" y="846" class="t">Redis — snabb hjälp, aldrig sanningen</text>
+  <text x="1130" y="866" class="s">väntrum: ZSET + Lua (direktinsläpp) · rate limit per IP</text>
+  <text x="1130" y="883" class="s">cache: config 5 s, eventlista, platsstatus</text>
+  <text x="1130" y="900" class="s">pub/sub ws:* · botskydd (PoW, räknare) · mejl-dedupe</text>
+
+  <!-- Förklaring -->
+  <text x="60" y="985" class="h" fill="#1d2128">Pilar</text>
+  <g stroke-width="1.8" fill="none">
+    <path d="M60,1010 H150" stroke="#222" marker-end="url(#a-black)"/>
+    <path d="M60,1040 H150" stroke="#2f6fdb" stroke-width="2.6" marker-end="url(#a-blue)"/>
+    <path d="M60,1070 H150" stroke="#d98a2b" stroke-width="2" marker-end="url(#a-orange)"/>
+    <path d="M60,1100 H150" stroke="#4f8f3e" marker-end="url(#a-green)"/>
+    <path d="M60,1130 H150" stroke="#8a8f98" stroke-dasharray="7 5" marker-end="url(#a-gray)"/>
+  </g>
+  <text x="165" y="1014" class="v">HTTP(S)</text>
+  <text x="165" y="1044" class="v">WebSocket</text>
+  <text x="165" y="1074" class="v">Händelse via RabbitMQ (publicera / konsumera)</text>
+  <text x="165" y="1104" class="v">Databas / lagring (SQL, Redis)</text>
+  <text x="165" y="1134" class="v">Anrop till extern tjänst</text>
+
+  <!-- RabbitMQ-händelser -->
+  <rect x="490" y="960" width="620" height="200" rx="10" fill="#fdf4e8" stroke="#d98a2b" stroke-width="1.5"/>
+  <text x="508" y="986" class="h" fill="#b5651d">RabbitMQ-händelser (routing key → konsument)</text>
+  <g stroke="#f0dcc0" stroke-width="1"><path d="M505,1000 H1095 M505,1030 H1095 M505,1060 H1095 M505,1090 H1095 M505,1120 H1095"/></g>
+  <text x="508" y="1020" class="k">reservation.created</text><text x="700" y="1020" class="v">booking-api → ingen konsument (oanvänd)</text>
+  <text x="508" y="1050" class="k">payment.succeeded</text><text x="700" y="1050" class="v">Stripe-webhooken i booking-api → booking-api</text>
+  <text x="508" y="1080" class="k">order.confirmed</text><text x="700" y="1080" class="v">booking-api → notification-worker</text>
+  <text x="508" y="1110" class="k">order.refunded</text><text x="700" y="1110" class="v">booking-api → notification-worker</text>
+  <text x="508" y="1140" class="k">order.seat_refunded</text><text x="700" y="1140" class="v">booking-api → notification-worker</text>
+
+  <!-- WebSocket-meddelanden -->
+  <rect x="1140" y="960" width="580" height="200" rx="10" fill="#eef3fb" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="1158" y="986" class="h" fill="#2f5fa8">WebSocket-meddelanden (Redis ws:* → realtime-gateway)</text>
+  <g stroke="#d6e1f2" stroke-width="1"><path d="M1155,1000 H1705 M1155,1030 H1705 M1155,1060 H1705 M1155,1090 H1705"/></g>
+  <text x="1158" y="1020" class="kb">admitted</text><text x="1300" y="1020" class="v">scheduler-worker → kösidan *</text>
+  <text x="1158" y="1050" class="kb">sales_closed</text><text x="1300" y="1050" class="v">scheduler-worker → kösidan *</text>
+  <text x="1158" y="1080" class="kb">sold_out</text><text x="1300" y="1080" class="v">scheduler-worker → kösidan *</text>
+  <text x="1158" y="1110" class="kb">seat_taken</text><text x="1300" y="1110" class="v">booking-api → platskartan</text>
+  <text x="1158" y="1138" class="l">* kösidan läser i dag samma besked via GET /queue/status (var 2:a s);</text>
+  <text x="1158" y="1152" class="l">webbappen lyssnar bara på seat_taken över WebSocket</text>
+</svg>

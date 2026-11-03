@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1790 650" width="1790" height="650" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="d-black" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#222"/></marker>
+    <style>
+      .t { font-size: 14px; font-weight: 700; fill: #1d2128; text-anchor: middle; }
+      .s { font-size: 11px; fill: #3b4150; text-anchor: middle; }
+      .lane { font-size: 14px; font-weight: 700; fill: #1d2128; }
+      .laned { font-size: 11px; fill: #4a505c; }
+      .v { font-size: 11.5px; fill: #3b4150; }
+    </style>
+  </defs>
+  <rect width="1790" height="650" fill="#ffffff"/>
+  <text x="20" y="36" font-size="20" font-weight="700" fill="#1d2128">Från merge till produktion (.github/workflows/deploy.yml)</text>
+
+  <!-- Banor -->
+  <rect x="20" y="64" width="1750" height="126" rx="10" fill="#f4f5f7" stroke="#c9ccd2"/>
+  <rect x="20" y="206" width="1750" height="126" rx="10" fill="#fdf8e6" stroke="#ecd9a0"/>
+  <rect x="20" y="372" width="1750" height="126" rx="10" fill="#eef3fb" stroke="#bfd0e8"/>
+  <text x="36" y="120" class="lane">Cloudflare</text><text x="36" y="138" class="laned">frontenden</text>
+  <text x="36" y="262" class="lane">GitHub Actions</text><text x="36" y="280" class="laned">tester och bygge</text>
+  <text x="36" y="428" class="lane">k3s-klustret</text><text x="36" y="446" class="laned">via Tailscale</text>
+
+  <!-- Rad: GitHub Actions -->
+  <g stroke-width="1.5">
+    <rect x="200" y="226" width="195" height="86" rx="10" fill="#fdf0c2" stroke="#d4a72c"/>
+    <rect x="425" y="226" width="195" height="86" rx="10" fill="#fdf0c2" stroke="#d4a72c"/>
+    <rect x="650" y="226" width="195" height="86" rx="10" fill="#fdf0c2" stroke="#d4a72c"/>
+    <rect x="875" y="226" width="195" height="86" rx="10" fill="#fdf0c2" stroke="#d4a72c"/>
+  </g>
+  <text x="297" y="262" class="t">Merge till main</text><text x="297" y="282" class="s">startar deploy.yml</text>
+  <text x="522" y="254" class="t">CI-tester</text><text x="522" y="274" class="s">lint · typecheck · enhet</text><text x="522" y="290" class="s">integration · Pact · e2e · system</text>
+  <text x="747" y="262" class="t">Bygg images</text><text x="747" y="282" class="s">6 st parallellt</text>
+  <text x="972" y="262" class="t">GHCR</text><text x="972" y="282" class="s">taggas med commit-id</text>
+
+  <!-- Rad: Cloudflare -->
+  <g stroke-width="1.5">
+    <rect x="425" y="84" width="195" height="86" rx="10" fill="#eceef1" stroke="#8a8f98"/>
+    <rect x="650" y="84" width="195" height="86" rx="10" fill="#eceef1" stroke="#8a8f98"/>
+    <rect x="875" y="84" width="195" height="86" rx="10" fill="#eceef1" stroke="#8a8f98"/>
+  </g>
+  <text x="522" y="120" class="t">Bygg webb + scanner</text><text x="522" y="140" class="s">vite build → statiska filer</text>
+  <text x="747" y="120" class="t">Ladda upp till R2</text><text x="747" y="140" class="s">rclone</text>
+  <text x="972" y="120" class="t">Workers serverar</text><text x="972" y="140" class="s">tikknet.se · scan. · cdn.</text>
+
+  <!-- Rad: klustret -->
+  <g stroke-width="1.5">
+    <rect x="200" y="392" width="195" height="86" rx="10" fill="#dde8f6" stroke="#4a6fa5"/>
+    <rect x="425" y="392" width="195" height="86" rx="10" fill="#dde8f6" stroke="#4a6fa5"/>
+    <rect x="650" y="392" width="195" height="86" rx="10" fill="#dde8f6" stroke="#4a6fa5"/>
+    <rect x="875" y="392" width="195" height="86" rx="10" fill="#f9dcb4" stroke="#d98a2b"/>
+    <rect x="1100" y="392" width="195" height="86" rx="10" fill="#dde8f6" stroke="#4a6fa5"/>
+    <rect x="1325" y="392" width="195" height="86" rx="10" fill="#dde8f6" stroke="#4a6fa5"/>
+    <rect x="1550" y="392" width="195" height="86" rx="10" fill="#dcecd5" stroke="#5c9a4a"/>
+  </g>
+  <text x="297" y="422" class="t">Anslut</text><text x="297" y="442" class="s">Tailscale + kubeconfig</text><text x="297" y="458" class="s">API:t är aldrig publikt</text>
+  <text x="522" y="422" class="t">Hemligheter</text><text x="522" y="442" class="s">GitHub Secrets →</text><text x="522" y="458" class="s">Kubernetes Secrets</text>
+  <text x="747" y="422" class="t">Datalager</text><text x="747" y="442" class="s">Postgres · Redis</text><text x="747" y="458" class="s">RabbitMQ</text>
+  <text x="972" y="422" class="t">Migrations-Job</text><text x="972" y="442" class="s">båda shards · advisory lock</text><text x="972" y="458" class="s">körs FÖRE den nya koden</text>
+  <text x="1197" y="422" class="t">kubectl apply -k</text><text x="1197" y="442" class="s">Kustomize-overlay</text><text x="1197" y="458" class="s">nya image-taggar</text>
+  <text x="1422" y="422" class="t">Rullande uppdatering</text><text x="1422" y="442" class="s">maxUnavailable 0</text><text x="1422" y="458" class="s">readiness · preStop</text>
+  <text x="1647" y="422" class="t">rollout status</text><text x="1647" y="442" class="s">väntar på friska poddar</text><text x="1647" y="458" class="s">annars blir jobbet rött</text>
+
+  <!-- Pilar -->
+  <g fill="none" stroke="#222" stroke-width="1.6">
+    <path d="M395,269 H425" marker-end="url(#d-black)"/>
+    <path d="M620,269 H650" marker-end="url(#d-black)"/>
+    <path d="M845,269 H875" marker-end="url(#d-black)"/>
+    <path d="M522,226 V170" marker-end="url(#d-black)"/>
+    <path d="M620,127 H650" marker-end="url(#d-black)"/>
+    <path d="M845,127 H875" marker-end="url(#d-black)"/>
+    <path d="M972,312 V352 H297 V392" marker-end="url(#d-black)"/>
+    <path d="M395,435 H425" marker-end="url(#d-black)"/>
+    <path d="M620,435 H650" marker-end="url(#d-black)"/>
+    <path d="M845,435 H875" marker-end="url(#d-black)"/>
+    <path d="M1070,435 H1100" marker-end="url(#d-black)"/>
+    <path d="M1295,435 H1325" marker-end="url(#d-black)"/>
+    <path d="M1520,435 H1550" marker-end="url(#d-black)"/>
+  </g>
+  <text x="530" y="200" class="v" font-size="10.5">parallellt</text>
+
+  <!-- Noteringar -->
+  <rect x="200" y="525" width="790" height="100" rx="10" fill="#eef3fb" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="218" y="550" font-size="13" font-weight="700" fill="#2f5fa8">Zero downtime kräver fyra saker samtidigt</text>
+  <text x="218" y="572" class="v">readinessProbe · maxUnavailable: 0 · preStop + terminationGracePeriodSeconds 30 · graceful shutdown</text>
+  <text x="218" y="594" class="v">Bevis: 0 misslyckade av 22 978 requests under två utrullningar mitt i ett lasttest</text>
+  <text x="218" y="612" class="v">(docs/evidence/zero-downtime.md)</text>
+
+  <rect x="1030" y="525" width="740" height="100" rx="10" fill="#fdf4e8" stroke="#d98a2b" stroke-width="1.5"/>
+  <text x="1048" y="550" font-size="13" font-weight="700" fill="#b5651d">Att veta</text>
+  <text x="1048" y="572" class="v">Kedjan avbryts så fort ett steg misslyckas, och då rullas ingen ny kod ut.</text>
+  <text x="1048" y="594" class="v">Migrations måste vara bakåtkompatibla: gammal kod kör fortfarande medan de körs.</text>
+  <text x="1048" y="612" class="v">Terraform (servrar, Cloudflare, Helm-tillägg) ingår inte här, den körs för hand.</text>
+</svg>
