@@ -256,3 +256,38 @@ Att göra för hand innan lasttestet: `terraform plan` och `apply` för `helm_re
 `helm_release.kube_prometheus_stack` och `helm_release.ingress_nginx`, och `cloudflare_ruleset.loadtest_skip`
 när loadgen-VM:arna skapas. Stäng av Bot Fight Mode under testet.
 
+
+## Körning 5 november: databaspoolen tog slut (grenen `loadtest-fix`)
+
+`normal-sale` från två lastgeneratorer gick hela vägen: 48 746 bokningsförsök, 4 740 sålda biljetter
+(under taket), inga dubbelsålda. CPU räckte. Men tusentals anrop fick 500.
+
+**Två fel i k6, inte i systemet.** Första försöket dödades av lastgeneratorns minne (`Killed` vid ca
+1 200 VU): varje VU tolkade hela stolsstatusen (5 000 stolar, ca 790 KB) varannan sekund. Nu laddas
+pollningen ner utan att sparas, och bara den sista läsningen tolkas, med ett gjson-filter som bara
+plockar ut lediga stolars id:n (`tests/load/lib/booking-flow.js`). Minnet låg sedan stilla på ca 1 GB.
+
+**Orsaken till 500:orna.** Postgres-anslutningarna låg platt på 16 per shard hela försäljningen
+(4 poddar × poolen 4), booking-api använde lite CPU och p95 var 4,96 s, alltså precis pg-poolens
+`connectionTimeoutMillis` på 5 s. Anrop som väntat längre på en anslutning kastade "timeout exceeded
+when trying to connect" och blev 500. Loggen visade bara `"error": {}`, eftersom felet loggades under en
+nyckel som pino inte gör om till text. HPA skalade inte heller, eftersom poddarna väntade i stället för
+att räkna. Planen ovan cachade stolskartan men missade att kön och eventsidan läser databasen vid varje
+anrop.
+
+**Åtgärder:**
+
+- Kort cache per podd (2 s, med single-flight) för försäljningsfönstret och slutsåld-läget
+  (`queue/join`, `queue/status`), eventsidan (`GET /events/:eventId`) och reservationskonfigurationen
+  (lästes från shard 0 vid varje reservation). Fönstret räknas fortfarande från Postgres `now()`, se
+  `services/booking-api/src/services/sales-window.ts`. Av när `API_CACHE_MAX_AGE_SECONDS` är 0.
+- Samtidiga missar på stolsstatusen och sektionssammanfattningen i samma podd delar på en läsning.
+- `DB_POOL_MAX=6` för booking-api (standard 4). Budgeten mot `max_connections`, räknad för en
+  utrullning mitt i en försäljning, står i `shared/db/src/pools.ts`.
+- En transaktion som rullas tillbaka lämnar nu tillbaka anslutningen till poolen. Tidigare slängdes den
+  vid varje fel, också vid ett vanligt 409 "stolen är tagen", så nästa anrop fick öppna en ny anslutning
+  medan poolen redan var flaskhalsen. Den slängs bara om själva ROLLBACK misslyckas.
+- Betalnings- och notiskonsumenten räknar en full pool som ett tillfälligt fel: meddelandet köas om
+  utan att räknas mot leveransgränsen. Under körningen hamnade 4 betalningshändelser i dödkön så.
+- En full pool svarar 503 med `Retry-After` i stället för 500.
+- Fel loggas med meddelande och stack, både under `err` och `error`.

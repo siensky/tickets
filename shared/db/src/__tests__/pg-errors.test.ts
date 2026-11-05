@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isDeadlockDetected, isLockNotAvailable, isUniqueViolation } from '../pg-errors.js';
+import {
+  isDeadlockDetected,
+  isLockNotAvailable,
+  isUniqueViolation,
+  isConnectionTimeout,
+} from '../pg-errors.js';
 
 describe('isUniqueViolation', () => {
   it('matches 23505 with the given constraint name', () => {
@@ -37,5 +42,29 @@ describe('isDeadlockDetected', () => {
 
   it('rejects other codes', () => {
     expect(isDeadlockDetected({ code: '55P03' })).toBe(false);
+  });
+});
+
+describe('isConnectionTimeout', () => {
+  it('matches pg-pool timing out while every connection is busy', () => {
+    expect(isConnectionTimeout(new Error('timeout exceeded when trying to connect'))).toBe(
+      true,
+    );
+  });
+
+  it('matches a new connection to Postgres timing out', () => {
+    expect(
+      isConnectionTimeout(new Error('Connection terminated due to connection timeout')),
+    ).toBe(true);
+  });
+
+  it('rejects other errors and non-errors', () => {
+    expect(
+      isConnectionTimeout(new Error('canceling statement due to statement timeout')),
+    ).toBe(false);
+    expect(isConnectionTimeout({ message: 'timeout exceeded when trying to connect' })).toBe(
+      false,
+    );
+    expect(isConnectionTimeout(undefined)).toBe(false);
   });
 });

@@ -34,23 +34,14 @@ function fakeShardPools(
       return Promise.resolve({ rows: [{ sold_out: soldOut }] });
     }
     if (sql.includes('FROM events')) {
-      // Emulerar vad Postgres SJÄLV skulle räkna ut (`now() < sales_open_at`
-      // osv, se events-repository.ts) — testets `pool.query` är en fejk
-      // som inte kör riktig SQL, så den måste räkna ut samma booleaner
-      // som produktionskoden numera litar på i stället för appserverns
-      // `new Date()` (docs/rules.md §4).
-      const now = new Date();
+      // Emulerar Postgres `now()` (`db_now`, se events-repository.ts): öppet/stängt räknas från den
+      // tiden, aldrig från appserverns klocka (docs/rules.md §4).
       return Promise.resolve({
         rows: [
           {
             sales_open_at: salesWindow.salesOpenAt,
             sales_close_at: salesWindow.salesCloseAt,
-            is_before_open: now < salesWindow.salesOpenAt,
-            is_after_close: now > salesWindow.salesCloseAt,
-            seconds_until_close: Math.max(
-              0,
-              Math.ceil((salesWindow.salesCloseAt.getTime() - now.getTime()) / 1000),
-            ),
+            db_now: new Date(),
           },
         ],
       });

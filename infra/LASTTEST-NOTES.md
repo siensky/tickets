@@ -164,8 +164,8 @@ Kör alltså ALLTID i denna ordning:
 
 1. `k6 run --summary-export=/tmp/k6-summary.json ...`
 2. vänta tills RabbitMQ-kön är tom (`rabbitmqctl list_queues name messages`)
-3. `generate-sale-report -- <eventId> <scenario> /tmp/k6-summary.json <sekunder> /tmp/report.json`
-4. **sen** `reset-sale -- <eventId>`
+3. `generate-sale-report <eventId> <scenario> /tmp/k6-summary.json <sekunder> /tmp/report.json`
+4. **sen** `reset-sale <eventId>`
 
 Kör man reset-sale före rapporten är den körningens data oåterkalleligt
 borta.

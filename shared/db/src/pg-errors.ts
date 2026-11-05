@@ -38,3 +38,17 @@ export function isLockNotAvailable(error: unknown): boolean {
 export function isDeadlockDetected(error: unknown): boolean {
   return isPgErrorLike(error) && error.code === '40P01';
 }
+
+/**
+ * pg-pool's own messages (no SQLSTATE): every connection in the pool stayed busy for longer than
+ * `connectionTimeoutMillis`, or a new connection to Postgres didn't open in time. Both mean "overloaded
+ * right now, try again", not a bug, so the error handler answers 503 instead of 500.
+ */
+const CONNECTION_TIMEOUT_MESSAGES = new Set([
+  'timeout exceeded when trying to connect',
+  'Connection terminated due to connection timeout',
+]);
+
+export function isConnectionTimeout(error: unknown): boolean {
+  return error instanceof Error && CONNECTION_TIMEOUT_MESSAGES.has(error.message);
+}

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   closeShardPools,
   createShardPools,
+  DEFAULT_POOL_MAX,
   getGlobalPool,
   getPoolForEvent,
 } from '../pools.js';
@@ -73,6 +74,22 @@ describe('createShardPools error handling', () => {
     const shardPools = createShardPools();
 
     expect(() => shardPools.pools[0].emit('error', new Error('boom'))).not.toThrow();
+  });
+});
+
+describe('createShardPools pool size', () => {
+  it('uses DEFAULT_POOL_MAX per shard unless poolMax is given', () => {
+    process.env['DATABASE_URL_SHARD_0'] = 'postgresql://fake-0';
+    process.env['DATABASE_URL_SHARD_1'] = 'postgresql://fake-1';
+
+    const standard = createShardPools();
+    const raised = createShardPools({ poolMax: 8 });
+
+    expect(standard.pools.map((pool) => pool.options.max)).toEqual([
+      DEFAULT_POOL_MAX,
+      DEFAULT_POOL_MAX,
+    ]);
+    expect(raised.pools.map((pool) => pool.options.max)).toEqual([8, 8]);
   });
 });
 

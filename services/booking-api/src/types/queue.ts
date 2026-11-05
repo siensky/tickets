@@ -13,6 +13,13 @@ export interface QueueConfig {
   readonly directAdmitLimit: number;
 }
 
+/** Försäljningsfönstret som det låg i databasen, med Postgres `now()` vid läsningen. */
+export interface EventSalesWindowSnapshot {
+  readonly salesOpenAt: Date;
+  readonly salesCloseAt: Date;
+  readonly dbNow: Date;
+}
+
 export interface EventSalesWindow {
   readonly salesOpenAt: Date;
   readonly salesCloseAt: Date;

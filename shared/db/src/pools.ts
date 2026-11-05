@@ -26,6 +26,8 @@ export interface CreateShardPoolsOptions {
    * traffic — without this, killing shard-1 would kill the pod).
    */
   onShardError?: (shardIndex: 0 | 1, error: Error) => void;
+  /** Max anslutningar per shard i den här processen. Standard `DEFAULT_POOL_MAX` (se storleksräkningen nedan). */
+  poolMax?: number;
 }
 
 function requireEnv(name: string): string {
@@ -36,16 +38,26 @@ function requireEnv(name: string): string {
   return value;
 }
 
-// Sizing (docs/plan.md "Infrastruktur": "Testcontainers: höj
-// max_connections" is about the TEST scenario — this is the separate
-// production trap it flags: booking-api's HPA scales to 10 replicas,
-// each with its OWN pool per shard. At the default pg.Pool max of 10,
-// that's 10 × 10 × 2 shards = 200 possible connections against a
-// Postgres whose default max_connections is 100. `max: 4` keeps 10
-// replicas × 4 × 2 shards = 80, leaving headroom for scheduler-worker,
-// the migrations Job, and postgres-exporter. Revisit with real numbers
-// once Fas 6 measures the HPA curve under load.
-const POOL_MAX = 4;
+// Sizing. Each shard is its OWN Postgres server with the default
+// max_connections of 100, so the budget is per server: every process
+// connected to a shard counts once against THAT shard's 100. Every
+// service connects as `postgres` (a superuser), so
+// superuser_reserved_connections protects nothing: at 100, even an
+// emergency psql is refused. Keep real headroom.
+//
+// 4 is the default for every service. booking-api raises it with
+// DB_POOL_MAX (infra/k8s/base/booking-api/deployment.yaml): the load test
+// showed 4 per pod was the bottleneck (all connections busy for the whole
+// sale, waits over 5 s became 500s) while Postgres itself was idle.
+// Worst case per shard at DB_POOL_MAX=6, mid rolling deploy during a sale
+// (a terminating pod still holds its pool; maxSurge doesn't count it):
+//   booking-api          (6 HPA max + 1 surge + 1 terminating) × 6 = 48
+//   notification-worker  (4 KEDA max + 1 + 1) × 4                  = 24
+//   scheduler-worker     1 × 4 (Recreate)                          =  4
+//   a local script over port-forward (reset-sale etc.)             =  4
+//   migrations Job, backup, postgres-exporter, psql                ~  4
+//   total                                                          ~ 84 of 100
+export const DEFAULT_POOL_MAX = 4;
 const CONNECTION_TIMEOUT_MS = 5000;
 const STATEMENT_TIMEOUT_MS = 5000;
 const IDLE_IN_TRANSACTION_TIMEOUT_MS = 5000;
@@ -53,24 +65,24 @@ const IDLE_IN_TRANSACTION_TIMEOUT_MS = 5000;
 function createPool(
   connectionString: string,
   shardIndex: 0 | 1,
-  onShardError?: CreateShardPoolsOptions['onShardError'],
+  options: CreateShardPoolsOptions,
 ): Pool {
   const pool = new Pool({
     connectionString,
-    max: POOL_MAX,
+    max: options.poolMax ?? DEFAULT_POOL_MAX,
     connectionTimeoutMillis: CONNECTION_TIMEOUT_MS,
     statement_timeout: STATEMENT_TIMEOUT_MS,
     idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
   });
   pool.on('error', (error: Error) => {
-    onShardError?.(shardIndex, error);
+    options.onShardError?.(shardIndex, error);
   });
   return pool;
 }
 
 export function createShardPools(options: CreateShardPoolsOptions = {}): ShardPools {
-  const shard0 = createPool(requireEnv('DATABASE_URL_SHARD_0'), 0, options.onShardError);
-  const shard1 = createPool(requireEnv('DATABASE_URL_SHARD_1'), 1, options.onShardError);
+  const shard0 = createPool(requireEnv('DATABASE_URL_SHARD_0'), 0, options);
+  const shard1 = createPool(requireEnv('DATABASE_URL_SHARD_1'), 1, options);
   return { pools: [shard0, shard1] };
 }
 

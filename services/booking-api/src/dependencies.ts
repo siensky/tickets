@@ -15,6 +15,11 @@ import { createRedisClient, type RedisClient } from '@tickets/redis';
 import { createStripeClient } from './services/stripe-client.js';
 import type { ChallengeDeps } from './services/challenge-service.js';
 import { createPowKey } from './services/pow.js';
+import type { QueueReadCaches } from './services/queue-service.js';
+import { createReadCache, type ReadCache } from './services/read-cache.js';
+import type { TimedSalesWindowSnapshot } from './services/sales-window.js';
+import type { EventSummary } from './types/event.js';
+import type { ReservationConfig } from './types/reservation.js';
 
 export function requireEnv(name: string): string {
   const value = process.env[name];
@@ -44,6 +49,44 @@ export interface Dependencies {
   readonly apiCacheSeconds: number;
   /** Botskyddet på queue/join (docs/plan.md 8.5). */
   readonly challenge: ChallengeDeps;
+  /** Korta läscacher per podd (services/read-cache.ts). Avstängda när `apiCacheSeconds` är 0. */
+  readonly queueReadCaches: QueueReadCaches;
+  readonly eventCache: ReadCache<EventSummary>;
+  readonly reservationConfigCache: ReadCache<ReservationConfig>;
+}
+
+/**
+ * Hur länge en het läsning (försäljningsfönster, slutsålt, eventsidan, reservationskonfigurationen)
+ * återanvänds i podden. Kort med flit: eventsidans lediga platser och konfigändringar syns inom två
+ * sekunder. Samma av-knapp som API-cachen: 0 sekunder där (lokalt och i CI) stänger av även den här.
+ */
+const READ_CACHE_TTL_MS = 2000;
+
+function createReadCaches(
+  apiCacheSeconds: number,
+): Pick<Dependencies, 'queueReadCaches' | 'eventCache' | 'reservationConfigCache'> {
+  const ttlMs = apiCacheSeconds > 0 ? READ_CACHE_TTL_MS : 0;
+  return {
+    queueReadCaches: {
+      salesWindow: createReadCache<TimedSalesWindowSnapshot>(ttlMs),
+      soldOut: createReadCache<boolean>(ttlMs),
+    },
+    eventCache: createReadCache<EventSummary>(ttlMs),
+    reservationConfigCache: createReadCache<ReservationConfig>(ttlMs),
+  };
+}
+
+/** `DB_POOL_MAX`: anslutningar per shard i den här podden (shared/db/src/pools.ts har budgeten). */
+function readPoolMax(): number | undefined {
+  const raw = process.env['DB_POOL_MAX'];
+  if (raw === undefined || raw === '') {
+    return undefined;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 20) {
+    throw new Error('DB_POOL_MAX must be an integer between 1 and 20');
+  }
+  return value;
 }
 
 /**
@@ -96,15 +139,21 @@ function readTurnstileConfig(): ChallengeDeps['turnstile'] {
   };
 }
 
+function createShardPoolsFromEnv(logger: Logger): ShardPools {
+  return createShardPools({
+    onShardError: (shardIndex, error) => {
+      logger.warn({ shardIndex, error }, 'shard connection error');
+    },
+    poolMax: readPoolMax(),
+  });
+}
+
 export function loadDependencies(
   logger: Logger,
   businessMetrics: BusinessMetrics,
 ): Dependencies {
-  const shardPools = createShardPools({
-    onShardError: (shardIndex, error) => {
-      logger.warn({ shardIndex, error }, 'shard connection error');
-    },
-  });
+  const shardPools = createShardPoolsFromEnv(logger);
+  const apiCacheSeconds = readCacheSeconds();
   const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
   const queueTokenSecret = createQueueTokenSecret(requireEnv('QUEUE_TOKEN_SECRET'));
   return {
@@ -140,7 +189,8 @@ export function loadDependencies(
     ),
     businessMetrics,
     publicAssetBaseUrl: readAssetBaseUrl(),
-    apiCacheSeconds: readCacheSeconds(),
+    apiCacheSeconds,
+    ...createReadCaches(apiCacheSeconds),
     analytics: createServerAnalyticsFromEnv(process.env, (error) => {
       logger.warn({ error }, 'posthog error');
     }),

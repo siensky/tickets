@@ -21,7 +21,7 @@ import {
   parseNonNegativeInteger,
   parsePositiveInteger,
 } from '../repositories/config-repository.js';
-import { getEventSalesWindow, isEventSoldOut } from '../repositories/events-repository.js';
+import { isEventSoldOut } from '../repositories/events-repository.js';
 import type {
   EventSalesWindow,
   JoinQueueInput,
@@ -29,12 +29,21 @@ import type {
   QueueConfig,
   QueueStatusResult,
 } from '../types/queue.js';
+import type { ReadCache } from './read-cache.js';
+import { readSalesWindow, type TimedSalesWindowSnapshot } from './sales-window.js';
+
+/** Korta cacher per podd för det join och status läser ur Postgres (services/read-cache.ts). Utan dem: ingen cache. */
+export interface QueueReadCaches {
+  readonly salesWindow: ReadCache<TimedSalesWindowSnapshot>;
+  readonly soldOut: ReadCache<boolean>;
+}
 
 export interface QueueServiceDeps {
   readonly shardPools: ShardPools;
   readonly redis: RedisClient;
   readonly queueTokenSecret: ReturnType<typeof createQueueTokenSecret>;
   readonly businessMetrics: BusinessMetrics;
+  readonly queueReadCaches?: QueueReadCaches;
 }
 
 // Cachar varje nyckel var för sig (docs/plan.md "Redis —
@@ -108,7 +117,11 @@ export async function joinQueue(
   input: JoinQueueInput,
 ): Promise<JoinQueueResult> {
   const pool = getPoolForEvent(deps.shardPools, input.eventId);
-  const salesWindow = await getEventSalesWindow(pool, input.eventId);
+  const salesWindow = await readSalesWindow(
+    pool,
+    input.eventId,
+    deps.queueReadCaches?.salesWindow,
+  );
   assertSalesWindowOpen(input.eventId, salesWindow);
 
   const config = await getCachedQueueConfig(deps);
@@ -145,11 +158,16 @@ export async function getQueueStatus(
     // klienten kunna läsa ett tillstånd den förstår här också, inte bara via
     // det fire-and-forget WS-meddelandet (docs/plan.md "Realtid").
     const pool = getPoolForEvent(deps.shardPools, eventId);
-    const salesWindow = await getEventSalesWindow(pool, eventId);
+    const caches = deps.queueReadCaches;
+    const salesWindow = await readSalesWindow(pool, eventId, caches?.salesWindow);
     if (salesWindow.isAfterClose) {
       return { status: 'sales_closed' };
     }
-    if (await isEventSoldOut(pool, eventId)) {
+    const loadSoldOut = () => isEventSoldOut(pool, eventId);
+    const soldOut = await (caches === undefined
+      ? loadSoldOut()
+      : caches.soldOut.get(eventId, loadSoldOut));
+    if (soldOut) {
       return { status: 'sold_out' };
     }
     return { status: 'not_found' };

@@ -49,6 +49,7 @@ import {
   toReservationView,
 } from '../mappers/reservation-mapper.js';
 import { sumSeatPrices } from './pricing.js';
+import type { ReadCache } from './read-cache.js';
 import { computeRequestHash } from './request-hash.js';
 import { findUnavailableSeatIds, validateSeatCount } from './seat-availability.js';
 import type {
@@ -69,11 +70,21 @@ const ACTIVE_QUEUE_TOKEN_CONSTRAINT = 'reservations_active_queue_token_unique';
 // same raw key string.
 const IDEMPOTENCY_SCOPE_PREFIX = 'reservation';
 
+const RESERVATION_CONFIG_CACHE_KEY = 'reservation-config';
+
+/**
+ * `configCache` (services/read-cache.ts): reservationskonfigurationen ligger på shard 0 och lästes vid
+ * varje reservation, också när eventet ligger på shard 1. Utan cachen läses den varje gång.
+ */
 export async function reserveSeats(
   shardPools: ShardPools,
   input: ReserveSeatsInput,
+  configCache?: ReadCache<ReservationConfig>,
 ): Promise<ReservationResult> {
-  const config = await getReservationConfig(getGlobalPool(shardPools));
+  const loadConfig = () => getReservationConfig(getGlobalPool(shardPools));
+  const config = await (configCache === undefined
+    ? loadConfig()
+    : configCache.get(RESERVATION_CONFIG_CACHE_KEY, loadConfig));
   validateSeatCount(input.seatIds, config.maxSeatsPerReservation);
 
   const pool = getPoolForEvent(shardPools, input.eventId);

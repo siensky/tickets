@@ -12,7 +12,12 @@
  * The Fas 6 KEDA `ScaledObject` scales against the plugin's metric (or
  * RabbitMQ's management API directly) instead.
  */
-import { closeShardPools, createShardPools, type ShardPools } from '@tickets/db';
+import {
+  closeShardPools,
+  createShardPools,
+  isConnectionTimeout,
+  type ShardPools,
+} from '@tickets/db';
 import { OUTBOX_EXCHANGE } from '@tickets/domain';
 import {
   createHttpMetrics,
@@ -128,6 +133,7 @@ async function startNotificationConsumer(
       queue: ORDER_EVENTS_QUEUE,
       routingKey: ORDER_EVENTS_ROUTING_KEY,
       deliveryLimit: DELIVERY_LIMIT,
+      isTransient: isConnectionTimeout,
     },
     (payload, messageId) =>
       processNotificationEvent({ shardPools, redis, logger }, payload, messageId),

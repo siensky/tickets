@@ -7,7 +7,7 @@ variable "hcloud_token" {
 }
 
 variable "cloudflare_api_token" {
-  description = "Cloudflare API-token för TERRAFORM: Zone:DNS:Edit + Zone Settings:Edit + Cache Rules:Edit (SSL-läge, cache-regel, DNS-poster) + Account:Workers Scripts:Edit (frontend-proxy-Workern, cloudflare-frontend.tf). Används ALDRIG i klustret — se cloudflare_dns_token för den smalare token cert-manager får. Sätts via TF_VAR_cloudflare_api_token."
+  description = "Cloudflare API-token för TERRAFORM: Zone:DNS:Edit + Zone Settings:Edit + Cache Rules:Edit (SSL-läge, cache-regel, DNS-poster) + Zone WAF:Edit (lasttestets undantagsregel, cloudflare.tf) + Account:Workers Scripts:Edit (frontend-proxy-Workern, cloudflare-frontend.tf). Används ALDRIG i klustret — se cloudflare_dns_token för den smalare token cert-manager får. Sätts via TF_VAR_cloudflare_api_token."
   type        = string
   sensitive   = true
 }

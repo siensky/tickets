@@ -14,7 +14,9 @@ import {
   cancelReservationOrCheckout,
   type AbandonedCheckoutDeps,
 } from '../services/abandoned-checkout-service.js';
+import type { ReadCache } from '../services/read-cache.js';
 import { getReservationForQueueToken, reserveSeats } from '../services/reservation-service.js';
+import type { ReservationConfig } from '../types/reservation.js';
 import { notifySeatsTaken, type SeatMarkServiceDeps } from '../services/seat-mark-service.js';
 
 const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
@@ -28,12 +30,14 @@ export function readIdempotencyKey(request: FastifyRequest): string {
   });
 }
 
-// Återexporterad åt routes/reservations.ts (routes får bara bero på controllers, docs/rules.md §1).
+// Återexporterade åt routes/reservations.ts (routes får bara bero på controllers, docs/rules.md §1).
 export type { AbandonedCheckoutDeps };
+export type ReservationConfigCache = ReadCache<ReservationConfig>;
 
 export function createCreateReservationHandler(
   shardPools: ShardPools,
   seatMarkDeps: SeatMarkServiceDeps,
+  configCache?: ReservationConfigCache,
 ) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const bodyResult = createReservationRequestSchema.safeParse(request.body);
@@ -50,12 +54,16 @@ export function createCreateReservationHandler(
       throw new ValidationError('missing queue authentication context');
     }
 
-    const result = await reserveSeats(shardPools, {
-      eventId: queueAuth.eventId,
-      seatIds: bodyResult.data.seatIds,
-      queueTokenId: queueAuth.queueTokenId,
-      idempotencyKey: readIdempotencyKey(request),
-    });
+    const result = await reserveSeats(
+      shardPools,
+      {
+        eventId: queueAuth.eventId,
+        seatIds: bodyResult.data.seatIds,
+        queueTokenId: queueAuth.queueTokenId,
+        idempotencyKey: readIdempotencyKey(request),
+      },
+      configCache,
+    );
     // Best-effort — docs/plan.md "din stol togs": notifiera alla andra
     // kötoken som hade något av dessa stolar markerat. Får aldrig fälla
     // detta svar, reservationen är redan committad.

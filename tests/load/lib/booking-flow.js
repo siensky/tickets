@@ -131,29 +131,40 @@ export function pickRandomAvailableSeats(maxSeats, browseSeconds = 0) {
     return [];
   }
   const section = sections[Math.floor(Math.random() * sections.length)];
-  const seats = browseSection(section.id, browseSeconds);
-  const available = seats
-    .filter((seat) => seat.status === 'available')
-    .map((seat) => seat.seatId);
+  browseSection(section.id, browseSeconds);
+  const available = readAvailableSeatIds(section.id);
   shuffleInPlace(available);
   return available.slice(0, maxSeats);
 }
 
-function readSeatStatus(sectionId) {
-  const res = http.get(`${BASE_URL}/events/${EVENT_ID}/sections/${sectionId}/seats/status`);
-  return res.status === 200 ? res.json('seats') : [];
+function seatStatusUrl(sectionId) {
+  return `${BASE_URL}/events/${EVENT_ID}/sections/${sectionId}/seats/status`;
 }
 
+/**
+ * Bara den sista läsningen tolkas, och då bara de lediga stolarnas id:n (gjson-filtret körs i Go, inte
+ * som 5 000 JS-objekt). En sektion med 5 000 stolar är ca 790 KB; att tolka hela svaret varannan
+ * sekund i tusentals VU:er fyllde lastgeneratorns minne (k6 "Killed" vid ca 1 200 VU).
+ */
+function readAvailableSeatIds(sectionId) {
+  const res = http.get(seatStatusUrl(sectionId));
+  if (res.status !== 200) {
+    return [];
+  }
+  const ids = res.json('seats.#(status=="available")#.seatId');
+  return Array.isArray(ids) ? ids : [];
+}
+
+/** Pollningen laddas ner som webbappens (samma trafik mot Cloudflare och klustret) men sparas inte. */
 function browseSection(sectionId, browseSeconds) {
-  let seats = readSeatStatus(sectionId);
+  const discard = { responseType: 'none' };
   for (let elapsed = 0; elapsed < browseSeconds; elapsed += SEAT_STATUS_POLL_SECONDS) {
     if (elapsed % SECTION_SUMMARY_POLL_SECONDS === 0) {
-      http.get(`${BASE_URL}/events/${EVENT_ID}/sections/summary`);
+      http.get(`${BASE_URL}/events/${EVENT_ID}/sections/summary`, discard);
     }
+    http.get(seatStatusUrl(sectionId), discard);
     sleep(SEAT_STATUS_POLL_SECONDS);
-    seats = readSeatStatus(sectionId);
   }
-  return seats;
 }
 
 function shuffleInPlace(array) {
