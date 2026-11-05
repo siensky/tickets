@@ -14,7 +14,10 @@ import { fileURLToPath } from 'node:url';
 import {
   ASK_USER,
   CODE_FLAGS,
+  FILE_WRITERS,
   INFO_FLAGS,
+  VERIFY_STATE,
+  denyStateWrite,
   PROGRAM_CHECKS,
   RUNNER_VALUE_OPTIONS,
   SECRET_PATH,
@@ -108,10 +111,14 @@ function evaluateWords(words, command, depth) {
   }
   if (SHELLS.has(program)) return checkShell(args, command, depth);
   if (program in CODE_FLAGS) return checkInterpreter(program, args, command);
+  if (FILE_WRITERS.has(program) && args.some((a) => VERIFY_STATE.test(a.text))) {
+    return denyStateWrite();
+  }
   return PROGRAM_CHECKS[program]?.(args) ?? null;
 }
 
 function evaluateSimple(command, depth) {
+  if (command.redirects.some((r) => VERIFY_STATE.test(r.text))) return denyStateWrite();
   const mentionsSecret = [...command.words, ...command.redirects].some((w) =>
     SECRET_PATH.test(w.text),
   );

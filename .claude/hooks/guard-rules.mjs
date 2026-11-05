@@ -186,8 +186,15 @@ export const PROGRAM_CHECKS = {
   gh: checkGh,
 };
 
+// Verifieringsposten och försöksräknaren skrivs bara av verify.mjs (ADR-0012).
+export const VERIFY_STATE = /\.claude\/state(\/|$)/;
+export const FILE_WRITERS = words('rm mv cp tee touch truncate sed ln install dd chmod rsync');
+export const denyStateWrite = () =>
+  deny('verify-state', 'Bara verify.mjs skriver i .claude/state/. Kör /verify i stället.');
+
 /** Kod som körs inline (`node -e`, `python -c`, heredoc till en tolk) granskas som text. */
 export function checkInlineCode(code) {
+  if (VERIFY_STATE.test(code)) return denyStateWrite();
   if (SECRET_PATH.test(code)) {
     return deny(
       'secret-path',

@@ -17,6 +17,15 @@ const RULE_SHAPE = /^(Bash|Read|Edit|WebFetch|Agent|Skill)(\(.+\))?$/;
 // Kommandon som kan köra godtycklig kod och därmed ta sig förbi neka-reglerna.
 const WRAPPERS =
   /^Bash\((node|python3?|sh|bash|zsh|npx|pnpm (exec|dlx)|pnpm --filter|env|eval|xargs)\b/;
+// Projektets eget verifieringsskript, exakt så (inga argument som byter ut stegen).
+const VERIFY_COMMANDS = new Set([
+  'Bash(node .claude/hooks/verify.mjs)',
+  'Bash(node .claude/hooks/verify.mjs --scope full)',
+]);
+const hooksFor = (event, script) =>
+  (settings.hooks?.[event] ?? [])
+    .flatMap((group) => group.hooks)
+    .filter((hook) => hook.args?.some((arg) => arg.endsWith(`/.claude/hooks/${script}`)));
 
 describe('.claude/settings.json', () => {
   it('har bara nycklar som projektet använder', () => {
@@ -49,7 +58,19 @@ describe('.claude/settings.json', () => {
   });
 
   it('tillåter aldrig ett kommando som kan köra godtycklig kod', () => {
-    expect(allow.filter((rule) => WRAPPERS.test(rule))).toEqual([]);
+    expect(allow.filter((rule) => WRAPPERS.test(rule) && !VERIFY_COMMANDS.has(rule))).toEqual(
+      [],
+    );
+  });
+
+  it('tillåter verifieringsskriptet bara exakt så och skyddar posten mot redigering', () => {
+    expect(allow.filter((rule) => rule.includes('verify.mjs'))).toEqual([...VERIFY_COMMANDS]);
+    expect(deny).toContain('Edit(/.claude/state/**)');
+  });
+
+  it('kräver en verifieringspost innan sessionen eller en subagent avslutas', () => {
+    expect(hooksFor('Stop', 'require-verify.mjs')).toHaveLength(1);
+    expect(hooksFor('SubagentStop', 'require-verify.mjs')).toHaveLength(1);
   });
 
   it('tillåter bara exakta kommandon, aldrig ett jokertecken', () => {

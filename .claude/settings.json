@@ -40,7 +40,8 @@
       "Read(/infra/terraform/**/*.tfstate*)",
       "Read(/infra/terraform/**/.kube/**)",
       "Read(/infra/terraform/**/.kube-config-raw)",
-      "Read(~/.tikknet-tf.env)"
+      "Read(~/.tikknet-tf.env)",
+      "Edit(/.claude/state/**)"
     ],
     "ask": [
       "Bash(git checkout *)",
@@ -67,7 +68,9 @@
       "Bash(pnpm test)",
       "Bash(pnpm test:integration)",
       "Bash(pnpm test:contract)",
-      "Bash(pnpm format:check)"
+      "Bash(pnpm format:check)",
+      "Bash(node .claude/hooks/verify.mjs)",
+      "Bash(node .claude/hooks/verify.mjs --scope full)"
     ]
   },
   "env": {
@@ -85,6 +88,32 @@
             "timeout": 10,
             "onFailure": "block",
             "statusMessage": "Kontrollerar kommandot"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/require-verify.mjs"],
+            "timeout": 30,
+            "statusMessage": "Kontrollerar verifieringsposten"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/require-verify.mjs"],
+            "timeout": 30,
+            "statusMessage": "Kontrollerar verifieringsposten"
           }
         ]
       }
