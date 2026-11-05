@@ -164,6 +164,9 @@ resource "helm_release" "ingress_nginx" {
         proxy-send-timeout    = "120"
         worker-connections    = "10000"
         max-worker-open-files = "20000"
+        # docs/loadtest-cpu-plan.md steg 2: ingen loggrad per anrop. Antal anrop, status och svarstider
+        # finns kvar i Prometheus (nginx_ingress_controller_*), som Grafana-panelerna använder.
+        disable-access-log = "true"
       }
       resources = {
         requests = {

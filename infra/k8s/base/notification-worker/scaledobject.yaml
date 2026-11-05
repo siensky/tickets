@@ -1,5 +1,9 @@
 # docs/plan.md "Autoscaling": KEDA på notification-worker, RabbitMQ-
-# ködjup, 100 meddelanden/podd, min 1, max 10.
+# ködjup, 100 meddelanden/podd, min 1, max 4.
+#
+# max 4, inte 10 (docs/loadtest-cpu-plan.md steg 5): klustret har fast storlek, och varje extra
+# notification-worker-podd reserverar CPU som booking-api behöver för att kunna skala. Mejlen är
+# simulerade och billiga, så fyra poddar räcker för en försäljning.
 #
 # `cooldownPeriod` styr BARA nedskalning till 0 repliker — ingen effekt
 # här eftersom `minReplicaCount: 1` aldrig går till 0 (upptäckt i Fas 6-
@@ -38,7 +42,7 @@ spec:
   scaleTargetRef:
     name: notification-worker
   minReplicaCount: 1
-  maxReplicaCount: 10
+  maxReplicaCount: 4
   cooldownPeriod: 60
   advanced:
     horizontalPodAutoscalerConfig:

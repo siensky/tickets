@@ -181,44 +181,19 @@ resource "helm_release" "kube_prometheus_stack" {
       # Prometheus datasource is auto-provisioned by this chart. Loki isn't
       # (separate helm_release below) — wired in here instead of via the
       # datasource-sidecar, since there's exactly one and it never changes.
-      additionalDataSources = concat([{
-        name   = "Loki"
-        uid    = "loki"
-        type   = "loki"
-        access = "proxy"
-        url    = "http://loki.${kubernetes_namespace.observability.metadata[0].name}.svc.cluster.local:3100"
-        # Från en loggrad till dess trace (pino-instrumenteringen lägger `trace_id` i varje loggrad inom en span).
-        jsonData = var.tempo_enabled ? {
-          derivedFields = [{
-            name          = "trace_id"
-            matcherRegex  = "\"trace_id\":\"(\\w+)\""
-            url           = "$${__value.raw}"
-            datasourceUid = "tempo"
-          }]
-        } : {}
-        }], var.tempo_enabled ? [{
-        name   = "Tempo"
-        uid    = "tempo"
-        type   = "tempo"
-        access = "proxy"
-        url    = "http://tempo.${kubernetes_namespace.observability.metadata[0].name}.svc.cluster.local:3200"
-        # Från ett trace till loggarna för samma trace_id.
-        jsonData = {
-          tracesToLogsV2 = {
-            datasourceUid      = "loki"
-            filterByTraceID    = false
-            spanStartTimeShift = "-5m"
-            spanEndTimeShift   = "5m"
-            customQuery        = true
-            query              = "{namespace=\"ticketing\"} |= \"$${__trace.traceId}\""
-          }
-        }
-      }] : [])
+      additionalDataSources = [{
+        name     = "Loki"
+        uid      = "loki"
+        type     = "loki"
+        access   = "proxy"
+        url      = "http://loki.${kubernetes_namespace.observability.metadata[0].name}.svc.cluster.local:3100"
+        jsonData = {}
+      }]
     }
   })]
 }
 
-# docs/plan.md "Observability": Loki + Alloy för loggar och traces.
+# docs/plan.md "Observability": Loki + Alloy för loggar.
 # Monolithic (renamed from "SingleBinary" upstream) + filesystem storage：
 # matches this project's scale — one cluster, no multi-tenant log volume
 # that would justify the simple-scalable or microservices deployment modes.
@@ -293,46 +268,9 @@ resource "helm_release" "loki" {
   })]
 }
 
-# docs/plan.md 8.7: Tempo som single-binary (samma mönster som Loki: filesystem, en replika). Resurserna är
-# hårda krav, eftersom noderna är cpx22 (4 GB): 128Mi begärt, 384Mi tak, och GOMEMLIMIT strax under taket så att
-# Go-runtimen städar innan kärnan OOM-dödar podden. 7 dagars retention; Tempo har ingen storleksbaserad
-# retention, så diskens tak är PVC:n (5Gi, larm vid 80 %) tillsammans med 10 % sampling i Alloy.
-# Chartet: grafana-community/tempo 3.2.0 (Tempo 3.1.0).
-resource "helm_release" "tempo" {
-  count      = var.tempo_enabled ? 1 : 0
-  name       = "tempo"
-  repository = "https://grafana-community.github.io/helm-charts"
-  chart      = "tempo"
-  version    = "3.2.0"
-  namespace  = kubernetes_namespace.observability.metadata[0].name
-
-  # kube_prometheus_stack: serviceMonitor nedan kräver att CRD:n redan finns.
-  depends_on = [kubernetes_namespace.observability, helm_release.kube_prometheus_stack]
-
-  values = [yamlencode({
-    tempo = {
-      retention        = "168h"
-      reportingEnabled = false
-      resources = {
-        requests = { cpu = "50m", memory = "128Mi" }
-        limits   = { cpu = "500m", memory = "384Mi" }
-      }
-      extraEnv = [{ name = "GOMEMLIMIT", value = "320MiB" }]
-    }
-    persistence = {
-      enabled          = true
-      storageClassName = "hcloud-volumes"
-      size             = "5Gi"
-    }
-    serviceMonitor = { enabled = true }
-  })]
-}
-
-# docs/plan.md "Observability": OTel-instrumentering (shared/observability/
-# src/tracing.ts) exporterar till Alloys OTLP-mottagare redan nu. Tempo
-# (traces-backend) kopplas in efter VG — tills då loggar Alloy bara att
-# spans togs emot (otelcol.exporter.debug), så pipen är testad innan Fas 6+
-# bara behöver byta ut EN exporter-rad, inte instrumentera om fem tjänster.
+# docs/plan.md "Observability": Alloy samlar poddarnas loggar och skickar dem till Loki. Tracing
+# (OpenTelemetry och Tempo) är borttaget (docs/loadtest-cpu-plan.md steg 1): det spårade varje anrop i
+# alla tjänster och kostade CPU under last utan att någon backend tog emot det.
 resource "helm_release" "alloy" {
   name       = "alloy"
   repository = "https://grafana.github.io/helm-charts"
@@ -341,39 +279,14 @@ resource "helm_release" "alloy" {
   namespace  = kubernetes_namespace.observability.metadata[0].name
 
   # kube_prometheus_stack: serviceMonitor nedan kräver att CRD:n redan finns.
-  # Tempo först (docs/plan.md 8.7): Alloy ska inte börja skicka till en backend som inte finns än.
-  depends_on = [helm_release.loki, helm_release.kube_prometheus_stack, helm_release.tempo]
+  depends_on = [helm_release.loki, helm_release.kube_prometheus_stack]
 
   values = [yamlencode({
     alloy = {
       configMap = {
-        create = true
-        content = templatefile("${path.module}/alloy-config.alloy.tftpl", {
-          tempo_enabled             = var.tempo_enabled
-          tempo_sampling_percentage = var.tempo_sampling_percentage
-        })
+        create  = true
+        content = file("${path.module}/alloy-config.alloy")
       }
-      # otelcol.exporter.debug is still "experimental" upstream. It stays until Tempo is proven
-      # (docs/plan.md 8.7); removing it and this setting is a separate last commit.
-      stabilityLevel = "experimental"
-      # The chart's auto-created Service (below) only exposes ports listed
-      # here — it doesn't introspect alloy-config.alloy's otelcol.receiver.otlp
-      # block. Services' OTEL_EXPORTER_OTLP_TRACES_ENDPOINT points at
-      # alloy.observability.svc.cluster.local:4318.
-      extraPorts = [
-        {
-          name       = "otlp-grpc"
-          port       = 4317
-          targetPort = 4317
-          protocol   = "TCP"
-        },
-        {
-          name       = "otlp-http"
-          port       = 4318
-          targetPort = 4318
-          protocol   = "TCP"
-        },
-      ]
     }
     # Alloys egna mått (loki_write_dropped_entries_total) skrapas av
     # Prometheus via en ServiceMonitor — utan den kan larmet i

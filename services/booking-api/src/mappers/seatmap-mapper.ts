@@ -1,10 +1,6 @@
 /**
  * Database-row ↔ API-object conversion for the seat-status cache
- * (docs/rules.md §1). `parseCachedSeatStatuses` narrows the cached JSON
- * string back to `SeatStatusEntry[]` with `as` — allowed here per
- * docs/rules.md §2 because the shape was written by `toSeatStatusEntries`
- * itself a couple of seconds earlier (same contract as
- * reservation-mapper.ts's `parseReplayedReservationResult`).
+ * (docs/rules.md §1).
  */
 import type {
   SeatStatusEntry,
@@ -23,16 +19,6 @@ export function toSeatStatusEntries(rows: readonly SeatStatusRow[]): SeatStatusE
     priceCents: row.priceCents,
     heldUntil: row.heldUntil === null ? null : row.heldUntil.toISOString(),
   }));
-}
-
-export function parseCachedSeatStatuses(cached: string): SeatStatusEntry[] | undefined {
-  const entries = JSON.parse(cached) as SeatStatusEntry[];
-  // En post skriven av en äldre podd under en rullande deploy saknar priceCents/heldUntil: räkna som cachemiss.
-  return entries.every(
-    (entry) => typeof entry.priceCents === 'number' && entry.heldUntil !== undefined,
-  )
-    ? entries
-    : undefined;
 }
 
 /** Slår ihop sektionens layout (global pool) med dess aggregat (eventets shard). `availability` räknas i servicen. */

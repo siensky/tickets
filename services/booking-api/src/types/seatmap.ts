@@ -20,6 +20,11 @@ export interface SeatStatusRow {
   readonly heldUntil: Date | null;
 }
 
+/**
+ * En stol i stolsstatussvaret. Svaret cachas färdigt i Redis under `seatmapStatusKey` (shared/redis):
+ * ändras formen här ska nyckelns version (`seatmap:v2`) räknas upp, annars kan en podd under en
+ * rullande deploy skicka en äldre podds cachade svar i fel form.
+ */
 export interface SeatStatusEntry {
   readonly seatId: string;
   readonly venueSeatId: string;

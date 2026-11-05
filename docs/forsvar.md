@@ -339,7 +339,7 @@ start. Korrektheten ska inte vila på Kubernetes schemaläggning.
 
 ### Varför körs migrations som ett Job och inte som init-container?
 
-En init-container körs av varje podd, och 2–10 repliker hade tävlat om att migrera. Ett Job med
+En init-container körs av varje podd, och 2–6 repliker hade tävlat om att migrera. Ett Job med
 advisory lock mot båda shardarna gör det till en operation, och pipelinen avbryter om det
 misslyckas. Därför måste migrationer också vara additiva: de körs innan den nya koden rullas ut.
 
@@ -359,7 +359,7 @@ sänks det tillfälligt till 60 s med `kubectl patch` och återställs efteråt.
 
 `notification-worker` kan ha tusentals meddelanden i kö och ändå ligga på 3 % CPU eftersom den
 väntar på nätverk. HPA skulle se "allt lugnt". KEDA skalar på RabbitMQ-ködjup (100 per podd,
-1–10 poddar).
+1–4 poddar).
 
 ### Varför lovas inte nedskalning för realtime-gateway?
 
@@ -509,13 +509,15 @@ Pull: varje tjänst exponerar `GET /metrics` (via `prom-client`) och Prometheus 
 sekund. Poddarna hittas via `ServiceMonitor`. Komponenter som inte talar Prometheus själva får en
 exporter (`postgres-exporter`, `redis-exporter`). RabbitMQ har en inbyggd plugin.
 
-### Varför tracing, och varför Tempo sist?
+### Varför finns det ingen tracing?
 
-Metrics säger *att* ett anrop tog 8 s. Loggar ger separata rader från separata tjänster. Ett
-trace visar vattenfallet för en enskild request, även över köhoppet
-`order → outbox → RabbitMQ → worker`. Instrumentering är billig att göra under bygget och dyr i
-efterhand, men backend går fort att koppla in. Därför OTel från dag ett och Tempo när VG-kraven
-var säkrade, med 10 % sampling och hårda minnesgränser eftersom noderna är små.
+Metrics säger *att* ett anrop tog 8 s, och loggar säger *vad* som hände. Ett trace hade visat var
+tiden gick för en enskild request. OpenTelemetry fanns i alla tjänster, men lasttestet visade priset:
+varje anrop blev flera spans (HTTP, Postgres, Redis, RabbitMQ, nätverk), till 100 %, och skickades till
+Alloy utan att någon backend tog emot dem. Det åt CPU på två små noder precis när systemet behövde den
+som mest. Tracing togs därför bort helt (docs/loadtest-cpu-plan.md steg 1). Mått i Prometheus och
+loggar i Loki räcker för det här systemets felsökning. Behövs traces igen är rätt sätt att sampla redan
+i tjänsterna (till exempel 1–10 %) och ha en backend som tar emot dem.
 
 ### Varför skickas `payment_succeeded` från servern?
 
@@ -574,7 +576,16 @@ Att användaren kommer tillbaka från Stripe bevisar inget. Sidan pollar orderst
 - **NetworkPolicies saknas.** Datatjänsterna har ingen publik exponering, men poddarna i
   klustret är inte isolerade från varandra. Nästa steg är default-deny per namnrymd
 - **Retention** finns bara för reservationer (30 dagar, timjobb). Outbox, `processed_messages` och idempotensnycklar rensas inte
-- **Slutsålt-flödet och väntelistan** saknas: kön töms inte med besked när allt är sålt
+- **Delad databas.** booking-api och scheduler-worker skriver båda till `reservations`, `seats` och
+  `outbox`. Låsen och de unika indexen skyddar datan, men det bryter mot principen "en databas per
+  tjänst": schemat är delat och tjänsterna måste ändras i takt. Scheduler-worker är i praktiken
+  booking-apis bakgrundsdel (samma domän), därför valdes det. Renare vore att den anropar booking-api
+  eller att jobben körs i booking-api med ledarval
+- **Kösidan pollade länge i stället för att lyssna på WebSocket.** Servern skickade insläppet över
+  WebSocket, men kösidan frågade `GET /queue/status` varannan sekund. Vid en stor kö blev det tiotusentals
+  anrop per sekund, och lasttestet fick slut på CPU. Nu är WebSocket huvudvägen och polling var 15:e
+  sekund bara reserv (docs/loadtest-cpu-plan.md steg 3)
+- **Väntelistan** saknas (`waitlist`-tabellen används inte). Kön töms med besked vid slutsålt
 - **Cache hit ratio vid kanten** är inte uppmätt, så påståendet om fan-out vilar på
   Cloudflares dokumenterade beteende
 - **Radering av personuppgifter** finns som princip, inte som funktion

@@ -108,10 +108,10 @@ resource "hcloud_server" "demo_workers" {
 }
 
 # Lastgenerator-VM:er (docs/plan.md "Lasttest") — INTE med i k3s-klustret
-# och INTE på det privata nätverket: de anropar klustrets PUBLIKA IP
-# precis som en riktig extern klient ska mätas göra, samma skäl som
-# huvudkörningen går direkt mot ingress i stället för via Cloudflare
-# (se firewall.tf/dns.tf). cloud-init/loadgen.yaml.tftpl installerar k6
+# och INTE på det privata nätverket: de går genom Cloudflare (api.<domän>)
+# som riktiga besökare, eller direkt mot klustrets publika IP via
+# loadtest.<domän> (deploy-under-load, felsökning; se firewall.tf/dns.tf).
+# cloud-init/loadgen.yaml.tftpl installerar k6
 # och höjer fd-/sysctl-gränserna (docs/plan.md "Höj ... på BÅDA
 # generatorer och noder").
 resource "hcloud_server" "loadgen" {
@@ -126,6 +126,14 @@ resource "hcloud_server" "loadgen" {
   # 443-allowlistningen, och en firewall_ids hit tillbaka till samma
   # resurs hade gett en beroendecykel. Se firewall.tf:s kommentar.
   firewall_ids = [hcloud_firewall.loadgen.id]
+
+  # Bara IPv4 (docs/loadtest-cpu-plan.md steg 6): k6 går genom Cloudflare, och Cloudflare skickar
+  # klientens adress vidare i CF-Connecting-IP. Med IPv6 hade k6 kommit fram med en IPv6-adress som
+  # varken booking-apis rate limit-undantag (loadgen_ipv4s) eller Cloudflare-regeln känner igen.
+  public_net {
+    ipv4_enabled = true
+    ipv6_enabled = false
+  }
 
   user_data = templatefile("${path.module}/cloud-init/loadgen.yaml.tftpl", {})
 }

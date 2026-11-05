@@ -1,4 +1,12 @@
-# docs/plan.md "Autoscaling": mål 70 % CPU, min 2, max 10.
+# docs/plan.md "Autoscaling": mål 70 % CPU, min 2, max 6.
+#
+# max 6, inte 10 (docs/loadtest-cpu-plan.md steg 5): klustret har en fast storlek (två cpx22, cirka 2000m
+# per nod) och skalar inte noder. Efter att realtime-gatewayens reservation sänkts finns cirka 550m ledigt
+# per nod i lasttestläget, alltså plats för två booking-api-poddar till per nod (250m var): 2 + 4 = 6. Ett
+# högre tak hade bara gett poddar i Pending. Höj taket bara om reservationerna eller noderna ändras.
+# Budgeten delas med realtime-gateway (2–4 poddar à 100m) och notification-worker (1–4 à 50m): skalar de
+# till max samtidigt tar de 350m av samma utrymme, och då ryms 5 booking-api-poddar. Kontrolleras med
+# `kubectl describe nodes` under lasttestets topp (docs/loadtest-cpu-plan.md steg 7).
 # `scaleDown.stabilizationWindowSeconds: 300` (Kubernetes standard) —
 # ett kortare fönster (t.ex. 60) provades men visade sig farligt under
 # en sammanhängande lasttestkörning: en enda kort dipp i CPU-metriken
@@ -29,7 +37,7 @@ spec:
     kind: Deployment
     name: booking-api
   minReplicas: 2
-  maxReplicas: 10
+  maxReplicas: 6
   metrics:
     - type: Resource
       resource:

@@ -7,11 +7,15 @@
  * write-invalidated cache, is deliberate: a few seconds of staleness
  * here is harmless, the reservation transaction is still the only thing
  * that actually prevents overselling.
+ *
+ * Status and the section summary are cached as the finished response body
+ * (a JSON string) and sent as-is, so a cache hit costs no parsing or
+ * re-serialisation (docs/loadtest-cpu-plan.md steg 4).
  */
 import { getGlobalPool, getPoolForEvent, type ShardPools } from '@tickets/db';
 import { NotFoundError } from '@tickets/domain';
 import type { Logger } from '@tickets/observability';
-import { seatmapStatusKey, type RedisClient } from '@tickets/redis';
+import { seatmapStatusKey, seatmapSummaryKey, type RedisClient } from '@tickets/redis';
 import { getEventById } from '../repositories/events-repository.js';
 import {
   aggregateSeatsBySection,
@@ -25,13 +29,12 @@ import {
   sectionBelongsToVenue,
 } from '../repositories/venues-repository.js';
 import {
-  parseCachedSeatStatuses,
   toSeatStatusEntries,
   toSectionSummary,
   toSectionSummaryEntry,
 } from '../mappers/seatmap-mapper.js';
 import { computeSeatAvailability } from './event-availability.js';
-import type { SeatStatusEntry, SectionSummary } from '../types/seatmap.js';
+import type { SectionSummary } from '../types/seatmap.js';
 import type { VenueSeatGeometryRow, VenueSectionRow } from '../types/venue.js';
 
 export interface SeatmapServiceDeps {
@@ -74,50 +77,74 @@ export async function getSectionGeometry(
  * must degrade to "ask Postgres every time", never a 500 for every
  * client watching this section.
  */
-async function readCachedSeatStatus(
+async function readCachedBody(
   deps: SeatmapServiceDeps,
   key: string,
-): Promise<SeatStatusEntry[] | undefined> {
+): Promise<string | undefined> {
   try {
-    const cached = await deps.redis.get(key);
-    return cached === null ? undefined : parseCachedSeatStatuses(cached);
+    return (await deps.redis.get(key)) ?? undefined;
   } catch (error) {
     deps.logger.warn(
-      { error, key },
-      'seatmap status cache read failed, falling back to Postgres',
+      { err: error, key },
+      'seatmap cache read failed, falling back to Postgres',
     );
     return undefined;
   }
 }
 
-async function writeCachedSeatStatus(
+async function writeCachedBody(
   deps: SeatmapServiceDeps,
   key: string,
-  entries: readonly SeatStatusEntry[],
+  body: string,
+  ttlSeconds: number,
 ): Promise<void> {
   try {
-    await deps.redis.set(key, JSON.stringify(entries), 'EX', SEAT_STATUS_CACHE_TTL_SECONDS);
+    await deps.redis.set(key, body, 'EX', ttlSeconds);
   } catch (error) {
-    deps.logger.warn({ error, key }, 'seatmap status cache write failed, ignoring');
+    deps.logger.warn({ err: error, key }, 'seatmap cache write failed, ignoring');
   }
 }
 
-export async function getSectionSeatStatus(
+/** Stolsstatus för en sektion som färdigt svar: `{"seats":[...]}`. */
+export async function getSectionSeatStatusBody(
   deps: SeatmapServiceDeps,
   eventId: string,
   sectionId: string,
-): Promise<SeatStatusEntry[]> {
+): Promise<string> {
   const key = seatmapStatusKey(eventId, sectionId);
-  const cached = await readCachedSeatStatus(deps, key);
+  const cached = await readCachedBody(deps, key);
   if (cached !== undefined) {
     return cached;
   }
-
   const pool = getPoolForEvent(deps.shardPools, eventId);
   const rows = await listSeatStatusesForSection(pool, eventId, sectionId);
-  const entries = toSeatStatusEntries(rows);
-  await writeCachedSeatStatus(deps, key, entries);
-  return entries;
+  const body = JSON.stringify({ seats: toSeatStatusEntries(rows) });
+  await writeCachedBody(deps, key, body, SEAT_STATUS_CACHE_TTL_SECONDS);
+  return body;
+}
+
+/**
+ * Sektionssammanfattningen som färdigt svar. Cachas i Redis lika länge som dess `max-age`
+ * (`summaryCacheSeconds`, docs/plan.md 8.3), så att `GROUP BY`-frågan körs en gång per event och
+ * period i stället för en gång per besökare. 0 (API-cachen avstängd) = ingen Redis-cache heller.
+ * Ett event som inte finns cachas aldrig (404).
+ */
+export async function getSectionSummaryBody(
+  deps: SeatmapServiceDeps,
+  eventId: string,
+): Promise<string> {
+  const ttlSeconds = deps.summaryCacheSeconds ?? 0;
+  if (ttlSeconds <= 0) {
+    return JSON.stringify(await getSectionSummary(deps, eventId));
+  }
+  const key = seatmapSummaryKey(eventId);
+  const cached = await readCachedBody(deps, key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const body = JSON.stringify(await getSectionSummary(deps, eventId));
+  await writeCachedBody(deps, key, body, ttlSeconds);
+  return body;
 }
 
 /**

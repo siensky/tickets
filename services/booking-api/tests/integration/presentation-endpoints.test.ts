@@ -10,6 +10,7 @@ import type { Auth0Verifier } from '@tickets/auth';
 import type { Logger } from '@tickets/observability';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
+import { seatmapSummaryKey } from '@tickets/redis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { registerErrorHandler } from '../../src/routes/error-handler.js';
 import { registerOrderRoutes } from '../../src/routes/orders.js';
@@ -184,6 +185,8 @@ describe('presentation endpoints (Fas 7 steg 5)', () => {
         shardPools: db.shardPools,
         redis: redis.client,
         logger: LOGGER,
+        // Cachen på (som i produktion), så att testet även visar att svaret cachas.
+        summaryCacheSeconds: 5,
       });
 
       const response = await app.inject({
@@ -209,6 +212,13 @@ describe('presentation endpoints (Fas 7 steg 5)', () => {
       });
 
       await pool.query('UPDATE venue_sections SET layout_x = NULL WHERE id = $1', [floorId]);
+      // Svaret cachas i 5 s (docs/loadtest-cpu-plan.md steg 4): inom tiden kommer samma svar tillbaka.
+      const cached = await app.inject({
+        method: 'GET',
+        url: `/events/${eventId}/sections/summary`,
+      });
+      expect(cached.body).toBe(response.body);
+      await redis.client.del(seatmapSummaryKey(eventId));
       const noLayout = await app.inject({
         method: 'GET',
         url: `/events/${eventId}/sections/summary`,

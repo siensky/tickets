@@ -95,10 +95,10 @@
     <rect x="1108" y="630" width="190" height="60" rx="8"/>
     <rect x="1310" y="630" width="190" height="60" rx="8" stroke-dasharray="5 4"/>
   </g>
-  <text x="395" y="655" class="pt">booking-api</text><text x="395" y="674" class="ps">Deployment · HPA 2–10</text>
+  <text x="395" y="655" class="pt">booking-api</text><text x="395" y="674" class="ps">Deployment · HPA 2–6</text>
   <text x="597" y="655" class="pt">realtime-gateway</text><text x="597" y="674" class="ps">Deployment · HPA 2–4</text>
   <text x="799" y="655" class="pt">scheduler-worker</text><text x="799" y="674" class="ps">Deployment · 1 · Recreate</text>
-  <text x="1001" y="655" class="pt">notification-worker</text><text x="1001" y="674" class="ps">Deployment · KEDA 1–10</text>
+  <text x="1001" y="655" class="pt">notification-worker</text><text x="1001" y="674" class="ps">Deployment · KEDA 1–4</text>
   <text x="1203" y="655" class="pt">payment-mock</text><text x="1203" y="674" class="ps">Deployment · 1 (4 vid lasttest)</text>
   <text x="1405" y="655" class="pt">migrations</text><text x="1405" y="674" class="ps">Job · körs före varje deploy</text>
 
@@ -129,14 +129,12 @@
     <rect x="704" y="850" width="190" height="60" rx="8"/>
     <rect x="906" y="850" width="190" height="60" rx="8"/>
     <rect x="1108" y="850" width="190" height="60" rx="8"/>
-    <rect x="1310" y="850" width="190" height="60" rx="8" stroke-dasharray="5 4" fill="#fdf6ec"/>
   </g>
   <text x="395" y="875" class="pt">Prometheus</text><text x="395" y="894" class="ps">hämtar /metrics · 10 dagar</text>
   <text x="597" y="875" class="pt">Alertmanager</text><text x="597" y="894" class="ps">larmregler → Slack</text>
   <text x="799" y="875" class="pt">Grafana</text><text x="799" y="894" class="ps">dashboards · Auth0-inloggning</text>
   <text x="1001" y="875" class="pt">Loki</text><text x="1001" y="894" class="ps">loggar · 7 dagar</text>
   <text x="1203" y="875" class="pt">Alloy</text><text x="1203" y="894" class="ps">DaemonSet · samlar loggar</text>
-  <text x="1405" y="875" class="pt">Tempo</text><text x="1405" y="894" class="ps">byggt, ej applicerat</text>
 
   <!-- systemtillägg -->
   <rect x="70" y="944" width="1460" height="92" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/>
@@ -206,7 +204,7 @@
   <text x="665" y="1224" class="v">Backup / lagring</text>
   <text x="665" y="1252" class="v">Anrop till extern tjänst</text>
   <rect x="560" y="1266" width="40" height="18" rx="4" fill="#ffffff" stroke="#8a8f98" stroke-dasharray="5 4"/>
-  <text x="665" y="1280" class="v">Streckad ruta = finns bara ibland eller är inte utrullad</text>
+  <text x="665" y="1280" class="v">Streckad ruta = finns bara ibland (jobb, lasttest)</text>
 
   <g>
     <rect x="1060" y="1208" width="22" height="14" rx="3" fill="#dde8f6" stroke="#4a6fa5"/><text x="1092" y="1220" class="v">ticketing: apparna</text>

@@ -73,6 +73,11 @@ spec:
         - name: rabbitmq
           image: rabbitmq:4-management-alpine
           env:
+            # Erlangs schemaläggare väntar aktivt ("busy-wait") som standard och bränner CPU även när kön
+            # är nästan tom. På små, delade noder rekommenderar RabbitMQ att stänga av det
+            # (docs/loadtest-cpu-plan.md steg 5).
+            - name: RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS
+              value: '+sbwt none +sbwtdcpu none +sbwtdio none'
             - name: RABBITMQ_DEFAULT_USER
               value: app
             - name: RABBITMQ_DEFAULT_PASS
@@ -116,7 +121,9 @@ spec:
               cpu: 200m
               memory: 256Mi
             limits:
-              cpu: 1500m
+              # Sänkt från 1500m (docs/loadtest-cpu-plan.md steg 5): utan busy-wait behöver mäklaren
+              # betydligt mindre, och taket ska inte kunna ta resurser från booking-api under last.
+              cpu: 750m
               memory: 768Mi
           # B15-liknande resonemang som postgres-shard-0: Mnesia-återuppspelning
           # efter en hård nedstängning kan ta längre än en vanlig

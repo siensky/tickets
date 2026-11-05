@@ -25,7 +25,7 @@
 import { runFullBookingAttempt } from './lib/booking-flow.js';
 import { BASE_K6_OPTIONS, SUMMARY_TREND_STATS } from './lib/config.js';
 
-// 56/s × 120 s (maxWaitSeconds nedan) = 6 720 samtidigt blockerade VU i
+// 56/s × (120 s maxWaitSeconds + upp till 12 s på kartan) ≈ 7 400 samtidiga VU i
 // värsta fall (ingen hinner bli insläppt inom taket alls) — maxVUs med
 // marginal över det, inte de 3 000 en tidigare version råkade sätta
 // (vilket hade gett massvis `dropped_iterations` redan vid normal takt,

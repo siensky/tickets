@@ -17,10 +17,10 @@ poddar. Källfilen är [diagrams/cluster.svg](./diagrams/cluster.svg).
 
 | Del | Typ | Antal | Varför |
 |---|---|---|---|
-| booking-api | Deployment + HPA | 2–10 | Stateless, skalar på CPU, minst 2 för deploy utan nertid |
+| booking-api | Deployment + HPA | 2–6 | Stateless, skalar på CPU, minst 2 för deploy utan nertid. Taket är det som ryms på noderna |
 | realtime-gateway | Deployment + HPA | 2–4 | Långlivade anslutningar, skalar på minne |
 | scheduler-worker | Deployment, `Recreate` | 1 | Jobben får aldrig köras dubbelt |
-| notification-worker | Deployment + KEDA | 1–10 | CPU säger inget om en kö, ködjupet gör det |
+| notification-worker | Deployment + KEDA | 1–4 | CPU säger inget om en kö, ködjupet gör det |
 | payment-mock | Deployment | 1 | Fejkad Stripe för lasttest |
 | Postgres × 2, Redis, RabbitMQ | StatefulSet + volym | 1 vardera | Data överlever omstart. En replik = känd enskild felpunkt |
 | migrations | Job | per deploy | Körs före koden, advisory lock |

@@ -18,6 +18,8 @@ import {
   createHttpMetrics,
   createLogger,
   createRegistry,
+  createSlowRequestHook,
+  QuietRequestLogController,
   type HttpMetrics,
   type Logger,
 } from '@tickets/observability';
@@ -34,7 +36,6 @@ import Fastify, {
 } from 'fastify';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
-import { shutdownTracing } from './instrumentation.js';
 import { startHeartbeat } from './services/heartbeat.js';
 import { processNotificationEvent } from './services/notification-consumer-service.js';
 
@@ -82,7 +83,6 @@ function createShutdownHandler(
     await resources.consumer.close();
     await closeShardPools(resources.shardPools);
     await closeRedisClient(resources.redis);
-    await shutdownTracing();
     process.exit(0);
   };
   return (signal: string): void => {
@@ -103,7 +103,8 @@ async function createAndStartHttpServer(
     RawRequestDefaultExpression<RawServerDefault>,
     RawReplyDefaultExpression<RawServerDefault>,
     FastifyBaseLogger
-  >({ loggerInstance: logger });
+  >({ loggerInstance: logger, logController: new QuietRequestLogController() });
+  app.addHook('onResponse', createSlowRequestHook(logger));
   registerHealthRoutes(app);
   registerMetricsRoutes(app, registry);
   registerRedMetricsHook(app, httpMetrics);

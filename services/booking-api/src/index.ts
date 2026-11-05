@@ -18,6 +18,8 @@ import {
   createLogger,
   createOversellMetrics,
   createRegistry,
+  createSlowRequestHook,
+  QuietRequestLogController,
   type HttpMetrics,
   type Logger,
   type OversellMetrics,
@@ -55,7 +57,6 @@ import { registerScanRoutes } from './routes/scans.js';
 import { registerSeatMarkRoutes } from './routes/seat-marks.js';
 import { registerSeatmapRoutes } from './routes/seatmap.js';
 import { registerWebhookRoutes } from './routes/webhooks.js';
-import { shutdownTracing } from './instrumentation.js';
 import { createStripeClient } from './services/stripe-client.js';
 import {
   parsePaymentSucceededPayload,
@@ -77,12 +78,18 @@ type FastifyApp = FastifyInstance<
 >;
 
 function createApp(logger: Logger): FastifyApp {
-  return Fastify<
+  const app = Fastify<
     RawServerDefault,
     RawRequestDefaultExpression<RawServerDefault>,
     RawReplyDefaultExpression<RawServerDefault>,
     FastifyBaseLogger
-  >({ loggerInstance: logger, trustProxy: true });
+  >({
+    loggerInstance: logger,
+    trustProxy: true,
+    logController: new QuietRequestLogController(),
+  });
+  app.addHook('onResponse', createSlowRequestHook(logger));
+  return app;
 }
 
 function registerRedMetricsHook(app: FastifyApp, httpMetrics: HttpMetrics): void {
@@ -252,7 +259,6 @@ function createShutdownHandler(
     await resources.deps.analytics.shutdown();
     await closeShardPools(resources.deps.shardPools);
     await closeRedisClient(resources.deps.redis);
-    await shutdownTracing();
     process.exit(0);
   };
   return (signal: string): void => {

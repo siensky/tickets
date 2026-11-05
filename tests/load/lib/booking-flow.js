@@ -25,66 +25,101 @@ export function joinQueue() {
   return ok ? res.json('token') : undefined;
 }
 
+// Samma tider som webbappen (apps/web/src/hooks/use-queue-admission.ts och SeatmapPage), så att testet
+// belastar systemet som riktiga besökare gör (docs/loadtest-cpu-plan.md steg 3 och 6).
+const QUEUE_FALLBACK_POLL_SECONDS = 15;
+const QUEUE_NO_SOCKET_POLL_SECONDS = 2;
+const SEAT_STATUS_POLL_SECONDS = 2;
+const SECTION_SUMMARY_POLL_SECONDS = 10;
+const QUEUE_END_TYPES = new Set(['sales_closed', 'sold_out']);
+
 /**
- * Pollar statusendpointen var 2:a sekund (samma takt som den riktiga
- * PWA:n, docs/plan.md "Realtid") tills kötoken är insläppt eller
- * `maxWaitSeconds` passerat. Returnerar `true`/`false`, aldrig ett fel —
- * att INTE bli insläppt inom fönstret är ett giltigt, mätbart utfall
- * (queue-storm.js bryr sig bara om just detta).
+ * En statusläsning: 'admitted', 'closed' (stängt eller slutsålt) eller 'waiting'. Ett tillfälligt fel
+ * (429, 5xx, ett Cloudflare-svar) räknas som 'waiting', precis som webbappen fortsätter vänta.
  */
-export function waitForAdmission(token, maxWaitSeconds) {
-  const deadline = Date.now() + maxWaitSeconds * 1000;
-  while (Date.now() < deadline) {
-    const res = http.get(`${BASE_URL}/events/${EVENT_ID}/queue/status`, {
-      headers: { [QUEUE_TOKEN_HEADER]: token },
-    });
-    if (res.status === 200 && res.json('status') === 'admitted') {
-      return true;
-    }
-    sleep(2);
+function readQueueStatus(token) {
+  const res = http.get(`${BASE_URL}/events/${EVENT_ID}/queue/status`, {
+    headers: { [QUEUE_TOKEN_HEADER]: token },
+  });
+  if (res.status !== 200) {
+    return 'waiting';
   }
-  return false;
+  const status = res.json('status');
+  if (status === 'admitted') {
+    return 'admitted';
+  }
+  return QUEUE_END_TYPES.has(status) ? 'closed' : 'waiting';
 }
 
 /**
- * Som waitForAdmission, men via WebSocket mot realtime-gateway i
- * stället för REST-polling (docs/plan.md "Realtid": köplats/insläpp är
- * just det WS används till). queue-storm.js:s hela poäng är att öva
- * Fas 6:s pub/sub-ombyggnad (en delad `psubscribe`-anslutning per podd)
- * och realtime-gatewayens HPA under riktiga 50 000 samtidiga
- * anslutningar — REST-polling övar ingenting av det (upptäckt i
- * Fas 6-reviewn). OVERIFIERAT mot en riktig k6-körning (ingen k6-binär
- * i byggmiljön) — smoke-testa med få VU innan den stora körningen.
+ * Väntar på insläpp som webbappen gör: först en statusläsning (direktinsläppet skickar inget
+ * WebSocket-meddelande), sedan WebSocket mot realtime-gateway, med en statusläsning var 15:e
+ * sekund som reserv. Stängs socketen i förtid (uppgraderingen misslyckas, servern eller Cloudflare
+ * stänger) pollas status varannan sekund fram till tidsgränsen, som webbappen gör utan socket.
+ * Returnerar `true`/`false`, aldrig ett fel: att INTE bli insläppt inom fönstret är ett giltigt,
+ * mätbart utfall.
  *
- * Skickar tokenet som FÖRSTA meddelandet, aldrig i URL:en, samma regel
- * som services/realtime-gateway/src/controllers/ws-controller.ts.
+ * Skickar tokenet som FÖRSTA meddelandet, aldrig i URL:en, samma regel som
+ * services/realtime-gateway/src/controllers/ws-controller.ts.
  */
 export function waitForAdmissionViaWebSocket(token, maxWaitSeconds) {
+  const deadline = Date.now() + maxWaitSeconds * 1000;
+  const first = readQueueStatus(token);
+  if (first !== 'waiting') {
+    return first === 'admitted';
+  }
   let admitted = false;
+  let finished = false;
   const response = ws.connect(`${WS_BASE_URL}/ws`, {}, (socket) => {
     socket.on('open', () => socket.send(JSON.stringify({ token })));
     socket.on('message', (raw) => {
       const payload = JSON.parse(raw);
       if (payload.type === 'admitted') {
         admitted = true;
+        finished = true;
+        socket.close();
+      } else if (QUEUE_END_TYPES.has(payload.type)) {
+        finished = true;
         socket.close();
       }
     });
+    socket.setInterval(() => {
+      const status = readQueueStatus(token);
+      if (status === 'admitted' || status === 'closed') {
+        admitted = status === 'admitted';
+        finished = true;
+        socket.close();
+      }
+    }, QUEUE_FALLBACK_POLL_SECONDS * 1000);
     socket.setTimeout(() => socket.close(), maxWaitSeconds * 1000);
   });
   check(response, { 'ws: upgraded (101)': (r) => r && r.status === 101 });
-  return admitted;
+  if (finished) {
+    return admitted;
+  }
+  return pollUntilDeadline(token, deadline);
+}
+
+/** Socketen stängdes utan besked: polla som webbappen gör utan socket, fram till tidsgränsen. */
+function pollUntilDeadline(token, deadline) {
+  while (Date.now() < deadline) {
+    const status = readQueueStatus(token);
+    if (status !== 'waiting') {
+      return status === 'admitted';
+    }
+    sleep(QUEUE_NO_SOCKET_POLL_SECONDS);
+  }
+  return false;
 }
 
 /**
- * Upptäcker lediga stolar precis som den riktiga klienten gör (karta →
- * sektion → stolsstatus), INTE en genväg direkt mot databasen — det är
- * precis den vägen som ska belastningstestas. Returnerar upp till
- * `maxSeats` slumpade, för tillfället lediga stol-id:n (eller en tom
- * lista om ingen sektion hade några — reserveSeats hanterar det som ett
- * giltigt "inga stolar valda"-utfall).
+ * Upptäcker lediga stolar precis som den riktiga klienten gör (karta → sektion → stolsstatus), INTE en
+ * genväg direkt mot databasen. Under `browseSeconds` "väljer" besökaren stolar som i webbappen:
+ * stolsstatus varannan sekund och sektionssammanfattningen var 10:e sekund. Genom Cloudflare cachas
+ * stolsstatusen vid kanten, sammanfattningen inte (docs/loadtest-cpu-plan.md steg 6). Returnerar upp
+ * till `maxSeats` slumpade lediga stol-id:n från den senaste läsningen (eller en tom lista).
  */
-export function pickRandomAvailableSeats(maxSeats) {
+export function pickRandomAvailableSeats(maxSeats, browseSeconds = 0) {
   const event = http.get(`${BASE_URL}/events/${EVENT_ID}`);
   if (event.status !== 200) {
     return [];
@@ -96,18 +131,29 @@ export function pickRandomAvailableSeats(maxSeats) {
     return [];
   }
   const section = sections[Math.floor(Math.random() * sections.length)];
-  const statusRes = http.get(
-    `${BASE_URL}/events/${EVENT_ID}/sections/${section.id}/seats/status`,
-  );
-  if (statusRes.status !== 200) {
-    return [];
-  }
-  const available = statusRes
-    .json('seats')
+  const seats = browseSection(section.id, browseSeconds);
+  const available = seats
     .filter((seat) => seat.status === 'available')
     .map((seat) => seat.seatId);
   shuffleInPlace(available);
   return available.slice(0, maxSeats);
+}
+
+function readSeatStatus(sectionId) {
+  const res = http.get(`${BASE_URL}/events/${EVENT_ID}/sections/${sectionId}/seats/status`);
+  return res.status === 200 ? res.json('seats') : [];
+}
+
+function browseSection(sectionId, browseSeconds) {
+  let seats = readSeatStatus(sectionId);
+  for (let elapsed = 0; elapsed < browseSeconds; elapsed += SEAT_STATUS_POLL_SECONDS) {
+    if (elapsed % SECTION_SUMMARY_POLL_SECONDS === 0) {
+      http.get(`${BASE_URL}/events/${EVENT_ID}/sections/summary`);
+    }
+    sleep(SEAT_STATUS_POLL_SECONDS);
+    seats = readSeatStatus(sectionId);
+  }
+  return seats;
 }
 
 function shuffleInPlace(array) {
@@ -157,16 +203,23 @@ export function checkout(token, reservationId) {
   return res.status === 201;
 }
 
+// Hur länge en besökare tittar på kartan innan hen reserverar (sekunder, slumpat inom intervallet).
+const BROWSE_SECONDS_MIN = 4;
+const BROWSE_SECONDS_MAX = 12;
+
 /** En hel VU-iteration: väntrum → karta → reservation → betalning. Returnerar `true` bara om hela kedjan lyckades. */
 export function runFullBookingAttempt(maxWaitSeconds, maxSeats) {
   const token = joinQueue();
   if (token === undefined) {
     return false;
   }
-  if (!waitForAdmission(token, maxWaitSeconds)) {
+  if (!waitForAdmissionViaWebSocket(token, maxWaitSeconds)) {
     return false;
   }
-  const seatIds = pickRandomAvailableSeats(maxSeats);
+  const browseSeconds =
+    BROWSE_SECONDS_MIN +
+    Math.floor(Math.random() * (BROWSE_SECONDS_MAX - BROWSE_SECONDS_MIN + 1));
+  const seatIds = pickRandomAvailableSeats(maxSeats, browseSeconds);
   const reservationId = reserveSeats(token, seatIds);
   if (reservationId === undefined) {
     return false;

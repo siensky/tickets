@@ -8,8 +8,8 @@ import type { SeatmapServiceDeps } from '../../src/services/seatmap-service.js';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/services/seatmap-service.js', () => ({
-  getSectionSummary: vi.fn().mockResolvedValue({ stage: null, sections: [] }),
-  getSectionSeatStatus: vi.fn().mockResolvedValue([]),
+  getSectionSummaryBody: vi.fn().mockResolvedValue('{"stage":null,"sections":[]}'),
+  getSectionSeatStatusBody: vi.fn().mockResolvedValue('{"seats":[]}'),
   getSectionGeometry: vi.fn().mockResolvedValue([]),
   listVenueSections: vi.fn().mockResolvedValue([]),
 }));
@@ -70,6 +70,9 @@ describe('seatmap cache headers', () => {
 
     expect(response.headers['access-control-allow-origin']).toBe('*');
     expect(response.headers['cache-control']).toBe('public, max-age=1');
+    // Det färdiga svaret skickas som det är, men fortfarande som JSON.
+    expect(response.headers['content-type']).toBe('application/json; charset=utf-8');
+    expect(response.json()).toEqual({ seats: [] });
     await app.close();
   });
 });
