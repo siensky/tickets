@@ -9,11 +9,26 @@ upprepar det inte.
 | [`phases/phase-NN.md`](./phases/) | Vad en fas bygger: mål, omfattning, beroenden, steg, acceptanskriterier |
 | [`phase-status.md`](./phase-status.md) | Vad som är klart, pågående och nästa, och vad nästa session behöver veta |
 | [`rules.md`](./rules.md) | Kodregler och regler för AI-assisterad utveckling (enda källan) |
-| [`adr/`](./adr/) | Arkitekturbeslut |
+| [`adr/`](./adr/) | Arkitekturbeslut, se listan nedan |
 | [`forsvar.md`](./forsvar.md), [`architecture.md`](./architecture.md), [`runbook.md`](./runbook.md) | Motiveringar, diagram, driftrutiner |
 
 Uppgiftskontrakt (mål, tillåtna filer, acceptanskriterier för en enskild uppgift) skrivs inte som filer.
 De tas fram av `/phase` och står i sessionen och i PR-beskrivningen (ADR-0012).
+
+**Arkitekturbeslut:**
+[0001 Tailscale till Kubernetes-API:et](./adr/0001-tailscale-cluster-access.md) ·
+[0002 DNS-01 och Let's Encrypt staging](./adr/0002-dns01-letsencrypt-staging.md) ·
+[0003 privat nätverk via cloud-init](./adr/0003-private-network-bootstrap.md) ·
+[0004 två Cloudflare-tokens](./adr/0004-split-cloudflare-tokens.md) ·
+[0005 backuper i R2](./adr/0005-backup-storage-r2.md) ·
+[0006 k3s på Hetzner](./adr/0006-k3s-on-hetzner.md) ·
+[0007 DNS round-robin utan lastbalanserare](./adr/0007-dns-round-robin-without-lb.md) ·
+[0008 sharding per event](./adr/0008-sharding-per-event.md) ·
+[0009 PostHog EU via proxy](./adr/0009-posthog-eu-reverse-proxy.md) ·
+[0010 scannern som webbapp](./adr/0010-scanner-as-web-app.md) ·
+[0011 Pact utan broker](./adr/0011-pact-without-broker.md) ·
+[0012 dokumentstruktur och arbetsflöde](./adr/0012-agentic-workflow.md).
+Nya beslut skrivs med [mallen](./adr/0000-template.md).
 
 ---
 
