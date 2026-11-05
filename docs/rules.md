@@ -167,7 +167,8 @@ fallgrop. Inga kommentarer som upprepar vad koden redan säger.
 
 - Innan en ny fil skapas: **leta upp en liknande befintlig fil och följ dess mönster**
 - Nya tjänster kopierar strukturen från `booking-api` **exakt**
-- **Inga nya mappar** utanför den beslutade strukturen
+- **Inga nya mappar** utanför den beslutade strukturen. `docs/phases/` och `.claude/` hör till
+  strukturen ([ADR-0012](./adr/0012-agentic-workflow.md))
 - **Inga nya beroenden utan att fråga först**
 - Arkitekturbeslut i `docs/adr/` ändras inte utan att en ny ADR skrivs
 - **Ändra inte fler filer än uppgiften kräver**
@@ -179,10 +180,12 @@ fallgrop. Inga kommentarer som upprepar vad koden redan säger.
   åtgärdade: `docs/phase-status.md` ska skapas (om den inte finns) eller uppdateras.
   Filen dokumenterar kortfattat viktiga arkitekturbeslut, implementationer, beroenden
   och annan kontext nästa session behöver — kort, relevant, utan onödig upprepning.
-- **Vid start av en ny fas** ska huvudagenten läsa både hela `docs/plan.md` och
-  `docs/phase-status.md`.
-- **Review-subagenten** ska på samma sätt läsa hela `docs/plan.md` och
-  `docs/phase-status.md` innan granskningen påbörjas.
+- **Vid start av en ny fas** ska huvudagenten läsa `docs/plan.md`, hela fasdokumentet
+  (`docs/phases/phase-NN.md`), hela `docs/phase-status.md` och de avsnitt i
+  `docs/specification.md` som fasdokumentet listar under "Berör".
+- **Review-subagenten** ska på samma sätt läsa samma dokument innan granskningen påbörjas.
+- Planen för en fas står i fasdokumentet, utfallet i `docs/phase-status.md`. Samma sak skrivs
+  inte på båda ställena.
 
 ## 12. Säkerhetsspärrar — hårda förbud
 

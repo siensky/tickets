@@ -15,7 +15,11 @@ interface RawSeatStatusRow {
   held_until: Date | null;
 }
 
-/** `event_id` AND `section_id` both present (docs/rules.md §4: shard-nyckel i varje fråga). */
+/**
+ * `event_id` AND `section_id` both present (docs/rules.md §4: shard-nyckel i varje fråga). Ordered by
+ * seat id: the compact status is one character per seat in this order, and the catalog uses the same
+ * order (services/seat-status-views.ts), so the client can match the two up by position.
+ */
 export async function listSeatStatusesForSection(
   pool: Pool,
   eventId: string,
@@ -27,7 +31,8 @@ export async function listSeatStatusesForSection(
      FROM seats s
      LEFT JOIN reservations r
        ON r.event_id = s.event_id AND r.id = s.reservation_id AND r.status = 'active'
-     WHERE s.event_id = $1 AND s.section_id = $2`,
+     WHERE s.event_id = $1 AND s.section_id = $2
+     ORDER BY s.id`,
     [eventId, sectionId],
   );
   return rows.map((row) => ({

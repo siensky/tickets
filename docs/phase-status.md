@@ -1,7 +1,18 @@
 # Fasstatus mellan sessioner
 
-Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
-Läs båda innan en ny fas påbörjas.
+Kort kontext nästa session behöver utöver fasdokumentet i `docs/phases/` och `docs/specification.md`
+(docs/rules.md §11a). Planen för en fas står i fasdokumentet, utfallet här. Äldre anteckningar nedan
+hänvisar till `docs/plan.md` med gamla avsnittsnamn; tabellen "Hänvisningar från koden" i
+[`plan.md`](./plan.md) visar var de står nu.
+
+## Läget just nu
+
+| | Vad | Var |
+|---|---|---|
+| **Klart** | Fas 0–8, mergade till `main` | [`plan.md`](./plan.md) "Faser" |
+| **Klart** | Lasttester och CPU-arbete, mergat (PR #26, #27) | [`loadtest-cpu-plan.md`](./loadtest-cpu-plan.md) |
+| **Pågående** | `spiketest-fix`: kompakt stolsstatus (katalog + ett tecken per stol), Alloy-fix, bevis från 5/11, ny dokumentstruktur och agentiskt arbetsflöde (ADR-0012). Inte committat | [`loadtest-cpu-plan.md`](./loadtest-cpu-plan.md) "Mindre stolsstatus", [ADR-0012](./adr/0012-agentic-workflow.md) |
+| **Nästa** | Ingen fas planerad. Kandidater: [`plan.md`](./plan.md) "Kända begränsningar". Valfritt: köra om spike-sale med den kompakta stolsstatusen | — |
 
 ## Efter Fas 8 — sessionsklocka, retention, `reservation.created` (`feature/adjustments`)
 

@@ -114,10 +114,11 @@ function pollUntilDeadline(token, deadline) {
 
 /**
  * Upptäcker lediga stolar precis som den riktiga klienten gör (karta → sektion → stolsstatus), INTE en
- * genväg direkt mot databasen. Under `browseSeconds` "väljer" besökaren stolar som i webbappen:
- * stolsstatus varannan sekund och sektionssammanfattningen var 10:e sekund. Genom Cloudflare cachas
- * stolsstatusen vid kanten, sammanfattningen inte (docs/loadtest-cpu-plan.md steg 6). Returnerar upp
- * till `maxSeats` slumpade lediga stol-id:n från den senaste läsningen (eller en tom lista).
+ * genväg direkt mot databasen. Som webbappen (apps/web/src/lib/seat-status.ts) hämtas sektionens katalog
+ * (stolarnas id och pris) en gång när sektionen öppnas, och sedan bara den kompakta statusen (ett tecken
+ * per stol) varannan sekund under `browseSeconds`, plus sektionssammanfattningen var 10:e sekund. Genom
+ * Cloudflare cachas stolsstatusen vid kanten, sammanfattningen inte (docs/loadtest-cpu-plan.md steg 6).
+ * Returnerar upp till `maxSeats` slumpade lediga stol-id:n från den senaste läsningen (eller en tom lista).
  */
 export function pickRandomAvailableSeats(maxSeats, browseSeconds = 0) {
   const event = http.get(`${BASE_URL}/events/${EVENT_ID}`);
@@ -131,28 +132,52 @@ export function pickRandomAvailableSeats(maxSeats, browseSeconds = 0) {
     return [];
   }
   const section = sections[Math.floor(Math.random() * sections.length)];
+  const catalog = readSeatCatalog(section.id);
   browseSection(section.id, browseSeconds);
-  const available = readAvailableSeatIds(section.id);
+  const available = readAvailableSeatIds(section.id, catalog);
   shuffleInPlace(available);
   return available.slice(0, maxSeats);
 }
 
-function seatStatusUrl(sectionId) {
-  return `${BASE_URL}/events/${EVENT_ID}/sections/${sectionId}/seats/status`;
+function seatStatusUrl(sectionId, view) {
+  return `${BASE_URL}/events/${EVENT_ID}/sections/${sectionId}/seats/status?view=${view}`;
 }
 
 /**
- * Bara den sista läsningen tolkas, och då bara de lediga stolarnas id:n (gjson-filtret körs i Go, inte
- * som 5 000 JS-objekt). En sektion med 5 000 stolar är ca 790 KB; att tolka hela svaret varannan
- * sekund i tusentals VU:er fyllde lastgeneratorns minne (k6 "Killed" vid ca 1 200 VU).
+ * Som webbappen: statusen först, sedan katalogen för just den versionen (`&version=`). Returnerar
+ * katalogens version och stol-id:n i katalogens ordning (gjson-urvalet körs i Go, inte som JS-objekt).
  */
-function readAvailableSeatIds(sectionId) {
-  const res = http.get(seatStatusUrl(sectionId));
+function readSeatCatalog(sectionId) {
+  const compact = http.get(seatStatusUrl(sectionId, 'compact'));
+  if (compact.status !== 200) {
+    return undefined;
+  }
+  const version = compact.json('version');
+  const res = http.get(`${seatStatusUrl(sectionId, 'catalog')}&version=${version}`);
   if (res.status !== 200) {
+    return undefined;
+  }
+  const seatIds = res.json('seats.#.seatId');
+  return Array.isArray(seatIds) ? { version: res.json('version'), seatIds } : undefined;
+}
+
+/**
+ * Den sista statusläsningen tolkas: stolar vars tecken är `a` (ledig) på samma position som i katalogen.
+ * Stämmer inte versionen (stolar har ändrats) väljs inget, precis som webbappen hellre hämtar om än gissar.
+ */
+function readAvailableSeatIds(sectionId, catalog) {
+  if (catalog === undefined) {
     return [];
   }
-  const ids = res.json('seats.#(status=="available")#.seatId');
-  return Array.isArray(ids) ? ids : [];
+  const res = http.get(seatStatusUrl(sectionId, 'compact'));
+  if (res.status !== 200 || res.json('version') !== catalog.version) {
+    return [];
+  }
+  const statuses = res.json('statuses');
+  if (typeof statuses !== 'string' || statuses.length !== catalog.seatIds.length) {
+    return [];
+  }
+  return catalog.seatIds.filter((_, index) => statuses.charAt(index) === 'a');
 }
 
 /** Pollningen laddas ner som webbappens (samma trafik mot Cloudflare och klustret) men sparas inte. */
@@ -162,7 +187,7 @@ function browseSection(sectionId, browseSeconds) {
     if (elapsed % SECTION_SUMMARY_POLL_SECONDS === 0) {
       http.get(`${BASE_URL}/events/${EVENT_ID}/sections/summary`, discard);
     }
-    http.get(seatStatusUrl(sectionId), discard);
+    http.get(seatStatusUrl(sectionId, 'compact'), discard);
     sleep(SEAT_STATUS_POLL_SECONDS);
   }
 }

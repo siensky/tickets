@@ -10,6 +10,7 @@ import { ValidationError } from '@tickets/domain';
 import {
   eventIdParamSchema,
   eventSectionParamSchema,
+  seatStatusQuerySchema,
   venueIdParamSchema,
   venueSectionParamSchema,
 } from '@tickets/schemas';
@@ -27,6 +28,9 @@ export type { SeatmapServiceDeps };
 
 const EDGE_CACHE_GEOMETRY = 'public, max-age=2592000';
 const EDGE_CACHE_STATUS = 'public, max-age=1';
+// Katalogen (stolarnas id och pris) ändras inte under en försäljning: webbläsaren behåller den i 5 minuter.
+// Kanten cachar den bara 1 s, eftersom cloudflare.tf:s regel för /seats/status gäller hela sökvägen.
+const EDGE_CACHE_CATALOG = 'public, max-age=300';
 // Servicen ger det färdiga JSON-svaret som sträng; utan typen skulle Fastify skicka det som text/plain.
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 
@@ -66,12 +70,21 @@ export function createGetSectionSeatStatusHandler(deps: SeatmapServiceDeps) {
         issues: parsed.error.issues,
       });
     }
+    const query = seatStatusQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      throw new ValidationError('view must be full, catalog or compact', {
+        issues: query.error.issues,
+      });
+    }
+    const view = query.data.view ?? 'full';
     const body = await getSectionSeatStatusBody(
       deps,
       parsed.data.eventId,
       parsed.data.sectionId,
+      view,
+      query.data.version,
     );
-    setPublicCacheHeaders(reply, EDGE_CACHE_STATUS);
+    setPublicCacheHeaders(reply, view === 'catalog' ? EDGE_CACHE_CATALOG : EDGE_CACHE_STATUS);
     reply.type(JSON_CONTENT_TYPE).send(body);
   };
 }

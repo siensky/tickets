@@ -163,27 +163,54 @@ describe('web → booking-api', () => {
       });
   });
 
-  it('GET stolstatus bär pris per stol', async () => {
+  it('GET stolkatalogen (?view=catalog) bär id och pris per stol', async () => {
     await pact
       .addInteraction()
       .given('an event with an available seat exists')
-      .uponReceiving('a request for the seat status of a section')
-      .withRequest('GET', `/events/${EVENT_ID}/sections/${SECTION_ID}/seats/status`)
+      .uponReceiving('a request for the seat catalog of a section')
+      .withRequest('GET', `/events/${EVENT_ID}/sections/${SECTION_ID}/seats/status`, (b) => {
+        b.query({ view: 'catalog', version: '3f2a9c1d0b7e6a54' });
+      })
       .willRespondWith(200, (b) => {
         b.jsonBody({
+          version: string('3f2a9c1d0b7e6a54'),
           seats: eachLike({
             seatId: uuid(SEAT_ID),
             venueSeatId: uuid(),
-            status: regex(/^(available|held|sold)$/, 'available'),
             priceCents: integer(39_500),
-            heldUntil: Matchers.nullValue(),
           }),
         });
       })
       .executeTest(async (mockServer) => {
         client = await loadClient(mockServer.url);
-        const { seats } = await client.getSectionSeatStatus(EVENT_ID, SECTION_ID);
-        expect(seats[0]?.seatId).toBe(SEAT_ID);
+        const catalog = await client.getSectionSeatCatalog(
+          EVENT_ID,
+          SECTION_ID,
+          '3f2a9c1d0b7e6a54',
+        );
+        expect(catalog).toMatchObject({ seats: [{ seatId: SEAT_ID }] });
+      });
+  });
+
+  it('GET kompakt stolsstatus (?view=compact) är ett tecken per stol', async () => {
+    await pact
+      .addInteraction()
+      .given('an event with an available seat exists')
+      .uponReceiving('a request for the compact seat status of a section')
+      .withRequest('GET', `/events/${EVENT_ID}/sections/${SECTION_ID}/seats/status`, (b) => {
+        b.query({ view: 'compact' });
+      })
+      .willRespondWith(200, (b) => {
+        b.jsonBody({
+          version: string('3f2a9c1d0b7e6a54'),
+          statuses: regex(/^[ahs]*$/, 'a'),
+          heldUntil: [],
+        });
+      })
+      .executeTest(async (mockServer) => {
+        client = await loadClient(mockServer.url);
+        const compact = await client.getSectionSeatStatusCompact(EVENT_ID, SECTION_ID);
+        expect(compact).toMatchObject({ statuses: 'a' });
       });
   });
 
