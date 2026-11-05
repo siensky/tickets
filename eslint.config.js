@@ -91,8 +91,6 @@ export default tseslint.config(
         // fil direkt i `src/` (samma skäl som index.ts: ren
         // konstruktion, ingen Fastify-routing), och den hade annars
         // blivit obevakad av exakt samma anledning som ovan.
-        // `instrumentation.ts` (fanns redan i alla fem tjänster) fångas
-        // nu också, verifierat ofarligt — den importerar bara `shared`.
         { type: 'service-root', pattern: 'services/*/src/*.ts', mode: 'file' },
         // Fas 6: engångsskript (reset-sale.ts m.fl.) — upptäckt i
         // Fas 6-reviewn att boundaries-listan saknade denna mapp helt,
@@ -195,10 +193,8 @@ export default tseslint.config(
                     types: {
                       // 'service-root' med sig själv: `*.ts` matchar NU
                       // flera lösa filer per tjänst (index.ts,
-                      // dependencies.ts, instrumentation.ts) — de
-                      // importerar redan av varandra (index.ts →
-                      // instrumentation.ts sedan tidigare, index.ts →
-                      // dependencies.ts sedan Fas 6).
+                      // dependencies.ts) — de importerar av varandra
+                      // (index.ts → dependencies.ts sedan Fas 6).
                       anyOf: [
                         'routes',
                         'controllers',

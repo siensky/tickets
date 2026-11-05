@@ -35,9 +35,18 @@ export function seatMarkHoldersKey(eventId: string, seatId: string): string {
   return `seatmark-holders:${eventId}:${seatId}`;
 }
 
-/** Stolsstatuscache per sektion (docs/plan.md "Redis — användningsområden": "seatmap:<event>:<sektion> → JSON"). */
+/**
+ * Stolsstatuscache per sektion: det färdiga svaret (`{"seats":[...]}`) som sträng (docs/loadtest-cpu-plan.md
+ * steg 4). `v2` skiljer det från det äldre formatet (bara listan), så gamla och nya poddar aldrig läser
+ * varandras poster under en rullande deploy.
+ */
 export function seatmapStatusKey(eventId: string, sectionId: string): string {
-  return `seatmap:${eventId}:${sectionId}`;
+  return `seatmap:v2:${eventId}:${sectionId}`;
+}
+
+/** Cache för sektionssammanfattningen per event: det färdiga svaret som sträng (docs/loadtest-cpu-plan.md steg 4). */
+export function seatmapSummaryKey(eventId: string): string {
+  return `seatmap-summary:v1:${eventId}`;
 }
 
 /** Cache för eventlistan per kategori (docs/plan.md 8.3). Fritextsök cachas aldrig: obegränsad nyckelmängd. */

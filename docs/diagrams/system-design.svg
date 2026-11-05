@@ -88,7 +88,7 @@
   <text x="250" y="479" class="s">HTTP-API: kö, karta, reservation,</text>
   <text x="250" y="496" class="s">checkout, biljetter, skanning, webhook</text>
   <text x="250" y="513" class="s">konsumerar payment.succeeded</text>
-  <text x="250" y="538" class="s" font-weight="700">HPA 2–10 (CPU 70 %)</text>
+  <text x="250" y="538" class="s" font-weight="700">HPA 2–6 (CPU 70 %)</text>
 
   <rect x="440" y="430" width="300" height="130" rx="10" fill="#dde8f6" stroke="#4a6fa5" stroke-width="1.5"/>
   <text x="590" y="458" class="t">scheduler-worker</text>
@@ -109,7 +109,7 @@
   <text x="1270" y="479" class="s">konsumerar order.*</text>
   <text x="1270" y="496" class="s">bekräftelse- och återbetalningsmejl</text>
   <text x="1270" y="513" class="s">(simulerade, skrivs till loggen)</text>
-  <text x="1270" y="538" class="s" font-weight="700">KEDA 1–10 (ködjup)</text>
+  <text x="1270" y="538" class="s" font-weight="700">KEDA 1–4 (ködjup)</text>
 
   <rect x="1490" y="430" width="230" height="210" rx="10" fill="#ece1f5" stroke="#8e5bb5" stroke-width="1.5"/>
   <text x="1605" y="458" class="t">Externa tjänster</text>
@@ -186,6 +186,6 @@
   <text x="1158" y="1050" class="kb">sales_closed</text><text x="1300" y="1050" class="v">scheduler-worker → kösidan *</text>
   <text x="1158" y="1080" class="kb">sold_out</text><text x="1300" y="1080" class="v">scheduler-worker → kösidan *</text>
   <text x="1158" y="1110" class="kb">seat_taken</text><text x="1300" y="1110" class="v">booking-api → platskartan</text>
-  <text x="1158" y="1138" class="l">* kösidan läser i dag samma besked via GET /queue/status (var 2:a s);</text>
-  <text x="1158" y="1152" class="l">webbappen lyssnar bara på seat_taken över WebSocket</text>
+  <text x="1158" y="1138" class="l">* kösidan läser då status direkt; GET /queue/status var 15:e s är</text>
+  <text x="1158" y="1152" class="l">bara reserv om ett meddelande missas</text>
 </svg>

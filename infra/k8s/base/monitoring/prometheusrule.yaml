@@ -32,13 +32,13 @@ spec:
             description: 'pg_up == 0 för {{ $labels.instance }} — postgres-exporter når inte databasen.'
 
         - alert: RabbitMQQueueDepthHigh
-          expr: rabbitmq_queue_messages_ready{queue!~".+\\.dead"} > 900
+          expr: rabbitmq_queue_messages_ready{queue!~".+\\.dead"} > 360
           for: 5m
           labels:
             severity: warning
           annotations:
             summary: 'Ködjup nära KEDAs skalningstak'
-            description: '{{ $labels.queue }} har {{ $value }} väntande meddelanden — KEDA skalar notification-worker på just detta mått, taket är 100/podd * 10 poddar (docs/plan.md "Autoscaling").'
+            description: '{{ $labels.queue }} har {{ $value }} väntande meddelanden — KEDA skalar notification-worker på just detta mått, taket är 100/podd * 4 poddar = 400, larm vid 90 % (docs/loadtest-cpu-plan.md steg 5).'
 
         # docs/plan.md 8.6: ett meddelande som överskrider x-delivery-limit hamnar i <kö>.dead i stället för att
         # försvinna. Kräver prometheus.return_per_object_metrics (rabbitmq.conf), annars finns ingen serie per kö.
@@ -61,17 +61,6 @@ spec:
           annotations:
             summary: 'Dödköerna saknas i RabbitMQ-måtten'
             description: 'Ingen *.dead-kö syns i Prometheus. Kontrollera att postStart-importen av definitions.json lyckades (kubectl logs -n data rabbitmq-0) och att per-kö-måtten är på.'
-
-        # docs/plan.md 8.7: Tempo har ingen storleksbaserad retention, så PVC:n (5Gi) är taket. 10 % sampling och
-        # 7 dagar ska rymmas gott och väl; fylls disken är det ett tecken på att samplingen är för hög.
-        - alert: TempoVolumeFilling
-          expr: kubelet_volume_stats_used_bytes{namespace="observability",persistentvolumeclaim=~".*tempo.*"} / kubelet_volume_stats_capacity_bytes{namespace="observability",persistentvolumeclaim=~".*tempo.*"} > 0.8
-          for: 15m
-          labels:
-            severity: warning
-          annotations:
-            summary: 'Tempos disk är över 80 % full'
-            description: 'PVC {{ $labels.persistentvolumeclaim }} är {{ $value | humanizePercentage }} full. Sänk tempo_sampling_percentage eller stäng av Tempo (tempo_enabled = false).'
 
         - alert: PodCrashLooping
           expr: increase(kube_pod_container_status_restarts_total{namespace=~"ticketing|data"}[15m]) > 3

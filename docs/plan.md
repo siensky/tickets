@@ -25,8 +25,8 @@ portfolioprojekt.
 | **G** CI/CD vid varje merge till main | GitHub Actions: test → images → migrations-Job → `kubectl apply` → `rollout status` | `.github/workflows/deploy.yml` |
 | **G** Unit-, integrations- och e2e-tester i pipelinen | Vitest, Testcontainers, Pact, systemtester, Playwright | `ci.yml`, `test.yml`, `e2e.yml` |
 | **G** Dagliga DB-backups till S3 | Nattlig `pg_dump` av båda shardarna till R2 (S3-kompatibelt) | Återställningsövning i runbook |
-| **G** Metrics och logging | Prometheus + Grafana, Loki + Alloy, Tempo | `https://grafana.tikknet.se` |
-| **VG** ≥2 instanser bakom load balancer | booking-api 2–10 repliker bakom ingress-nginx + Service | HPA min 2 |
+| **G** Metrics och logging | Prometheus + Grafana, Loki + Alloy | `https://grafana.tikknet.se` |
+| **VG** ≥2 instanser bakom load balancer | booking-api 2–6 repliker bakom ingress-nginx + Service | HPA min 2 |
 | **VG** Deploy utan downtime | Probes, `maxUnavailable: 0`, preStop, graceful shutdown | [`evidence/zero-downtime.md`](./evidence/zero-downtime.md): 0 fel av 22 978 |
 | **VG** Autoscaling upp **och** ner | HPA (CPU) på booking-api, KEDA (ködjup) på notification-worker | Grafana "Autoscaling & lasttest" |
 
@@ -60,10 +60,10 @@ Biljettbokning med platsval på en interaktiv arenakarta. 5 000 platser släpps 
 
 | Tjänst | Roll | Repliker |
 |---|---|---|
-| `booking-api` | Fastify HTTP-API, bokningstransaktionen | 2–10 (HPA, CPU) |
+| `booking-api` | Fastify HTTP-API, bokningstransaktionen | 2–6 (HPA, CPU) |
 | `realtime-gateway` | WebSocket-server (köplats, "din stol togs") | 2–4 (HPA, minne) |
 | `scheduler-worker` | Insläpp från väntrum, frisläpp av utgångna reservationer, outbox-relay, engångsskript (import, seed, reset) | **exakt 1** (`Recreate` + advisory lock) |
-| `notification-worker` | RabbitMQ-konsument: e-post med QR | 1–10 (KEDA, ködjup) |
+| `notification-worker` | RabbitMQ-konsument: e-post med QR | 1–4 (KEDA, ködjup) |
 | `payment-mock` | Simulerad betalleverantör med konfigurerbart kaos, för lasttest och CI | 1 (4 under lasttest) |
 | `migrations` | Kubernetes Job per deploy, båda shardarna, advisory lock | Job |
 
@@ -99,7 +99,7 @@ Webbläsare
 
 Node.js · TypeScript · Fastify · Zod · pnpm workspaces · Turborepo · Postgres · Redis ·
 RabbitMQ · React + Vite (PWA) · TanStack Query · Tailwind 4 + daisyUI · Auth0 · Stripe ·
-Terraform · k3s · Kustomize · Prometheus · Grafana · Loki · Tempo · PostHog · Vitest ·
+Terraform · k3s · Kustomize · Prometheus · Grafana · Loki · PostHog · Vitest ·
 Testcontainers · Pact · Playwright · k6
 
 ### Repo
@@ -416,13 +416,13 @@ rate limitern eftersom grindarna ofta delar NAT-IP.
   Terraform-resurser (`demo_node_count`, `loadgen_node_count`) som bara finns när de behövs
 - **Terraform äger:** servrar, brandvägg, privat nätverk, Hetzner CSI och CCM, Cloudflare (DNS,
   Cache Rules, SSL-läge, Workers), R2, samt klusterkomponenter som sällan ändras (ingress-nginx,
-  cert-manager, KEDA, kube-prometheus-stack, Loki, Alloy, Tempo)
+  cert-manager, KEDA, kube-prometheus-stack, Loki, Alloy)
 - **Terraform äger inte** applikationens manifest — de deployas vid varje merge
 - **Certifikat:** cert-manager med DNS-01 via Cloudflare (egen smal DNS-token). Let's Encrypt
   staging tills kedjan var stabil. Cloudflare SSL-läge Full (strict)
 - **Lagring:** `storageClassName` för Hetzner CSI explicit i varje StatefulSet, så en volym
   följer podden mellan noder
-- **Disk:** `retentionSize` på Prometheus, retention på Loki och Tempo, larm vid fylld volym
+- **Disk:** `retentionSize` på Prometheus, retention på Loki, larm vid fylld volym
 - Klustret kör k3s v1.31 (EOL upstream), uppgradering är nästa steg efter försvaret
 
 **Namespaces:** `ticketing` · `data` · `observability` · `ingress-nginx` · `keda` · `cert-manager`
@@ -440,12 +440,12 @@ och ett advisory lock vid start, eftersom RollingUpdate annars kör två samtidi
 
 ### Autoscaling
 
-- **booking-api:** HPA 70 % CPU, min 2, max 10. `requests 250m`, `limits 500m`, så kurvan blir
+- **booking-api:** HPA 70 % CPU, min 2, max 6 (det som ryms på två cpx22, se docs/loadtest-cpu-plan.md). `requests 250m`, `limits 500m`, så kurvan blir
   gradvis i stället för ett språng. `scaleDown.stabilizationWindowSeconds` är **300 s**: 60 s
   provades men skalade ner mitt i lasttestet och gav "connection reset". Sänks tillfälligt till
   60 s med `kubectl patch` före en demo och återställs efteråt
 - **realtime-gateway:** HPA på minne, 2–4. Nedskalning utlovas inte
-- **notification-worker:** KEDA på RabbitMQ-ködjup, 100 meddelanden/podd, 1–10
+- **notification-worker:** KEDA på RabbitMQ-ködjup, 100 meddelanden/podd, 1–4
 - **Nodnivå** skalas för hand via Terraform. Demonoderna provisioneras i förväg
 - PodDisruptionBudget `maxUnavailable: 1` på enreplikstjänsterna
 
@@ -470,7 +470,10 @@ Migrations körs aldrig som init-container. Det finns ingen staging-miljö.
   ServiceMonitors. Exporters för Postgres och Redis, RabbitMQ:s inbyggda plugin, ingress-nginx
   metrics, node-exporter, kube-state-metrics
 - **Loki + Alloy** för loggar (larm om Alloy tappar loggrader)
-- **Tempo** för traces (OTel i `shared/observability`, 10 % sampling), länkade till loggarna
+- **Ingen tracing.** OpenTelemetry och Tempo togs bort efter lasttestet: de kostade för mycket CPU på
+  två små noder (docs/loadtest-cpu-plan.md steg 1)
+- **Sparsam loggning:** ingen rad per anrop, bara fel och anrop över 1 s. ingress-nginx access-logg är
+  avstängd; antal anrop och svarstider finns i Prometheus
 - **Mått:** RED per endpoint, affär (aktiva reservationer, ködjup, insläppstakt, sålda
   biljetter, konvertering), infrastruktur (anslutningar per shard, låskonflikter,
   RabbitMQ-ködjup, dödköer) och `oversell_prevented_total`
@@ -513,7 +516,9 @@ biljett.
 ## 13. Lasttest
 
 Lastgeneratorer är Hetzner-maskiner som skapas med Terraform och rivs efteråt. Huvudkörningarna
-går mot ett eget värdnamn direkt mot ingress (vi mäter vårt system, inte Cloudflares nät).
+går genom Cloudflare (`api.<domän>`), samma väg som riktiga besökare, så att Cloudflares TLS och
+cache ingår i resultatet (docs/loadtest-cpu-plan.md steg 6). `deploy-under-load` och felsökning går
+direkt mot ingress via `loadtest.<domän>`.
 `scripts/loadtest-mode.sh on|off` växlar allt som bara ska gälla under test: allowlista för
 generatorernas IP:n, betalningar till payment-mock, högre insläppstakt, fler payment-mock-
 repliker, botskyddets undantag och `POSTHOG_ENABLED=false`.
@@ -558,7 +563,7 @@ Alla faser är byggda och mergade till `main`.
 | 5 | PWA:n med hela flödet, Playwright, frontend-deploy |
 | 6 | HPA, KEDA, zero-downtime-konfiguration, k6-scenarierna, lasttesten |
 | 7 | Loki-fix, zero-downtime-beviset, Grafana-demopaneler, återställningsövning, CSV-seed, `cdn.`, ny UI, PostHog, scannern, Pact, systemtester, dokumentation |
-| 8 | Snabbare CI, Auth0-utseende, eventlist-cache, cdn-304, session replay, botskydd (PoW + Turnstile), DLQ, Tempo |
+| 8 | Snabbare CI, Auth0-utseende, eventlist-cache, cdn-304, session replay, botskydd (PoW + Turnstile), DLQ |
 
 Vissa delar kräver manuella steg (Auth0, PostHog, Turnstile, `terraform apply`), beskrivna i
 runbooken.
@@ -567,7 +572,16 @@ runbooken.
 
 - **NetworkPolicies saknas.** Datatjänsterna är bara nåbara inifrån klustret, men poddarna
   är inte isolerade från varandra
-- **Slutsålt-flödet och väntelistan** är inte byggda (`waitlist`-tabellen finns men används inte)
+- **Delad databas, inte en per tjänst.** booking-api och scheduler-worker skriver båda till
+  `reservations`, `seats` och `outbox` (scheduler-worker: utgång, rensning och "publicerad").
+  Radlås, samma låsordning och unika index hindrar krockar, men tjänsterna delar schema och
+  måste ändras i takt. Renare: scheduler-worker anropar booking-api (eller en händelse) i stället
+  för att skriva själv, eller så körs jobben i booking-api med ledarval
+- **Kösidan lyssnar nu på WebSocket** (`admitted`, `sales_closed`, `sold_out`) och pollar bara var
+  15:e sekund som reserv. Tidigare pollade den varannan sekund, vilket gav onödig last vid en stor kö
+  (docs/loadtest-cpu-plan.md steg 3)
+- **Väntelistan** är inte byggd (`waitlist`-tabellen finns men används inte). Kön töms med besked
+  vid slutsålt och stängd försäljning
 - **Retention** finns bara för `reservations`. `outbox`, `processed_messages` och `idempotency_keys` rensas inte, så de växer
 - **Cache hit ratio vid kanten** är inte uppmätt
 - **Radering av personuppgifter** finns som princip, inte som funktion

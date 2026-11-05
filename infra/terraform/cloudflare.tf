@@ -113,3 +113,31 @@ resource "cloudflare_ruleset" "edge_cache" {
     }
   ]
 }
+
+# docs/loadtest-cpu-plan.md steg 6: lasttestet går genom Cloudflare (api.<domän>), som riktiga besökare.
+# Tusentals anrop per sekund från ett par IP-adresser ser annars ut som en attack, så Cloudflares
+# säkerhetskontroller (säkerhetsnivå, webbläsarkontroll, hotlänkning, User-Agent- och zonlås) hoppas över
+# för loadgen-VM:arna, och bara för API:t. Finns bara medan loadgen_node_count > 0. Bot Fight Mode kan inte
+# undantas på gratisplanen och stängs av för hand under testet (tests/load/README.md). Cloudflares egen
+# DDoS-skydd kan inte stängas av och gäller fortfarande.
+resource "cloudflare_ruleset" "loadtest_skip" {
+  count       = var.loadgen_node_count > 0 ? 1 : 0
+  zone_id     = data.cloudflare_zone.this.zone_id
+  name        = "tickets-loadtest-skip"
+  description = "Undantar loadgen-VM:arna från Cloudflares säkerhetskontroller under ett lasttest"
+  kind        = "zone"
+  phase       = "http_request_firewall_custom"
+
+  rules = [
+    {
+      description = "Loadgen-VM:ar mot api.${var.domain_name}"
+      expression  = "(ip.src in {${join(" ", hcloud_server.loadgen[*].ipv4_address)}} and http.host eq \"api.${var.domain_name}\")"
+      action      = "skip"
+      action_parameters = {
+        ruleset  = "current"
+        products = ["bic", "hot", "securityLevel", "uaBlock", "zoneLockdown"]
+      }
+      logging = { enabled = true }
+    },
+  ]
+}

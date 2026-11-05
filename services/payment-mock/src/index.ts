@@ -10,7 +10,13 @@
  * content type, and @fastify/formbody is a new dependency not approved
  * — this file registers a tiny one itself.
  */
-import { createHttpMetrics, createLogger, createRegistry } from '@tickets/observability';
+import {
+  createHttpMetrics,
+  createLogger,
+  createRegistry,
+  createSlowRequestHook,
+  QuietRequestLogController,
+} from '@tickets/observability';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Fastify, {
@@ -24,7 +30,6 @@ import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerCheckoutSessionsRoutes } from './routes/checkout-sessions.js';
 import { registerMockCheckoutRoutes } from './routes/mock-checkout.js';
 import { registerRefundsRoutes } from './routes/refunds.js';
-import { shutdownTracing } from './instrumentation.js';
 import { loadChaosConfig } from './services/chaos-config.js';
 import { createSessionStore } from './services/session-store.js';
 
@@ -41,7 +46,8 @@ export async function start(): Promise<void> {
     RawRequestDefaultExpression<RawServerDefault>,
     RawReplyDefaultExpression<RawServerDefault>,
     FastifyBaseLogger
-  >({ loggerInstance: logger });
+  >({ loggerInstance: logger, logController: new QuietRequestLogController() });
+  app.addHook('onResponse', createSlowRequestHook(logger));
   app.addContentTypeParser(FORM_URLENCODED, { parseAs: 'string' }, (_request, body, done) => {
     done(null, body);
   });
@@ -79,7 +85,6 @@ export async function start(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down gracefully');
     await app.close();
-    await shutdownTracing();
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

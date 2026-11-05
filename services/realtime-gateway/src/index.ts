@@ -5,7 +5,13 @@
  */
 import websocketPlugin from '@fastify/websocket';
 import { createQueueTokenSecret } from '@tickets/auth';
-import { createHttpMetrics, createLogger, createRegistry } from '@tickets/observability';
+import {
+  createHttpMetrics,
+  createLogger,
+  createRegistry,
+  createSlowRequestHook,
+  QuietRequestLogController,
+} from '@tickets/observability';
 import { closeRedisClient, createRedisClient } from '@tickets/redis';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +25,6 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerWsRoute } from './routes/ws.js';
 import { startWsSubscriberRegistry } from './services/ws-subscriber-registry.js';
-import { shutdownTracing } from './instrumentation.js';
 
 const SERVICE_NAME = 'realtime-gateway';
 
@@ -48,7 +53,8 @@ export async function start(): Promise<void> {
     RawRequestDefaultExpression<RawServerDefault>,
     RawReplyDefaultExpression<RawServerDefault>,
     FastifyBaseLogger
-  >({ loggerInstance: logger });
+  >({ loggerInstance: logger, logController: new QuietRequestLogController() });
+  app.addHook('onResponse', createSlowRequestHook(logger));
   await app.register(websocketPlugin);
 
   const redis = createRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
@@ -78,7 +84,6 @@ export async function start(): Promise<void> {
     await app.close();
     await wsSubscribers.close();
     await closeRedisClient(redis);
-    await shutdownTracing();
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

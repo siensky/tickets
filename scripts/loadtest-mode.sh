@@ -80,8 +80,12 @@ mode_on() {
 Lasttestläge PÅ (allowlist: $ips, insläpp: $rate/min, payment-mock: $LOADTEST_MOCK_REPLICAS repliker).
 Botskyddets undantag: kör  export CHALLENGE_BYPASS=$bypass_token  före k6 (läses som __ENV.CHALLENGE_BYPASS, hamnar inte i k6:s argumentlista; gäller bara tills du kör '$0 off').
 
+Före körningen genom Cloudflare (standardmålet api.tikknet.se, docs/loadtest-cpu-plan.md steg 6):
+  - Bot Fight Mode avstängt i Cloudflare (Security -> Bots), annars utmanas k6.
+  - Undantagsregeln tickets-loadtest-skip finns (skapas av terraform apply när loadgen_node_count > 0).
+
 Verifiera INNAN en stor körning:
-  k6 run -e BASE_URL=https://loadtest.tikknet.se -e EVENT_ID=<uuid> -e AUTH_TOKENS=<tok1,tok2,...> tests/load/smoke.js
+  k6 run -e EVENT_ID=<uuid> -e AUTH_TOKENS=<tok1,tok2,...> tests/load/smoke.js
   Förväntat: checks 100 %. Kontrollera sedan att ordrarna blev betalda (inte bara 201 från checkout), på båda shardarna:
   kubectl exec -n $DATA_NAMESPACE postgres-shard-0-0 -- psql -U postgres -d tickets -c "SELECT status, count(*) FROM orders GROUP BY status;"
   kubectl exec -n $DATA_NAMESPACE postgres-shard-1-0 -- psql -U postgres -d tickets -c "SELECT status, count(*) FROM orders GROUP BY status;"

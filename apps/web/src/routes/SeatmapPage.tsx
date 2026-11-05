@@ -132,7 +132,13 @@ export function SeatmapPage(): JSX.Element {
     enabled: eventId !== '',
     refetchInterval: 10_000,
   });
-  const { token, status, error: queueError } = useQueueAdmission(eventId);
+  const {
+    token,
+    status,
+    error: queueError,
+  } = useQueueAdmission(eventId, {
+    listenForAdmission: false,
+  });
 
   // Misslyckad kö (utgången token, stängd försäljning) hanteras av kösidan.
   if (queueError !== undefined || (status !== undefined && status.status !== 'admitted')) {

@@ -42,8 +42,6 @@ spec:
           env:
             - name: NODE_ENV
               value: production
-            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-              value: 'http://alloy.observability.svc.cluster.local:4318/v1/traces'
             - name: REALTIME_GATEWAY_PORT
               value: '3001'
             - name: REDIS_URL
@@ -57,9 +55,12 @@ spec:
                   key: queue-token-secret
           resources:
             requests:
-              cpu: 250m
-              # Höjt från 256Mi (Fas 6-reviewn): en Node 22-process med
-              # OTel förinstrumenterad ligger ofta redan nära 70 % av
+              # Sänkt från 250m (docs/loadtest-cpu-plan.md steg 5): gatewayen är minnesbunden och skalar på
+              # minne (hpa.yaml), och 250m reserverade CPU som booking-api behövde för att kunna skala.
+              # Mätt i vila: cirka 6m per podd.
+              cpu: 100m
+              # Höjt från 256Mi (Fas 6-reviewn, då med OTel-instrumentering,
+              # som numera är borttagen): en Node 22-process låg nära 70 % av
               # 256Mi i vila, vilket hade kunnat trigga HPA:n (hpa.yaml)
               # till max direkt utan en riktig kurva. OVERIFIERAT mot en
               # riktig podd (ingen Tailscale-åtkomst i byggmiljön, samma

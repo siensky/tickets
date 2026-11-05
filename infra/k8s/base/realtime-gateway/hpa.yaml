@@ -10,7 +10,7 @@
 # memory-tröskeln ges i docs/plan.md, så samma, redan motiverade
 # procentsats återanvänds här för konsekvens. Requesten höjdes i Fas 6-
 # reviewn (se deployment.yaml:s kommentar) specifikt för att 70 % inte
-# ska träffas direkt av en Node+OTel-process redan i vila — ändå
+# ska träffas direkt av en Node-process redan i vila (då med OTel, som numera är borttaget) — ändå
 # OVERIFIERAT mot en riktig podd.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

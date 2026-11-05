@@ -15,6 +15,8 @@ import {
   createHttpMetrics,
   createLogger,
   createRegistry,
+  createSlowRequestHook,
+  QuietRequestLogController,
   type HttpMetrics,
   type Logger,
 } from '@tickets/observability';
@@ -30,7 +32,6 @@ import Fastify, {
 } from 'fastify';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
-import { shutdownTracing } from './instrumentation.js';
 import {
   startBusinessMetricsJob,
   type BusinessMetricsJob,
@@ -106,7 +107,6 @@ function createShutdownHandler(
     await resources.analytics.shutdown();
     await closeShardPools(resources.shardPools);
     await closeRedisClient(resources.redis);
-    await shutdownTracing();
     process.exit(0);
   };
   return (signal: string): void => {
@@ -121,21 +121,32 @@ function createShutdownHandler(
   };
 }
 
+/** Bara hälso- och måttendpoints: loggar inget per anrop, bara långsamma anrop. */
+function createApp(
+  logger: Logger,
+  registry: ReturnType<typeof createRegistry>,
+  httpMetrics: ReturnType<typeof createHttpMetrics>,
+) {
+  const app = Fastify<
+    RawServerDefault,
+    RawRequestDefaultExpression<RawServerDefault>,
+    RawReplyDefaultExpression<RawServerDefault>,
+    FastifyBaseLogger
+  >({ loggerInstance: logger, logController: new QuietRequestLogController() });
+  app.addHook('onResponse', createSlowRequestHook(logger));
+  registerHealthRoutes(app);
+  registerMetricsRoutes(app, registry);
+  registerRedMetricsHook(app, httpMetrics);
+  return app;
+}
+
 export async function start(): Promise<void> {
   const logger = createLogger({ serviceName: SERVICE_NAME });
   const registry = createRegistry(SERVICE_NAME);
   const httpMetrics = createHttpMetrics(registry);
   const businessMetrics = createBusinessMetrics(registry);
 
-  const app = Fastify<
-    RawServerDefault,
-    RawRequestDefaultExpression<RawServerDefault>,
-    RawReplyDefaultExpression<RawServerDefault>,
-    FastifyBaseLogger
-  >({ loggerInstance: logger });
-  registerHealthRoutes(app);
-  registerMetricsRoutes(app, registry);
-  registerRedMetricsHook(app, httpMetrics);
+  const app = createApp(logger, registry, httpMetrics);
 
   const port = Number(process.env['SCHEDULER_WORKER_PORT'] ?? 3010);
   await app.listen({ port, host: '0.0.0.0' });

@@ -18,11 +18,16 @@ betalning) mellan scripten; `lib/config.js` läser miljövariabler.
 ## Köra ett scenario
 
 ```sh
-k6 run -e BASE_URL=https://loadtest.tikknet.se \
-       -e EVENT_ID=<uuid> \
+k6 run -e EVENT_ID=<uuid> \
        -e AUTH_TOKENS=<tok1,tok2,...> \
        tests/load/normal-sale.js
 ```
+
+Standardmålet är `https://api.tikknet.se`, genom Cloudflare som för riktiga besökare (se
+`docs/loadtest-cpu-plan.md` steg 6). Kontrollera före körningen att Cloudflares **Bot Fight Mode** är
+avstängt och att undantagsregeln för loadgen-IP:erna finns (den skapas av Terraform när
+`loadgen_node_count > 0`). `-e BASE_URL=https://loadtest.tikknet.se` går direkt mot klustret och
+används för `deploy-under-load.js` och felsökning.
 
 `EVENT_ID` måste redan ha sina 5 000 biljetter importerade. `AUTH_TOKENS`
 — se docs/runbook.md "Lasttest: förutfärdade Auth0-tokens".

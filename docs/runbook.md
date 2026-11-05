@@ -559,30 +559,6 @@ AUTH_TOKENS=tok1,tok2,tok3 ...`. Tokens har en begränsad livstid
 (Auth0-defaulten är timmar, inte dagar) — hämta färska strax innan en
 körning, inte dagen före.
 
-## Tempo: traces (Fas 8, steg 7)
-
-Alloy tar emot OTLP-spans från alla tjänster, skickar alla till debug-exportören (loggas, behålls tills Tempo är bevisad)
-och 10 % (`tempo_sampling_percentage`) till Tempo. Grafana har Tempo som datakälla; ett trace länkar till Loki-loggarna med
-samma `trace_id`, och en loggrad med `trace_id` länkar tillbaka till sitt trace.
-
-**Införande (du kör, i den här ordningen, utanför demo- och försvarsdagar):**
-
-1. Före: `kubectl top nodes` och `kubectl get pods -A | grep -v Running` (spara utskriften som jämförelse).
-2. `terraform -chdir=infra/terraform apply -target=helm_release.tempo`, vänta tills `kubectl get pods -n observability`
-   visar Tempo `Running` (readiness tar ca 30 s).
-3. `terraform -chdir=infra/terraform apply -target=helm_release.alloy` (ny Alloy-konfiguration) och
-   `terraform -chdir=infra/terraform apply -target=helm_release.kube_prometheus_stack` (Grafanas nya datakällor).
-4. Efter: `kubectl top nodes` igen, inga `Pending`-poddar, inga `OOMKilled` (`kubectl get pods -n observability`
-   → `kubectl describe pod` vid tvekan). Tempo ska ligga under 384Mi.
-5. Gör ett bokningsanrop (gå med i en kö på tikknet.se) och öppna Grafana → Explore → Tempo → *Search* (service
-   `booking-api`). Ett trace ska ha spans för booking-api, `pg` och `ioredis`. Med 10 % sampling kan du behöva
-   upprepa anropet några gånger; höj tillfälligt `-var tempo_sampling_percentage=100` för att se det direkt.
-
-**Rollback:** `terraform apply -var tempo_enabled=false -target=helm_release.alloy -target=helm_release.kube_prometheus_stack`
-följt av `-target=helm_release.tempo` (tar bort Tempo och dess PVC; Alloy går tillbaka till bara debug-exportören).
-
-**Larm:** `TempoVolumeFilling` (disken över 80 %). Tempo saknar storleksbaserad retention, så PVC:n (5Gi) är taket.
-
 ## Botskydd: proof of work och Turnstile (Fas 8, steg 6)
 
 `POST /events/:eventId/queue/join` utmanar misstänkta klienter (docs/plan.md 8.5). Nivå 0 = ingen utmaning (alla

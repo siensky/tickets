@@ -2,10 +2,11 @@
 // Allt läses från miljövariabler (`k6 run -e KEY=value ...`), aldrig
 // hårdkodat — samma event/host ska kunna bytas utan att röra scripten.
 
-// `loadtest.<domän>` (icke-proxat, infra/terraform/dns.tf) för
-// huvudkörningen; byt till `https://api.<domän>` för det mindre,
-// CF-proxade testet (docs/plan.md "Ett mindre CF-proxat test körs också").
-export const BASE_URL = __ENV.BASE_URL || 'https://loadtest.tikknet.se';
+// Genom Cloudflare (`api.<domän>`), samma väg som riktiga besökare: Cloudflare avslutar TLS och
+// cachar det som cachas i verkligheten (stolsstatus 1 s, arenageometri 30 dagar), så resultatet
+// speglar verkligheten (docs/loadtest-cpu-plan.md steg 6). `https://loadtest.<domän>` (icke-proxat,
+// direkt mot klustret) används för deploy-under-load och felsökning.
+export const BASE_URL = __ENV.BASE_URL || 'https://api.tikknet.se';
 
 export const WS_BASE_URL = BASE_URL.replace(/^http/, 'ws');
 

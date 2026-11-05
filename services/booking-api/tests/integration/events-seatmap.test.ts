@@ -16,7 +16,7 @@ import { registerEventRoutes } from '../../src/routes/events.js';
 import { getEvent, listAllEvents } from '../../src/services/events-service.js';
 import {
   getSectionGeometry,
-  getSectionSeatStatus,
+  getSectionSeatStatusBody,
   listVenueSections,
 } from '../../src/services/seatmap-service.js';
 import {
@@ -211,17 +211,21 @@ describe('events + seatmap', () => {
     });
 
     const deps = { shardPools: db.shardPools, redis: redis.client, logger: LOGGER };
-    const firstRead = await getSectionSeatStatus(deps, eventId, sectionId);
-    expect(firstRead).toEqual([
-      { seatId, venueSeatId, status: 'held', priceCents: 1000, heldUntil: null },
-    ]);
+    const firstRead: unknown = JSON.parse(
+      await getSectionSeatStatusBody(deps, eventId, sectionId),
+    );
+    expect(firstRead).toEqual({
+      seats: [{ seatId, venueSeatId, status: 'held', priceCents: 1000, heldUntil: null }],
+    });
 
     // Flip the row directly — if the second read still returns 'held',
     // it proves the value came from the Redis cache, not a fresh query.
     await pool.query(`UPDATE seats SET status = 'sold' WHERE id = $1`, [seatId]);
-    const secondRead = await getSectionSeatStatus(deps, eventId, sectionId);
-    expect(secondRead).toEqual([
-      { seatId, venueSeatId, status: 'held', priceCents: 1000, heldUntil: null },
-    ]);
+    const secondRead: unknown = JSON.parse(
+      await getSectionSeatStatusBody(deps, eventId, sectionId),
+    );
+    expect(secondRead).toEqual({
+      seats: [{ seatId, venueSeatId, status: 'held', priceCents: 1000, heldUntil: null }],
+    });
   }, 60_000);
 });

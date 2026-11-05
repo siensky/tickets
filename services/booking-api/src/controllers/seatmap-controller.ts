@@ -17,8 +17,8 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { setPublicCacheHeaders } from './http-headers.js';
 import {
   getSectionGeometry,
-  getSectionSeatStatus,
-  getSectionSummary,
+  getSectionSeatStatusBody,
+  getSectionSummaryBody,
   listVenueSections,
   type SeatmapServiceDeps,
 } from '../services/seatmap-service.js';
@@ -27,6 +27,8 @@ export type { SeatmapServiceDeps };
 
 const EDGE_CACHE_GEOMETRY = 'public, max-age=2592000';
 const EDGE_CACHE_STATUS = 'public, max-age=1';
+// Servicen ger det färdiga JSON-svaret som sträng; utan typen skulle Fastify skicka det som text/plain.
+const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 
 export function createListVenueSectionsHandler(deps: SeatmapServiceDeps) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
@@ -64,9 +66,13 @@ export function createGetSectionSeatStatusHandler(deps: SeatmapServiceDeps) {
         issues: parsed.error.issues,
       });
     }
-    const seats = await getSectionSeatStatus(deps, parsed.data.eventId, parsed.data.sectionId);
+    const body = await getSectionSeatStatusBody(
+      deps,
+      parsed.data.eventId,
+      parsed.data.sectionId,
+    );
     setPublicCacheHeaders(reply, EDGE_CACHE_STATUS);
-    reply.send({ seats });
+    reply.type(JSON_CONTENT_TYPE).send(body);
   };
 }
 
@@ -78,13 +84,13 @@ export function createGetSectionSummaryHandler(deps: SeatmapServiceDeps) {
         issues: parsed.error.issues,
       });
     }
-    const summary = await getSectionSummary(deps, parsed.data.eventId);
+    const body = await getSectionSummaryBody(deps, parsed.data.eventId);
     // Samma svar för alla (ingen inloggning, ingen kötoken). 0 = ingen header, och kanten cachar då inget
     // (regeln i cloudflare.tf följer origin-headern).
     const maxAge = deps.summaryCacheSeconds ?? 0;
     if (maxAge > 0) {
       setPublicCacheHeaders(reply, `public, max-age=${String(maxAge)}`);
     }
-    reply.send(summary);
+    reply.type(JSON_CONTENT_TYPE).send(body);
   };
 }

@@ -35,7 +35,7 @@ export interface ServerAnalyticsConfig {
 
 const DEFAULT_HOST = 'https://eu.i.posthog.com';
 // Kortare än podens terminationGracePeriodSeconds (30 s): svarar inte PostHog får det aldrig
-// blockera resten av graceful shutdown (pooler, tracing).
+// blockera resten av graceful shutdown (pooler, Redis).
 const REQUEST_TIMEOUT_MS = 3000;
 const SHUTDOWN_TIMEOUT_MS = 5000;
 

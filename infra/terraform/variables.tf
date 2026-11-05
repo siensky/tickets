@@ -170,19 +170,6 @@ variable "enable_hcloud_csi" {
   default     = true
 }
 
-# --- Tempo (docs/plan.md 8.7) ---
-variable "tempo_enabled" {
-  description = "Installera Tempo (traces) och låt Alloy skicka 10 % av spans dit. false = rollback: Tempo tas bort och Alloy tillbaka till bara debug-exportören."
-  type        = bool
-  default     = true
-}
-
-variable "tempo_sampling_percentage" {
-  description = "Andel spans (0-100) som Alloy skickar till Tempo. Noderna är små, så börja lågt."
-  type        = number
-  default     = 10
-}
-
 # --- Cert-manager / Let's Encrypt ---
 
 variable "letsencrypt_email" {
