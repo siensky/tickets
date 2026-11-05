@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const settings = JSON.parse(readFileSync(join(REPO, '.claude/settings.json'), 'utf8'));
@@ -110,5 +111,64 @@ describe('CLAUDE.md', () => {
     for (const path of imports) {
       expect(existsSync(join(REPO, path)), path).toBe(true);
     }
+  });
+});
+
+/** Frontmatter och text för en agent- eller skillfil. Claude Code ignorerar okända fält tyst. */
+function markdownWithFrontmatter(path) {
+  const [, frontmatter, body] = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(
+    readFileSync(join(REPO, path), 'utf8'),
+  );
+  return { meta: parseYaml(frontmatter), body };
+}
+const list = (value) => (Array.isArray(value) ? value : String(value).split(/,\s*/));
+const WRITE_TOOLS = ['Edit', 'Write', 'NotebookEdit', 'Agent'];
+
+describe('reviewer-agenten', () => {
+  const { meta, body } = markdownWithFrontmatter('.claude/agents/reviewer.md');
+
+  it('kan inte ändra filer eller starta andra agenter', () => {
+    expect(meta.name).toBe('reviewer');
+    expect(meta.permissionMode).toBe('plan');
+    expect(list(meta.tools).filter((tool) => WRITE_TOOLS.includes(tool))).toEqual([]);
+    expect(list(meta.disallowedTools)).toEqual(expect.arrayContaining(WRITE_TOOLS));
+  });
+
+  it('svarar med vad som granskats, vad som inte granskats, testläget och fynden', () => {
+    for (const heading of ['## Granskat', '## Inte granskat', '## Tester', '## Fynd']) {
+      expect(body).toContain(heading);
+    }
+    expect(body).toContain('Bara ci-ok i GitHub avgör');
+    expect(body).toContain('Du kör inga tester själv');
+  });
+});
+
+describe('skills', () => {
+  it('/review körs av reviewer-agenten i en egen kontext', () => {
+    const { meta } = markdownWithFrontmatter('.claude/skills/review/SKILL.md');
+    expect(meta).toMatchObject({ name: 'review', context: 'fork', agent: 'reviewer' });
+  });
+
+  it.each(['review', 'verify'])(
+    '/%s förhandsgodkänner varje kommando den kör när den laddas',
+    (skill) => {
+      const { meta, body } = markdownWithFrontmatter(`.claude/skills/${skill}/SKILL.md`);
+      const allowed = [
+        ...String(meta['allowed-tools'] ?? '').matchAll(/Bash\(([^)]+)\)/g),
+      ].map((match) => match[1]);
+      // Ett !`kommando` som inte är förhandsgodkänt avbryter hela skillen.
+      for (const [, command] of body.matchAll(/!`([^`]+)`/g)) {
+        expect(allowed, command).toContain(command);
+      }
+    },
+  );
+
+  it('/verify tillåter bara verifieringsskriptet och säger att bara användaren nollställer taket', () => {
+    const { meta, body } = markdownWithFrontmatter('.claude/skills/verify/SKILL.md');
+    expect(meta['allowed-tools']).toBe(
+      'Bash(node .claude/hooks/verify.mjs) Bash(node .claude/hooks/verify.mjs --scope full)',
+    );
+    expect(body).toContain('Bara användaren');
+    expect(body).toContain('ci-ok');
   });
 });

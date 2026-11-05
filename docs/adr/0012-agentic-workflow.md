@@ -53,9 +53,27 @@ Kodkommentarerna skrivs inte om; en tabell i `plan.md` visar var gamla hänvisni
 `.claude/` och `docs/phases/` är godkända mappar (`rules.md` §11). Agenterna läser fasdokumentet och
 de avsnitt i `specification.md` det pekar ut, inte hela planen (`rules.md` §11a).
 
-**Spärrarna stoppar misstag, inte en agent som aktivt försöker ta sig runt dem.** Ett skript i en
-tolk (`node -e`, `python -c`) kan inte bedömas på kommandotexten och blir alltid en fråga till
-utvecklaren. Den verkliga gränsen är att `main` kräver en grön `ci-ok`.
+**Spärrarna stoppar misstag, inte en agent som aktivt försöker ta sig runt dem.** Den verkliga gränsen
+är att `main` kräver en grön `ci-ok`. Kända luckor:
+
+- Ett skript i en fil (`node x.mjs`, `bash x.sh`) går inte att bedöma på kommandotexten. Det blir en
+  fråga till utvecklaren, eftersom tolkarna aldrig är tillåtna.
+- `pnpm test`, `pnpm lint` och `node .claude/hooks/verify.mjs` är tillåtna utan fråga och kör kod som
+  finns i repot: testfiler, skripten i `package.json`, `.claude/hooks/`. En ändrad testfil kan alltså
+  köra vad som helst. Ändringen av filen kräver utvecklarens godkännande i standardläget; i
+  `acceptEdits`-läget gör den det inte, och då gäller spärrarna inte. Använd inte `acceptEdits` här.
+- Stop-hooken ser bara ändringar via Edit, Write och NotebookEdit. En fil som ändrats med `sed -i` eller
+  `cat >` kräver ingen verifiering.
+- Verifieringsposten är ett lokalt kvitto. Den kan inte förfalskas via spärrade vägar, men den är inget
+  bevis; bara `ci-ok` i GitHub avgör.
+- Spärren ser bara sökvägar som står i kommandot. Rekursiv läsning (`grep -r token infra`) och
+  globmönster över flera led (`cat */*/*`) kan nå tfstate utan att nämna filen. Neka-reglerna för Read
+  gäller bara Claudes egna verktyg. Riktigt skydd för hemligheterna kräver OS-sandboxen (uppskjuten).
+- `reviewer` saknar Edit och Write men har Bash, och Bash kan skriva. Skyddet är planläget plus spärren,
+  inte bara listan över verktyg.
+- Claude Code laddar bara agenter från mappar som fanns när sessionen startade, och ändrat innehåll i en
+  agent- eller skillfil når inte alltid en pågående session. Starta om Claude Code efter en sådan ändring.
+  `/review` kontrollerar sina verktyg och avbryter om `reviewer` inte är laddad.
 
 Ny kod hänvisar till `specification.md` eller `phases/phase-NN.md`. Gamla hänvisningar till
 `plan.md` fungerar via tabellen i `plan.md`.

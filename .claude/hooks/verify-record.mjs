@@ -86,11 +86,3 @@ export function writeRecord(repo, record) {
   writeFileSync(statePath(repo, 'verify-record.json'), `${JSON.stringify(record, null, 2)}\n`);
   appendFileSync(statePath(repo, 'verify-history.jsonl'), `${JSON.stringify(record)}\n`);
 }
-
-export function readJson(file, fallback) {
-  try {
-    return JSON.parse(readFileSync(file, 'utf8'));
-  } catch {
-    return fallback;
-  }
-}

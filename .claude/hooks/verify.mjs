@@ -1,5 +1,5 @@
 /**
- * Lokal verifiering (ADR-0012, `/verify`): kör samma kontroller som CI för det som ändrats, klassar
+ * Lokal verifiering (ADR-0012, `/verify`): kör CI:s kontroller (utom e2e) för det som ändrats, klassar
  * varje steg (godkänt, testfel, miljöfel, timeout, inte krävt, bara i CI) och skriver en
  * verifieringspost för exakt det filträdet. Stop-hooken (require-verify.mjs) kräver att posten finns.
  *
@@ -8,13 +8,12 @@
  * tar bort .claude/state/verify-attempts.json. Kommandot har inga flaggor som byter ut stegen.
  */
 import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CI_ONLY, classify, failingTests, overallResult, planSteps } from './verify-steps.mjs';
 import {
   RECORD_KIND,
   git,
-  readJson,
   repoRoot,
   statePath,
   treeHash,
@@ -26,14 +25,39 @@ import {
 export const MAX_RUNS = 6;
 const OUTPUT_TAIL = 256 * 1024;
 
-/** Sökvägar som grenen ändrat jämfört med main, plus ändringarna i arbetskatalogen. */
-function changedPaths(repo, changes) {
-  let base = 'HEAD';
+/**
+ * Försöksräknaren. Saknas filen börjar räknaren om; finns den men går inte att läsa (tom, trasig) räknas
+ * det som ett stopp, så att en förstörd fil aldrig tar bort taket.
+ */
+export function readAttempts(file) {
+  if (!existsSync(file)) return null;
   try {
-    base = git(repo, ['merge-base', 'HEAD', 'main']).trim();
+    const state = JSON.parse(readFileSync(file, 'utf8'));
+    if (state !== null && typeof state === 'object' && !Array.isArray(state)) return state;
   } catch {
-    // Ingen main lokalt: bara arbetskatalogen räknas.
+    // Behandlas som trasig nedan.
   }
+  return { runsSinceGreen: MAX_RUNS, stop: 'corrupt_state', lastFailures: [] };
+}
+
+function mergeBase(repo) {
+  for (const ref of ['main', 'origin/main']) {
+    try {
+      return git(repo, ['merge-base', 'HEAD', ref]).trim();
+    } catch {
+      // Prova nästa referens.
+    }
+  }
+  return null;
+}
+
+/**
+ * Sökvägar som grenen ändrat jämfört med main, plus ändringarna i arbetskatalogen. `null` när det inte
+ * finns någon main att jämföra med; då körs alla steg i stället för att gissa.
+ */
+function changedPaths(repo, changes) {
+  const base = mergeBase(repo);
+  if (base === null) return null;
   const committed = git(repo, ['diff', '--name-only', base, 'HEAD'])
     .split('\n')
     .filter(Boolean);
@@ -51,6 +75,8 @@ function realExec(command, { cwd, timeoutMs }) {
   return {
     status: result.status,
     timedOut: result.error?.code === 'ETIMEDOUT',
+    errorCode: result.error?.code,
+    signal: result.signal,
     output: output.slice(-OUTPUT_TAIL),
   };
 }
@@ -62,28 +88,29 @@ function realDockerCheck() {
   return result.status === 0;
 }
 
-/** Om körningen får starta, och hur försöken räknas efter den. */
-export function checkAttempts(state, branch) {
-  if (state?.branch !== branch) return { allowed: true, runsSinceGreen: 0 };
-  if (state.stop)
-    return { allowed: false, stop: state.stop, runsSinceGreen: state.runsSinceGreen };
-  if (state.runsSinceGreen >= MAX_RUNS) {
-    return { allowed: false, stop: 'max_runs', runsSinceGreen: state.runsSinceGreen };
-  }
-  return { allowed: true, runsSinceGreen: state.runsSinceGreen };
+/**
+ * Om körningen får starta. Räknaren gäller oberoende av gren: ett grenbyte nollställer den inte, bara
+ * ett grönt resultat eller att användaren tar bort filen.
+ */
+export function checkAttempts(state) {
+  if (state === null || typeof state !== 'object') return { allowed: true, runsSinceGreen: 0 };
+  const runsSinceGreen = state.runsSinceGreen ?? 0;
+  if (state.stop) return { allowed: false, stop: state.stop, runsSinceGreen };
+  if (runsSinceGreen >= MAX_RUNS) return { allowed: false, stop: 'max_runs', runsSinceGreen };
+  return { allowed: true, runsSinceGreen };
 }
 
 export function nextAttempts(state, { branch, tree, result, failures }) {
   if (result === 'passed')
     return { branch, runsSinceGreen: 0, lastTree: tree, lastFailures: [] };
-  const previous = state?.branch === branch ? state : { runsSinceGreen: 0, lastFailures: [] };
+  const previous = state ?? { runsSinceGreen: 0, lastFailures: [] };
   const isSameFailure =
     failures.length > 0 &&
     previous.lastTree !== tree &&
     JSON.stringify(previous.lastFailures) === JSON.stringify(failures);
   return {
     branch,
-    runsSinceGreen: previous.runsSinceGreen + 1,
+    runsSinceGreen: (previous.runsSinceGreen ?? 0) + 1,
     lastTree: tree,
     lastFailures: failures,
     stop: isSameFailure ? 'same_failure' : undefined,
@@ -166,9 +193,13 @@ export function runVerify({
   const changes = workingChanges(repo);
   const tree = treeHash(repo, changes);
   const attemptsFile = statePath(repo, 'verify-attempts.json');
-  const state = readJson(attemptsFile, null);
-  const gate = checkAttempts(state, branch);
-  const planned = planSteps(changedPaths(repo, changes), scope);
+  const state = readAttempts(attemptsFile);
+  const gate = checkAttempts(state);
+  const changed = changedPaths(repo, changes);
+  const planned =
+    changed === null
+      ? planSteps([], 'full', 'ingen main att jämföra med: alla steg')
+      : planSteps(changed, scope);
   const steps = gate.allowed
     ? runSteps(planned, { repo, exec, dockerCheck })
     : planned.map((step) => ({
@@ -200,6 +231,7 @@ export function runVerify({
 const STOP_TEXT = {
   max_runs: `STOP: ${MAX_RUNS} körningar i rad utan grönt resultat.`,
   same_failure: 'STOP: samma test fallerar igen efter en ändring.',
+  corrupt_state: 'STOP: försöksräknaren går inte att läsa.',
 };
 
 export function formatReport(record) {

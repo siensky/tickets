@@ -66,7 +66,102 @@ const MORE_BYPASSES = [
   ['gh pr merge 27 --squash', 'gh-write'],
 ];
 
+// Vägarna som reviewer-agenten hittade i granskningen av steg 3–5 (alla gav tidigare inget beslut).
+const REVIEW_FINDINGS = [
+  ['echo commit -am x | xargs git', 'git-dynamic'],
+  ['echo commit | xargs git -C .', 'git-dynamic'],
+  ['echo x | xargs rm', 'stdin-args'],
+  ["find . -name '*.ts' -exec git commit -am x {} \\;", 'git-write'],
+  ['find . -execdir git push \\;', 'git-write'],
+  ['env -S "git commit -am x"', 'git-write'],
+  ['env -C . git commit -am x', 'git-write'],
+  ['exec -a foo git commit -am x', 'git-write'],
+  ['timeout --kill-after 5 10 git commit -am x', 'git-write'],
+  ['builtin command git commit -am x', 'git-write'],
+  ['function f { git commit -am x; }; f', 'git-write'],
+  ['pnpm exec -c "git commit -am x"', 'git-write'],
+  ['npm exec --call="git push"', 'git-write'],
+  [`GIT_PAGER="sh -c 'git commit -am x'" git log -p`, 'env-override'],
+  ['GIT_EXTERNAL_DIFF=./x.sh git diff', 'env-override'],
+  [
+    'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=commit git st',
+    'env-override',
+  ],
+  ['export PAGER="sh -c id"; git log', 'env-override'],
+  ['env NODE_OPTIONS=--require=./x.js node -v', 'env-override'],
+  ['git grep -O"sh -c id" foo', 'git-exec'],
+  ['git diff --ext-diff', 'git-exec'],
+  [`node -pe "require('child_process').execSync('git commit -am x')"`, 'inline-code'],
+  [`node --eval="require('child_process').execSync('git push')"`, 'inline-code'],
+  [`python3.12 -c "import os; os.system('git push')"`, 'inline-code'],
+  [`python3 -Ic "import os; os.system('git push')"`, 'inline-code'],
+  [`perl -we "system('git push')"`, 'inline-code'],
+  ['rm .claude//state/verify-attempts.json', 'verify-state'],
+  ['rm .claude/./state/verify-attempts.json', 'verify-state'],
+  ['rm .claude/hooks/../state/verify-attempts.json', 'verify-state'],
+  ['rm .claude/stat?/verify-attempts.json', 'verify-state'],
+  ['rm .cla*/state/verify-attempts.json', 'verify-state'],
+  ['rm -r .claude', 'verify-state'],
+  ['mv .claude /tmp/x', 'verify-state'],
+  ['cd .claude; rm state/verify-attempts.json', 'claude-dir'],
+  ['cat .en?', 'secret-path'],
+  ['cat infra/terraform/*.tfst*', 'secret-path'],
+  ['cat .env.{local,x}', 'secret-path'],
+];
+
+// Andra granskningsomgången: glob, versaler, `=`, omslagare under xargs och tolkar som läser stdin.
+const REVIEW_ROUND_2 = [
+  ['ls -d infra/terraform/terraform.tf[!x]tate', 'secret-path'],
+  ['cat .*', 'secret-path'],
+  ['cat infra/terraform/*', 'secret-path'],
+  ['ls infra/terraform/*.tf', 'secret-path'],
+  ['cat infra/terraform/.ku*/config', 'secret-path'],
+  ['cat infra/terraform/terraform.tfstat{a..z}', 'secret-path'],
+  ['cat TERRAFORM.TFSTATE', 'secret-path'],
+  ['cat .ENV', 'secret-path'],
+  ['cat .e[!x]v', 'secret-path'],
+  ['git diff --output=.claude/state/verify-attempts.json', 'verify-state'],
+  ['git log -p --output=/tmp/x', 'git-exec'],
+  ['dd if=x of=.claude/state/verify-attempts.json', 'verify-state'],
+  ['cp --target-directory=.claude/state x', 'verify-state'],
+  ['STATE=.claude/state; rm $STATE/verify-attempts.json', 'verify-state'],
+  ['rm .CLAUDE/STATE/verify-attempts.json', 'verify-state'],
+  ['echo commit | xargs env git', 'git-dynamic'],
+  ['echo commit | xargs nice git', 'git-dynamic'],
+  ['echo commit | xargs timeout 9 git', 'git-dynamic'],
+  ['echo commit | xargs pnpm exec git', 'git-dynamic'],
+  ['xargs -J % git % -am x < f', 'git-write'],
+  ['caffeinate -t 60 git commit -am x', 'git-write'],
+  ['stdbuf -o L git push', 'git-write'],
+  ["env -iS 'git commit -am x'", 'git-write'],
+  ['PATH=/tmp/evil:$PATH git status', 'env-override'],
+  ['declare -x GIT_PAGER="sh -c id"', 'env-override'],
+  ["alias git='git commit'", 'alias'],
+  ['less -o .claude/state/verify-attempts.json x', 'verify-state'],
+  ['rg --pre ./x.sh foo', 'rg-pre'],
+  ['echo "import os" | python3 -v', 'interpreter-stdin'],
+  ['echo "puts 1" | ruby -v', 'interpreter-stdin'],
+  ['bash /dev/stdin', 'shell-stdin'],
+  ['node /dev/stdin', 'interpreter-stdin'],
+  ['find . -name x -exec node -e {} \\;', 'stdin-args'],
+  ['find .claude/state -delete', 'verify-state'],
+];
+
 const MUST_PASS = [
+  'git diff --stat -- .claude/',
+  'git log --oneline -- .claude',
+  'git diff main...HEAD -- .claude/',
+  'git check-ignore -v .claude/state/verify-record.json',
+  "find .claude -name '*.mjs'",
+  "git grep -n -c 'function.*{' -- .claude/hooks",
+  "sed 's/{/(/g' notes.txt",
+  "echo '}'",
+  "awk -F'{' '{print $1}' notes.txt",
+  'NODE_OPTIONS=--max-old-space-size=4096 pnpm test',
+  'tree .claude',
+  'du -sh .claude',
+  'node -v',
+  'python3 -V',
   'git status --short',
   'git diff --stat main...HEAD',
   'git log --oneline -5',
@@ -95,6 +190,19 @@ const MUST_PASS = [
   'rm -r /tmp/scratch-dir',
   'docker info --format "{{.ServerVersion}}"',
   'ls docs | head -5 2>/dev/null',
+  'GIT_PAGER=cat git log -3',
+  'GIT_AUTHOR_NAME=x git log -1',
+  'git grep -n seatmap -- services',
+  'find docs -name "*.md" -exec wc -l {} +',
+  'git diff --stat | xargs echo',
+  'xargs git status < /dev/null',
+  'pnpm exec prettier --write .claude/hooks/*.mjs',
+  'ls .claude',
+  'cat .claude/settings.json',
+  'node -p "1 + 1"',
+  'python3.12 scripts/x.py',
+  'cat *.md',
+  'timeout 30 pnpm test',
 ];
 
 const MUST_ASK = [
@@ -117,6 +225,16 @@ describe('guard.mjs: de 18 kommandovägarna', () => {
 
 describe('guard.mjs: fler vägar runt reglerna', () => {
   it.each(MORE_BYPASSES)('nekar %j', (command, rule) => {
+    expect(evaluateCommand(command)).toMatchObject({ decision: 'deny', rule });
+  });
+});
+
+describe('guard.mjs: vägarna från granskningen', () => {
+  it.each(REVIEW_FINDINGS)('nekar %j', (command, rule) => {
+    expect(evaluateCommand(command)).toMatchObject({ decision: 'deny', rule });
+  });
+
+  it.each(REVIEW_ROUND_2)('nekar %j (andra omgången)', (command, rule) => {
     expect(evaluateCommand(command)).toMatchObject({ decision: 'deny', rule });
   });
 });

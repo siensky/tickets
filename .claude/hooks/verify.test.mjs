@@ -11,7 +11,14 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { evaluateCommand } from './guard.mjs';
 import { sessionEditedFiles, stopDecision } from './require-verify.mjs';
-import { MAX_RUNS, checkAttempts, formatReport, nextAttempts, runVerify } from './verify.mjs';
+import {
+  MAX_RUNS,
+  checkAttempts,
+  formatReport,
+  nextAttempts,
+  readAttempts,
+  runVerify,
+} from './verify.mjs';
 import { readRecord, treeHash, verifierHash, workingChanges } from './verify-record.mjs';
 import { classify, failingTests, overallResult, planSteps } from './verify-steps.mjs';
 
@@ -37,6 +44,14 @@ describe('planSteps', () => {
   it('kräver alla steg med scope full', () => {
     expect(planSteps([], 'full').every((s) => s.required)).toBe(true);
   });
+
+  it('kräver integration och kontrakt när en rotfil som package.json ändrats', () => {
+    for (const file of ['package.json', 'pnpm-lock.yaml', 'docker-compose.yml']) {
+      expect(required(planSteps([file], 'auto'))).toEqual(
+        expect.arrayContaining(['integration', 'contract']),
+      );
+    }
+  });
 });
 
 describe('classify och overallResult', () => {
@@ -51,6 +66,22 @@ describe('classify och overallResult', () => {
       'env_error',
     );
     expect(classify(unit, { status: null, timedOut: true, output: '' })).toBe('timeout');
+  });
+
+  it('klassar fel vid processtarten och en dödad process som miljöfel, inte testfel', () => {
+    expect(
+      classify(lint, { status: null, errorCode: 'ENOENT', output: 'spawnSync pnpm ENOENT' }),
+    ).toBe('env_error');
+    expect(classify(unit, { status: null, errorCode: 'ENOBUFS', output: '' })).toBe(
+      'env_error',
+    );
+    expect(classify(unit, { status: null, signal: 'SIGKILL', output: '' })).toBe('env_error');
+  });
+
+  it('klassar ett Docker-avbrott som miljöfel även när tester fallerade som följd', () => {
+    const output =
+      ' FAIL  tests/a.test.ts\nError: Cannot connect to the Docker daemon at unix:///x\n';
+    expect(classify(unit, { status: 1, output })).toBe('env_error');
   });
 
   it('är passed bara när varje krävt steg gick igenom', () => {
@@ -72,11 +103,11 @@ describe('classify och overallResult', () => {
 
 describe('taket för försök', () => {
   it(`stoppar efter ${MAX_RUNS} körningar i rad utan grönt resultat`, () => {
-    expect(checkAttempts({ branch: 'b', runsSinceGreen: MAX_RUNS }, 'b')).toMatchObject({
+    expect(checkAttempts({ branch: 'b', runsSinceGreen: MAX_RUNS })).toMatchObject({
       allowed: false,
       stop: 'max_runs',
     });
-    expect(checkAttempts({ branch: 'b', runsSinceGreen: MAX_RUNS - 1 }, 'b')).toMatchObject({
+    expect(checkAttempts({ branch: 'b', runsSinceGreen: MAX_RUNS - 1 })).toMatchObject({
       allowed: true,
     });
   });
@@ -93,16 +124,38 @@ describe('taket för försök', () => {
     ).toBeUndefined();
   });
 
-  it('nollställs av ett grönt resultat och av en annan gren', () => {
+  it('nollställs av ett grönt resultat', () => {
     expect(
       nextAttempts(
         { branch: 'b', runsSinceGreen: 4 },
         { branch: 'b', tree: 't', result: 'passed', failures: [] },
       ).runsSinceGreen,
     ).toBe(0);
+  });
+
+  it('räknar en trasig eller tom räknarfil som ett stopp, inte som en nollställning', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'attempts-'));
+    const file = join(dir, 'verify-attempts.json');
+    expect(readAttempts(file)).toBeNull();
+    for (const content of ['', '{trasig', '[]', 'null']) {
+      writeFileSync(file, content);
+      expect(checkAttempts(readAttempts(file)), JSON.stringify(content)).toMatchObject({
+        allowed: false,
+      });
+    }
+  });
+
+  it('nollställs inte av ett grenbyte: bara användaren tar bort räknaren', () => {
+    expect(checkAttempts({ branch: 'a', runsSinceGreen: MAX_RUNS })).toMatchObject({
+      allowed: false,
+      stop: 'max_runs',
+    });
     expect(
-      checkAttempts({ branch: 'a', runsSinceGreen: MAX_RUNS, stop: 'max_runs' }, 'b'),
-    ).toMatchObject({ allowed: true, runsSinceGreen: 0 });
+      nextAttempts(
+        { branch: 'a', runsSinceGreen: 3, lastFailures: [] },
+        { branch: 'b', tree: 't', result: 'failed', failures: ['× y'] },
+      ).runsSinceGreen,
+    ).toBe(4);
   });
 });
 
@@ -158,6 +211,14 @@ describe('runVerify', () => {
     );
   });
 
+  it('kör alla steg när det inte finns någon main att jämföra med', () => {
+    gitIn(repo, ['branch', '-m', 'main', 'trunk']);
+    const record = runVerify({ cwd: repo, exec: passingExec, dockerCheck: () => true });
+    const integration = record.steps.find((s) => s.name === 'integration');
+    expect(integration).toMatchObject({ required: true, outcome: 'passed' });
+    expect(integration.reason).toContain('ingen main');
+  });
+
   it('kör inga Docker-steg och ger env_error när Docker inte svarar', () => {
     const record = runVerify({ cwd: repo, exec: passingExec, dockerCheck: () => false });
     expect(record.result).toBe('env_error');
@@ -208,6 +269,18 @@ describe('Stop-hooken', () => {
         record: null,
       }),
     ).toEqual({});
+  });
+
+  it('räknar agent- och skillfilerna och CLAUDE.md som kod, inte dokumentation', () => {
+    for (const path of [
+      '.claude/agents/reviewer.md',
+      '.claude/skills/verify/SKILL.md',
+      'CLAUDE.md',
+    ]) {
+      expect(stopDecision({ ...base, changes: [{ path }], record: null }).block, path).toBe(
+        true,
+      );
+    }
   });
 
   it('blockerar när posten saknas, gäller ett annat träd eller en annan version av skripten', () => {
@@ -289,11 +362,23 @@ describe('posten skrivs bara av verify.mjs', () => {
     'rm .claude/state/verify-attempts.json',
     'cp fake.json .claude/state/verify-record.json',
     `node -e "require('fs').writeFileSync('.claude/state/verify-record.json', '{}')"`,
+    // Försöksräknaren får bara nollställas av användaren.
+    'find .claude/state -name verify-attempts.json -delete',
+    'unlink .claude/state/verify-attempts.json',
+    "perl -pi -e 's/6/0/' .claude/state/verify-attempts.json",
+    'python3 reset.py .claude/state/verify-attempts.json',
+    'git checkout -- .claude/state/verify-attempts.json',
+    'sh -c "rm -f .claude/state/verify-attempts.json"',
   ])('nekar %j', (command) => {
     expect(evaluateCommand(command)).toMatchObject({ decision: 'deny', rule: 'verify-state' });
   });
 
-  it('släpper igenom läsning av posten', () => {
-    expect(evaluateCommand('cat .claude/state/verify-record.json')).toBeNull();
+  it.each([
+    'cat .claude/state/verify-record.json',
+    'jq .result .claude/state/verify-record.json',
+    'ls .claude/state',
+    'tail -1 .claude/state/verify-history.jsonl',
+  ])('släpper igenom läsningen %j', (command) => {
+    expect(evaluateCommand(command)).toBeNull();
   });
 });

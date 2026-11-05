@@ -18,7 +18,10 @@ import {
 } from './verify-record.mjs';
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit']);
-const DOCS_ONLY = /(^docs\/|\.md$)/;
+// Dokumentation kräver ingen verifiering, men agent- och skillfilerna i .claude/ och CLAUDE.md testas
+// av .claude/hooks och räknas därför som kod.
+const isDocsOnly = (path) =>
+  !path.startsWith('.claude/') && path !== 'CLAUDE.md' && /(^docs\/|\.md$)/.test(path);
 const RUN_VERIFY = 'node .claude/hooks/verify.mjs';
 
 /** Om transkriptet innehåller ett anrop till ett verktyg som ändrar filer. */
@@ -53,7 +56,7 @@ export function stopDecision({
   isRetry,
 }) {
   if (!edited) return {};
-  const relevant = changes.filter((c) => !DOCS_ONLY.test(c.path));
+  const relevant = changes.filter((c) => !isDocsOnly(c.path));
   if (relevant.length === 0) return {};
   const isValid =
     record !== null &&

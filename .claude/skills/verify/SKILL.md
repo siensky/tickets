@@ -18,4 +18,9 @@ Kör `node .claude/hooks/verify.mjs`. Är argumentet `full`, kör `node .claude/
 | `INCOMPLETE` eller en rad `STOP:` | Taket för försök är nått. Stanna och fråga användaren.                                                                                                                                                      |
 
 Steg med `not_required` eller `ci_only` har inte körts lokalt. Säg det, och påstå aldrig att de är gröna.
-Posten i `.claude/state/` skrivs bara av skriptet; ändra den aldrig själv.
+Posten i `.claude/state/` skrivs bara av skriptet; ändra den aldrig själv. Nollställ aldrig taket för
+försök: vid `STOP` stannar du, säger vad som fallerar och ber användaren om hjälp. Bara användaren tar
+bort `.claude/state/verify-attempts.json`.
+
+Den lokala verifieringen är ett stöd, inte ett godkännande. Bara GitHub Actions `ci-ok` avgör om en PR
+är godkänd av CI; påstå aldrig något om CI som inte syns där.

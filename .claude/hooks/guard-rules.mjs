@@ -6,6 +6,8 @@
  * alias för `commit` eller `push`.
  */
 
+import { SECRET_PATH } from './guard-paths.mjs';
+
 const words = (text) => new Set(text.split(' '));
 
 export const ASK_USER = 'Be användaren köra kommandot själv (rules.md §12).';
@@ -49,27 +51,99 @@ const TERRAFORM_WRITE = words(
 export const SHELLS = words('sh bash zsh dash ksh fish');
 // Skalets nyckelord före ett kommando (`if git …`, `do git …`): kommandot efter dem bedöms.
 export const SHELL_KEYWORDS = words('if then else elif do while until ! { }');
-export const INFO_FLAGS = words('--version -v -V --help -h');
-export const CODE_FLAGS = {
-  node: ['-e', '--eval', '-p', '--print'],
-  python: ['-c'],
-  python3: ['-c'],
-  perl: ['-e', '-E'],
-  ruby: ['-e'],
-  bun: ['-e', '--eval'],
-  php: ['-r'],
-  osascript: ['-e'],
+// Flaggor som tar ett värde, per omslagare. En flagga som saknas här och ändå tar ett värde gör att
+// värdet tolkas som programmet; för de vanliga omslagarna är listan därför fullständig.
+const WRAPPER_VALUE_OPTIONS = {
+  env: words('-u --unset -C --chdir'),
+  timeout: words('-s --signal -k --kill-after'),
+  nice: words('-n --adjustment'),
+  sudo: words('-u -g -C -h -p -U -r -t -D'),
+  doas: words('-u -C'),
+  xargs: words('-n -L -P -E -I -J -R -S -s -d -a'),
+  stdbuf: words('-i -o -e'),
+  caffeinate: words('-t -w'),
+  watch: words('-n --interval -d'),
+  exec: words('-a'),
 };
 export const WRAPPERS = words(
-  'env command exec nohup nice time timeout sudo doas xargs watch stdbuf caffeinate unbuffer chronic',
+  'env command builtin exec nohup nice time timeout sudo doas xargs watch stdbuf caffeinate unbuffer chronic',
 );
-export const WRAPPER_VALUE_OPTIONS = words('-n -u -I -P -L -d -E -s -g -k --signal');
 export const RUNNER_VALUE_OPTIONS = words(
   '--filter -F --dir -C --reporter --loglevel -p --package --workspace',
 );
 
-export const SECRET_PATH =
-  /(^|[^\w.-])\.env(\.local|\.[\w-]+\.local)?(?![\w.-])|\.tfstate|\.kube(\/|-config-raw)|\.tikknet-tf\.env/;
+/**
+ * Vad en omslagare kör: `{ script }` för `env -S '…'`, annars `{ assignments, words }`. `timeout` tar
+ * dessutom en tid före kommandot.
+ */
+export function wrapperTarget(program, args) {
+  if (program === 'env') {
+    const index = args.findIndex(
+      (a) => /^(-[a-zA-Z]*S|--split-string)(=|$)/.test(a.text) || /^-S./.test(a.text),
+    );
+    if (index !== -1) {
+      const inline = /^(?:-S|--split-string=)(.+)$/.exec(args[index].text)?.[1];
+      return { script: inline ?? args[index + 1]?.text ?? '' };
+    }
+  }
+  const inner = skipOptions(args, WRAPPER_VALUE_OPTIONS[program] ?? new Set());
+  let i = 0;
+  while (
+    program === 'env' &&
+    i < inner.length &&
+    /^[A-Za-z_][A-Za-z0-9_]*=/.test(inner[i].text)
+  )
+    i += 1;
+  const rest = inner.slice(i);
+  return {
+    assignments: inner.slice(0, i),
+    words: program === 'timeout' ? rest.slice(1) : rest,
+  };
+}
+
+// Tolkar efter programnamn (`python3.12`, `nodejs`, `tsx` …): flaggan som tar kod som argument och de
+// flaggor som bara skriver ut version eller hjälp (för `python -v` betyder -v utförlig, inte version).
+const INTERPRETERS = [
+  [
+    /^(node|nodejs|tsx|ts-node|bun)$/,
+    (a) => /^-[a-zA-Z]*[ep][a-zA-Z]*$|^--(eval|print)$/.test(a),
+    words('-v --version -h --help'),
+  ],
+  [
+    /^(python|pypy)(\d+(\.\d+)?)?$/,
+    (a) => /^-[a-zA-Z]*c$/.test(a),
+    words('-V --version -h --help'),
+  ],
+  [/^perl[\d.]*$/, (a) => /^-[a-zA-Z]*[eE][a-zA-Z]*$/.test(a), words('--version -v --help')],
+  [/^ruby[\d.]*$/, (a) => /^-[a-zA-Z]*e$/.test(a), words('--version --help')],
+  [/^php[\d.]*$/, (a) => a === '-r', words('-v --version -h --help')],
+  [/^osascript$/, (a) => a === '-e', words('')],
+];
+
+/** Om programmet är en tolk: `{ codes(args), isInfoOnly(args) }`, annars `null`. */
+export function interpreterOf(program) {
+  if (program === 'deno') {
+    return {
+      codes: (args) => (args[0]?.text === 'eval' ? [args[1]?.text ?? ''] : []),
+      isInfoOnly: (args) => args.length === 1 && args[0].text === '--version',
+    };
+  }
+  const entry = INTERPRETERS.find(([name]) => name.test(program));
+  if (entry === undefined) return null;
+  const [, takesCode, infoFlags] = entry;
+  return {
+    codes: (args) =>
+      args.flatMap((arg, i) => {
+        const inline = /^--(eval|print)=([\s\S]*)$/.exec(arg.text);
+        if (inline !== null) return [inline[2]];
+        return takesCode(arg.text) && !infoFlags.has(arg.text)
+          ? [args[i + 1]?.text ?? '']
+          : [];
+      }),
+    isInfoOnly: (args) => args.length === 1 && infoFlags.has(args[0].text),
+  };
+}
+
 const INLINE_DANGER = new RegExp(
   [
     String.raw`\bgit\b[^\n;|&]*\b(add|commit|push|merge|rebase|reset|cherry-pick|revert|clean|pull|am|filter-branch|update-ref)\b`,
@@ -136,6 +210,17 @@ function checkGit(args) {
       `git apply med --index eller --cached lägger till i indexet. ${ASK_USER}`,
     );
   }
+  // En pager eller extern diff kör ett annat program; --output skriver till en valfri fil.
+  const runsProgram =
+    (sub.text === 'grep' && rest.some((a) => /^(-O|--open-files-in-pager)/.test(a))) ||
+    rest.includes('--ext-diff') ||
+    rest.some((a) => /^--output(=|$)/.test(a));
+  if (runsProgram) {
+    return deny(
+      'git-exec',
+      `git ${sub.text} med pager, extern diff eller --output kör ett annat program eller skriver en fil.`,
+    );
+  }
   if (GIT_READ_ONLY.has(sub.text) || GIT_READ_FORMS[sub.text]?.(rest)) return null;
   if (GIT_ASK.has(sub.text))
     return ask('git-mutating', `git ${sub.text} ändrar arbetskatalogen eller repot.`);
@@ -177,6 +262,13 @@ function checkGh(args) {
     : null;
 }
 
+function checkRg(args) {
+  const runsPreprocessor = args.some((a) => /^--pre(=|$)/.test(a.text));
+  return runsPreprocessor
+    ? deny('rg-pre', 'rg --pre kör ett annat program för varje fil.')
+    : null;
+}
+
 /** Kontroller per program för de program som inte kör andra kommandon. */
 export const PROGRAM_CHECKS = {
   git: checkGit,
@@ -184,17 +276,47 @@ export const PROGRAM_CHECKS = {
   terraform: checkTerraform,
   rm: checkRm,
   gh: checkGh,
+  rg: checkRg,
 };
 
-// Verifieringsposten och försöksräknaren skrivs bara av verify.mjs (ADR-0012).
-export const VERIFY_STATE = /\.claude\/state(\/|$)/;
-export const FILE_WRITERS = words('rm mv cp tee touch truncate sed ln install dd chmod rsync');
+/**
+ * `pnpm exec`, `pnpm dlx`, `npx`, `npm exec`, `yarn dlx`: `{ words }` för kommandot de kör, `{ script }`
+ * när de kör en skalsträng (`-c`, `--shell-mode`, `--call`), annars `null`.
+ */
+export function wrappedByRunner(program, args) {
+  const runs = {
+    pnpm: ['exec', 'dlx'],
+    npm: ['exec', 'x'],
+    yarn: ['exec', 'dlx'],
+    bun: ['x'],
+  }[program];
+  const isDirect = ['npx', 'pnpx', 'bunx'].includes(program);
+  const rest = skipOptions(args, RUNNER_VALUE_OPTIONS);
+  if (!isDirect && !runs?.includes(rest[0]?.text)) return null;
+  const after = isDirect ? args : rest.slice(1);
+  const shellFlag = after.findIndex((a) => /^(-c|--shell-mode|--call)(=|$)/.test(a.text));
+  if (shellFlag !== -1) {
+    const inline = /^--call=([\s\S]*)$/.exec(after[shellFlag].text);
+    return { script: inline?.[1] ?? after[shellFlag + 1]?.text ?? '' };
+  }
+  return { words: skipOptions(after, RUNNER_VALUE_OPTIONS) };
+}
+
+// Verifieringsposten och försöksräknaren skrivs bara av verify.mjs (ADR-0012). Kod som nämner både
+// .claude och state nekas, eftersom sökvägen kan byggas ihop i koden (`join('.claude', 'state')`).
+const MENTIONS_VERIFY_STATE = (code) => /\.claude/.test(code) && /state/.test(code);
+// Program som bara läser. Alla andra som nämner .claude/state/ nekas (vitlista, som för git), så att
+// varken posten eller försöksräknaren kan skrivas eller nollställas av någon annan än användaren.
+// (less och more är inte med: `less -o fil` skriver.)
+export const STATE_READERS = words('cat head tail jq ls wc grep rg diff stat file tree du');
+// Program som kan ta bort, flytta eller skriva över hela mappen .claude.
+export const DIR_WRITERS = words('rm rmdir mv cp chmod chown ln rsync tar unlink shred');
 export const denyStateWrite = () =>
   deny('verify-state', 'Bara verify.mjs skriver i .claude/state/. Kör /verify i stället.');
 
 /** Kod som körs inline (`node -e`, `python -c`, heredoc till en tolk) granskas som text. */
 export function checkInlineCode(code) {
-  if (VERIFY_STATE.test(code)) return denyStateWrite();
+  if (MENTIONS_VERIFY_STATE(code)) return denyStateWrite();
   if (SECRET_PATH.test(code)) {
     return deny(
       'secret-path',

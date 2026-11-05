@@ -5,12 +5,14 @@
  * Fallgrop: det här är ingen fullständig skaltolk. Det som inte går att tolka säkert (oavslutade
  * citat eller parenteser) kastar ett fel, och guard.mjs nekar då hellre än gissar. Ett ord som
  * innehåller en expansion (`$X`, `${X}`, `$( )`) markeras `dynamic`: dess värde avgörs först när
- * kommandot körs.
+ * kommandot körs. Ett ord med `*`, `?`, `[` eller `{` utanför citattecken markeras `glob`: skalet
+ * byter ut det mot filnamn.
  */
 
 export class ShellParseError extends Error {}
 
 const SEPARATORS = new Set([';', '&', '|', '(', ')', '\n']);
+const GLOB_CHARS = new Set(['*', '?', '[', '{']);
 
 class Scanner {
   constructor(src) {
@@ -29,10 +31,11 @@ class Scanner {
     this.redirectNext = false;
   }
 
-  appendToWord(text, isDynamic = false) {
-    this.word ??= { text: '', dynamic: false };
+  appendToWord(text, isDynamic = false, isGlob = false) {
+    this.word ??= { text: '', dynamic: false, glob: false };
     this.word.text += text;
     this.word.dynamic ||= isDynamic;
+    this.word.glob ||= isGlob;
   }
 
   endWord() {
@@ -69,7 +72,7 @@ class Scanner {
       return this.redirect();
     if (SEPARATORS.has(ch)) return this.skip(() => this.separator());
     this.pos += 1;
-    this.appendToWord(ch);
+    this.appendToWord(ch, false, GLOB_CHARS.has(ch));
   }
 
   skip(action) {

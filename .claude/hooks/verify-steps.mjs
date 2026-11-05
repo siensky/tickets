@@ -1,12 +1,16 @@
 /**
- * Stegen som `verify.mjs` kör, samma kontroller som `.github/workflows/test.yml`, och hur ett stegs
- * utfall klassas. Ändras CI-stegen ska de ses över här också.
+ * Stegen som `verify.mjs` kör och hur ett stegs utfall klassas. Stegen är kontrollerna i
+ * `.github/workflows/test.yml` utom e2e, plus `claude-hooks` (testerna för .claude/hooks, som CI inte
+ * kör förrän de läggs till där). Ändras CI-stegen ska de ses över här också.
  *
- * Fallgrop: ett miljöfel (Docker nere, disken full) är inte ett testfel. Det klassas som `env_error`
- * så att ingen försöker "laga" ett test som aldrig fick köra.
+ * Fallgrop: ett miljöfel (Docker nere, disken full, ett program som saknas) är inte ett testfel. Det
+ * klassas som `env_error` så att ingen försöker "laga" ett test som aldrig fick köra.
  */
 
 const MINUTE = 60_000;
+// Rotfiler som påverkar alla paket: ändras de körs även integrations- och kontraktstesterna.
+const ROOT_FILES =
+  /^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.base\.json|tsup\.base\.ts|turbo\.json|docker-compose\.yml)$/;
 
 export const STEPS = [
   { name: 'lint', command: ['pnpm', 'lint'], kind: 'static', timeoutMs: 10 * MINUTE },
@@ -50,7 +54,7 @@ export const STEPS = [
     kind: 'test',
     docker: true,
     timeoutMs: 25 * MINUTE,
-    when: /^(services|shared)\//,
+    when: (path) => /^(services|shared)\//.test(path) || ROOT_FILES.test(path),
   },
   {
     name: 'contract',
@@ -58,7 +62,9 @@ export const STEPS = [
     kind: 'test',
     docker: true,
     timeoutMs: 15 * MINUTE,
-    when: /^(apps\/(web|scanner)|services|shared\/(schemas|rabbit|redis|types))\//,
+    when: (path) =>
+      /^(apps\/(web|scanner)|services|shared\/(schemas|rabbit|redis|types))\//.test(path) ||
+      ROOT_FILES.test(path),
   },
 ];
 
@@ -70,24 +76,28 @@ export const CI_ONLY = [
 const ENV_ERROR_OUTPUT = [
   /Cannot connect to the Docker daemon/i,
   /Could not find a working container runtime strategy/i,
-  /docker\.sock/i,
   /Is the docker daemon running/i,
   /ENOSPC/,
-  /spawn \S+ ENOENT/,
+  /spawn(Sync)? \S+ ENOENT/,
   /Timed out (while )?waiting for container/i,
 ];
+// Fel från själva processtarten: programmet saknas, utdatan blev för stor, ingen behörighet.
+const ENV_ERROR_CODES = new Set(['ENOENT', 'ENOBUFS', 'EACCES', 'EAGAIN', 'ENOMEM']);
 
-/** Vilka steg som krävs för de ändrade sökvägarna. `full` kräver alla. */
-export function planSteps(changedPaths, scope) {
+const matchesPath = (when, path) =>
+  typeof when === 'function' ? when(path) : when.test(path);
+
+/** Vilka steg som krävs för de ändrade sökvägarna. `full` kräver alla. `fullReason` förklarar varför. */
+export function planSteps(changedPaths, scope, fullReason = 'scope full') {
   return STEPS.map((step) => {
     if (scope === 'full' || step.when === undefined) {
       return {
         ...step,
         required: true,
-        reason: scope === 'full' ? 'scope full' : 'körs alltid',
+        reason: scope === 'full' ? fullReason : 'körs alltid',
       };
     }
-    const match = changedPaths.find((path) => step.when.test(path));
+    const match = changedPaths.find((path) => matchesPath(step.when, path));
     return match === undefined
       ? { ...step, required: false, reason: 'inga ändrade filer som berör steget' }
       : { ...step, required: true, reason: `ändrad: ${match}` };
@@ -95,9 +105,14 @@ export function planSteps(changedPaths, scope) {
 }
 
 /** Utfallet för ett steg som körts: `passed`, `static_failure`, `test_failure`, `env_error` eller `timeout`. */
-export function classify(step, { status, timedOut, output }) {
+export function classify(step, { status, timedOut, output, errorCode, signal }) {
   if (timedOut) return 'timeout';
   if (status === 0) return 'passed';
+  if (ENV_ERROR_CODES.has(errorCode)) return 'env_error';
+  // Dödad av en signal (till exempel slut på minne) utan att ha fått köra klart.
+  if (status === null && signal) return 'env_error';
+  // Ett miljöfel vinner även när tester fallerade: när Docker försvinner mitt i en körning fallerar
+  // testerna som följd, och de ska inte "lagas". Mönstren är därför så specifika som möjligt.
   if (ENV_ERROR_OUTPUT.some((pattern) => pattern.test(output))) return 'env_error';
   return step.kind === 'static' ? 'static_failure' : 'test_failure';
 }
