@@ -4,18 +4,19 @@
  * eget `id` (docs/plan.md "Databas") — anroparen måste redan ha hittat
  * rätt pool via `getPoolForEvent`.
  *
- * `isBeforeOpen`/`isAfterClose` beräknas av Postgres (`now()`), inte av
- * anroparen med `new Date()` (docs/rules.md §4: "Tider som systemet
- * litar på beräknas alltid med now() från Postgres — aldrig i
- * appservern") — annars kan poddar med olika klockskev fatta olika
- * beslut om exakt samma event precis vid fönsterkanten.
+ * Försäljningsfönstret läses tillsammans med Postgres `now()`, aldrig mot
+ * appserverns `new Date()` (docs/rules.md §4: "Tider som systemet litar på
+ * beräknas alltid med now() från Postgres — aldrig i appservern"), annars
+ * kan poddar med olika klockskev fatta olika beslut om exakt samma event
+ * precis vid fönsterkanten. Se services/sales-window.ts för hur en cachad
+ * läsning räknar vidare från den tiden.
  */
 import type { EventCategory } from '@tickets/schemas';
 import { NotFoundError } from '@tickets/domain';
 import type { Pool } from 'pg';
 import type { EventRow, EventsFilter } from '../types/event.js';
 import type { EventTicketInfo } from '../types/my-tickets.js';
-import type { EventSalesWindow } from '../types/queue.js';
+import type { EventSalesWindowSnapshot } from '../types/queue.js';
 
 // Aggregatet över eventets stolar (prisintervall, lediga/totala) räknas i en
 // LATERAL-subfråga per event, på samma shard som eventet (docs/plan.md 7.13 E1).
@@ -149,21 +150,14 @@ export async function getEventTicketInfoByIds(
 export async function getEventSalesWindow(
   pool: Pool,
   eventId: string,
-): Promise<EventSalesWindow> {
+): Promise<EventSalesWindowSnapshot> {
   const { rows } = await pool.query<{
     sales_open_at: Date;
     sales_close_at: Date;
-    is_before_open: boolean;
-    is_after_close: boolean;
-    seconds_until_close: number;
-  }>(
-    `SELECT sales_open_at, sales_close_at,
-            now() < sales_open_at AS is_before_open,
-            now() > sales_close_at AS is_after_close,
-            GREATEST(0, CEIL(EXTRACT(EPOCH FROM sales_close_at - now())))::int AS seconds_until_close
-     FROM events WHERE id = $1`,
-    [eventId],
-  );
+    db_now: Date;
+  }>('SELECT sales_open_at, sales_close_at, now() AS db_now FROM events WHERE id = $1', [
+    eventId,
+  ]);
   const row = rows[0];
   if (row === undefined) {
     throw new NotFoundError(`Event ${eventId} not found`, { eventId });
@@ -171,9 +165,7 @@ export async function getEventSalesWindow(
   return {
     salesOpenAt: row.sales_open_at,
     salesCloseAt: row.sales_close_at,
-    isBeforeOpen: row.is_before_open,
-    isAfterClose: row.is_after_close,
-    secondsUntilClose: row.seconds_until_close,
+    dbNow: row.db_now,
   };
 }
 

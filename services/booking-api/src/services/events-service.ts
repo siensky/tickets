@@ -13,6 +13,7 @@ import { getVenueById, getVenuesByIds } from '../repositories/venues-repository.
 import { computeAvailability } from './event-availability.js';
 import { parseCachedEventSummaries, toEventSummary } from '../mappers/event-mapper.js';
 import type { EventRow, EventsFilter, EventSummary } from '../types/event.js';
+import type { ReadCache } from './read-cache.js';
 
 export interface EventsServiceDeps {
   readonly shardPools: ShardPools;
@@ -24,6 +25,11 @@ export interface EventsServiceDeps {
    * cache skyddar databasen när startsidan belastas. Utan `listCache` (standard lokalt och i CI) cachas inget.
    */
   readonly listCache?: { readonly redis: RedisClient; readonly ttlSeconds: number };
+  /**
+   * Kort cache per podd för ett enskilt event (services/read-cache.ts). Eventsidan räknar ihop alla
+   * eventets stolar per anrop och läses av varje besökare på väg in i kön. Utan den: ingen cache.
+   */
+  readonly eventCache?: ReadCache<EventSummary>;
 }
 
 /**
@@ -159,6 +165,11 @@ export async function getEvent(
   deps: EventsServiceDeps,
   eventId: string,
 ): Promise<EventSummary> {
+  const load = () => loadEvent(deps, eventId);
+  return deps.eventCache === undefined ? load() : deps.eventCache.get(eventId, load);
+}
+
+async function loadEvent(deps: EventsServiceDeps, eventId: string): Promise<EventSummary> {
   const pool = getPoolForEvent(deps.shardPools, eventId);
   const row = await getEventById(pool, eventId);
   if (row === undefined) {

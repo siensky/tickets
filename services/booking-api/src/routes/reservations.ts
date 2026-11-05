@@ -16,11 +16,16 @@ import {
   createCancelReservationHandler,
   createCreateReservationHandler,
   createGetReservationHandler,
+  type ReservationConfigCache,
 } from '../controllers/reservations-controller.js';
 
 export function registerReservationRoutes(
   app: FastifyInstance,
-  deps: QueueAuthDeps & { readonly shardPools: ShardPools; readonly stripe: Stripe },
+  deps: QueueAuthDeps & {
+    readonly shardPools: ShardPools;
+    readonly stripe: Stripe;
+    readonly reservationConfigCache?: ReservationConfigCache;
+  },
 ): void {
   const checkoutDeps = {
     shardPools: deps.shardPools,
@@ -35,10 +40,11 @@ export function registerReservationRoutes(
 
   app.post('/events/:eventId/reservations', {
     preHandler: requireAdmitted,
-    handler: createCreateReservationHandler(deps.shardPools, {
-      redis: deps.redis,
-      logger: deps.logger,
-    }),
+    handler: createCreateReservationHandler(
+      deps.shardPools,
+      { redis: deps.redis, logger: deps.logger },
+      deps.reservationConfigCache,
+    ),
   });
   // Kräver bara ett giltigt kötoken (inte insläpp): även den vars bokningsfönster löpt ut ska kunna släppa sina
   // stolar. Avbryter också en betalning som övergivits hos Stripe (services/abandoned-checkout-service.ts).

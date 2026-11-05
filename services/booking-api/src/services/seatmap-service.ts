@@ -34,6 +34,7 @@ import {
   toSectionSummaryEntry,
 } from '../mappers/seatmap-mapper.js';
 import { computeSeatAvailability } from './event-availability.js';
+import { createSingleFlight } from './read-cache.js';
 import type { SectionSummary } from '../types/seatmap.js';
 import type { VenueSeatGeometryRow, VenueSectionRow } from '../types/venue.js';
 
@@ -46,6 +47,14 @@ export interface SeatmapServiceDeps {
 }
 
 const SEAT_STATUS_CACHE_TTL_SECONDS = 2;
+
+/**
+ * När Redis-nyckeln går ut missar alla samtidiga anrop i podden på en gång. Utan det här frågade vart
+ * och ett Postgres efter hela sektionen (5 000 rader i lasttestet) och höll var sin anslutning. Nu delar
+ * de på en enda läsning. Ingen extra inaktualitet: de får exakt det svar som läses just nu.
+ */
+const statusLoads = createSingleFlight<string>();
+const summaryLoads = createSingleFlight<string>();
 
 export async function listVenueSections(
   deps: SeatmapServiceDeps,
@@ -116,11 +125,13 @@ export async function getSectionSeatStatusBody(
   if (cached !== undefined) {
     return cached;
   }
-  const pool = getPoolForEvent(deps.shardPools, eventId);
-  const rows = await listSeatStatusesForSection(pool, eventId, sectionId);
-  const body = JSON.stringify({ seats: toSeatStatusEntries(rows) });
-  await writeCachedBody(deps, key, body, SEAT_STATUS_CACHE_TTL_SECONDS);
-  return body;
+  return statusLoads.get(key, async () => {
+    const pool = getPoolForEvent(deps.shardPools, eventId);
+    const rows = await listSeatStatusesForSection(pool, eventId, sectionId);
+    const body = JSON.stringify({ seats: toSeatStatusEntries(rows) });
+    await writeCachedBody(deps, key, body, SEAT_STATUS_CACHE_TTL_SECONDS);
+    return body;
+  });
 }
 
 /**
@@ -142,9 +153,11 @@ export async function getSectionSummaryBody(
   if (cached !== undefined) {
     return cached;
   }
-  const body = JSON.stringify(await getSectionSummary(deps, eventId));
-  await writeCachedBody(deps, key, body, ttlSeconds);
-  return body;
+  return summaryLoads.get(key, async () => {
+    const body = JSON.stringify(await getSectionSummary(deps, eventId));
+    await writeCachedBody(deps, key, body, ttlSeconds);
+    return body;
+  });
 }
 
 /**

@@ -461,7 +461,7 @@ Deployen är `kubectl rollout restart` (två gånger), inte en merge genom pipel
 probes, preStop). Se `docs/forsvar.md`.
 
 1. **Slå på läget:** `scripts/loadtest-mode.sh on`. Kör `smoke.js` enligt utskriften.
-2. **Nollställ eventet** (efter smoke, så beviset startar rent): `pnpm run reset-sale -- <eventId>`
+2. **Nollställ eventet** (efter smoke, så beviset startar rent): `pnpm run reset-sale <eventId>`
    i `services/scheduler-worker`. Kräver port-forward och miljövariabler, se
    `infra/LASTTEST-NOTES.md` "Lokal DB-åtkomst för scheduler-worker-script".
 3. **Läs räknaren FÖRE** i Grafana → Explore (Prometheus):

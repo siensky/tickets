@@ -49,6 +49,12 @@ export interface ConsumeOptions {
   readonly routingKey: string;
   readonly deliveryLimit: number;
   readonly prefetch?: number;
+  /**
+   * Fler fel som ska räknas som tillfälliga (köas om, räknas inte mot `deliveryLimit`). Tjänsten skickar
+   * in sina egna, t.ex. `isConnectionTimeout` från @tickets/db: en full databaspool under en försäljning
+   * sa annars upp en betald betalningshändelse till dödkön efter fem försök.
+   */
+  readonly isTransient?: (error: unknown) => boolean;
 }
 
 export type MessageHandler = (
@@ -125,8 +131,9 @@ async function handleMessage(
   } catch (error) {
     onHandlerError(error, messageId);
     // Gränsen nådd: requeue=false dead-letterar meddelandet (policyn) i stället för att köa om det.
+    const isTransient = isTransientError(error) || options.isTransient?.(error) === true;
     const isLastAttempt =
-      !isTransientError(error) && readAcquiredCount(message) + 1 >= options.deliveryLimit;
+      !isTransient && readAcquiredCount(message) + 1 >= options.deliveryLimit;
     channel.nack(message, false, !isLastAttempt);
   }
 }

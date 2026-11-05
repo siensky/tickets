@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getQueueStatus, type QueueStatusResult } from '../lib/api-client.js';
 import { joinQueueWithChallenge } from '../lib/challenge.js';
 import { getStoredQueueToken, storeQueueToken } from '../lib/queue-token-storage.js';
+import { retryWhileBusy } from '../lib/retry-while-busy.js';
 import { useQueueSocket } from './use-queue-socket.js';
 
 export const WAITING_FALLBACK_POLL_MS = 15_000;
@@ -54,7 +55,8 @@ function useJoinQueueOnce(eventId: string): {
     }
     let cancelled = false;
     setIsJoining(true);
-    joinQueueWithChallenge(eventId)
+    // Ett 503 (alla databasanslutningar upptagna i toppen av en försäljning) försöks om några gånger.
+    retryWhileBusy(() => joinQueueWithChallenge(eventId), { isCancelled: () => cancelled })
       .then((result) => {
         if (!cancelled) {
           storeQueueToken(eventId, result.token);

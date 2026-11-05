@@ -37,7 +37,7 @@ describe('withTransaction', () => {
     expect(release).toHaveBeenCalledWith(false);
   });
 
-  it('rolls back, rethrows the original error, and destroys the connection, when the callback fails', async () => {
+  it('rolls back, rethrows the original error, and returns the clean connection to the pool, when the callback fails', async () => {
     const { client, query, release } = createFakeClient();
     const pool = { connect: vi.fn().mockResolvedValue(client) };
     const failure = new Error('boom');
@@ -50,10 +50,10 @@ describe('withTransaction', () => {
 
     expect(query).toHaveBeenNthCalledWith(1, 'BEGIN');
     expect(query).toHaveBeenNthCalledWith(2, 'ROLLBACK');
-    // true, not an Error object: tells node-postgres to destroy this
-    // connection instead of recycling a possibly-poisoned one.
+    // ROLLBACK succeeded, so the connection is clean: an expected
+    // domain error (a 409 "seat taken") must not cost a reconnect.
     expect(release).toHaveBeenCalledOnce();
-    expect(release).toHaveBeenCalledWith(true);
+    expect(release).toHaveBeenCalledWith(false);
   });
 
   it('still rethrows the ORIGINAL error, and still destroys the connection, when ROLLBACK itself fails', async () => {
@@ -72,7 +72,24 @@ describe('withTransaction', () => {
       }),
     ).rejects.toBe(failure);
 
+    // true, not an Error object: tells node-postgres to destroy this
+    // connection instead of recycling a possibly-poisoned one.
     expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledWith(true);
+  });
+
+  it('destroys the connection when COMMIT fails and ROLLBACK fails too', async () => {
+    const { client, query, release } = createFakeClient();
+    query
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('connection lost during COMMIT'))
+      .mockRejectedValueOnce(new Error('connection already closed'));
+    const pool = { connect: vi.fn().mockResolvedValue(client) };
+
+    await expect(withTransaction(pool, () => Promise.resolve('ok'))).rejects.toThrow(
+      'connection lost during COMMIT',
+    );
+
     expect(release).toHaveBeenCalledWith(true);
   });
 });

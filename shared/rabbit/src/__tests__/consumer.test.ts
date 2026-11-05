@@ -157,6 +157,38 @@ describe('connectConsumer', () => {
     await vi.waitFor(() => expect(nack).toHaveBeenCalledWith(message, false, true));
   });
 
+  it('keeps requeueing an error the service marks as transient (e.g. a full DB pool)', async () => {
+    const overload = new Error('timeout exceeded when trying to connect');
+    const handler = vi.fn().mockRejectedValue(overload);
+    const isTransient = vi.fn((error: unknown) => error === overload);
+    await connectConsumer(
+      'amqp://fake',
+      { ...options, isTransient },
+      handler,
+      () => undefined,
+    );
+
+    const message = fakeMessage({ reservationId: 'r-1' }, 'evt-1', 40);
+    registeredConsumer?.(message);
+    await vi.waitFor(() => expect(nack).toHaveBeenCalledWith(message, false, true));
+    expect(isTransient).toHaveBeenCalledWith(overload);
+  });
+
+  it('still dead-letters other errors on the last attempt when isTransient is set', async () => {
+    const handler = vi.fn().mockRejectedValue(new Error('poison'));
+    const isTransient = () => false;
+    await connectConsumer(
+      'amqp://fake',
+      { ...options, isTransient },
+      handler,
+      () => undefined,
+    );
+
+    const message = fakeMessage({ reservationId: 'r-1' }, 'evt-1', 4);
+    registeredConsumer?.(message);
+    await vi.waitFor(() => expect(nack).toHaveBeenCalledWith(message, false, false));
+  });
+
   it('closes the channel then the connection', async () => {
     const consumer = await connectConsumer(
       'amqp://fake',

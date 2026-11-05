@@ -15,25 +15,29 @@ export async function withTransaction<T>(
   fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
-  let failed = false;
+  let connectionBroken = false;
   try {
     await client.query('BEGIN');
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    failed = true;
     try {
       await client.query('ROLLBACK');
     } catch {
       // Rolling back failed too (e.g. the connection already dropped)
       // — the ORIGINAL error below is what actually explains the
-      // failure, so it's rethrown either way. `failed` staying true is
-      // what tells `release()` below to destroy this connection rather
-      // than hand a possibly-poisoned one back to the pool.
+      // failure, so it's rethrown either way. Only THEN is the
+      // connection possibly poisoned and destroyed by `release()`.
+      connectionBroken = true;
     }
     throw error;
   } finally {
-    client.release(failed);
+    // A successful ROLLBACK leaves a clean connection: hand it back.
+    // Destroying it on every expected domain error (a 409 "seat taken"
+    // happens thousands of times per sale) made the next caller open a
+    // new connection (TCP + auth) while the pool was already the
+    // bottleneck (docs/loadtest-cpu-plan.md, run of 5 November).
+    client.release(connectionBroken);
   }
 }

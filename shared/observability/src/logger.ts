@@ -52,13 +52,22 @@ export interface CreateLoggerOptions {
   readonly level?: 'error' | 'warn' | 'info' | 'debug';
 }
 
-export function createLogger(options: CreateLoggerOptions): Logger {
-  return pino({
+/** `destination` finns för tester som vill läsa raderna; i drift skrivs allt till stdout. */
+export function createLogger(
+  options: CreateLoggerOptions,
+  destination?: pino.DestinationStream,
+): Logger {
+  const config: pino.LoggerOptions = {
     name: options.serviceName,
     level: options.level ?? (process.env['NODE_ENV'] === 'production' ? 'info' : 'debug'),
     redact: { paths: REDACT_PATHS, censor: '[REDACTED]' },
     timestamp: pino.stdTimeFunctions.isoTime,
-  });
+    // Pino gör bara om fel till meddelande + stack under `err`. Koden loggar också `{ error }` på
+    // många ställen, och där blev ett vanligt `Error` bara `{}` (lasttestets 500:or gick inte att
+    // felsöka). Samma serializer på båda nycklarna.
+    serializers: { err: pino.stdSerializers.err, error: pino.stdSerializers.err },
+  };
+  return destination === undefined ? pino(config) : pino(config, destination);
 }
 
 /**

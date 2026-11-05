@@ -11,7 +11,7 @@
  * connections, waits for in-flight requests to finish, then closes every
  * connection pool, before exiting.
  */
-import { closeShardPools } from '@tickets/db';
+import { closeShardPools, isConnectionTimeout } from '@tickets/db';
 import {
   createBusinessMetrics,
   createHttpMetrics,
@@ -157,6 +157,7 @@ function registerRoutes(
     logger,
     assetBaseUrl: deps.publicAssetBaseUrl,
     listCache: { redis: deps.redis, ttlSeconds: deps.apiCacheSeconds },
+    eventCache: deps.eventCache,
   });
   registerSeatmapRoutes(app, {
     shardPools: deps.shardPools,
@@ -188,6 +189,7 @@ async function startPaymentConsumer(
       queue: PAYMENT_CONSUMER_QUEUE,
       routingKey: OUTBOX_EVENT_TYPES.PAYMENT_SUCCEEDED,
       deliveryLimit: PAYMENT_CONSUMER_DELIVERY_LIMIT,
+      isTransient: isConnectionTimeout,
     },
     (payload, messageId) =>
       processPaymentSucceeded(

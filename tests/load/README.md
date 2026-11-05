@@ -67,8 +67,8 @@ k6 run --summary-export=/tmp/k6-summary.json -e ... tests/load/normal-sale.js
 # alla ordrar) innan nästa steg — annars jobbar den fortfarande på rader
 # som reset-sale precis raderade
 cd services/scheduler-worker
-pnpm run generate-sale-report -- <eventId> normal-sale /tmp/k6-summary.json <körningens längd i sekunder> /tmp/report.json
-pnpm run reset-sale -- <eventId>   # ENDAST mellan normal-sale och spike-sale, manuellt
+pnpm run generate-sale-report <eventId> normal-sale /tmp/k6-summary.json <körningens längd i sekunder> /tmp/report.json
+pnpm run reset-sale <eventId>   # ENDAST mellan normal-sale och spike-sale, manuellt
 ```
 
 **Rate limitern** (docs/plan.md "Lasttest": "Lastgeneratorernas

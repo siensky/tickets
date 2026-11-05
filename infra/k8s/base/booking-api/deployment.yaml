@@ -93,6 +93,10 @@ spec:
             # Kort cache för eventlistan (Redis) och sektionssammanfattningen (docs/plan.md 8.3). 0 = av.
             - name: API_CACHE_MAX_AGE_SECONDS
               value: '10'
+            # Anslutningar per shard och podd (standard 4). Budgeten mot Postgres max_connections (100 per
+            # shard) står i shared/db/src/pools.ts — höj inte utan att räkna om den.
+            - name: DB_POOL_MAX
+              value: '6'
             - name: RATE_LIMIT_PER_SECOND
               value: '50'
             - name: PAYMENT_FROZEN_MINUTES
