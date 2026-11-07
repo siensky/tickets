@@ -104,7 +104,8 @@
       "Bash(pnpm test:contract)",
       "Bash(pnpm format:check)",
       "Bash(node .claude/hooks/verify.mjs)",
-      "Bash(node .claude/hooks/verify.mjs --scope full)"
+      "Bash(node .claude/hooks/verify.mjs --scope full)",
+      "Bash(node .claude/hooks/metrics-report.mjs)"
     ]
   },
   "env": {
@@ -122,6 +123,42 @@
             "timeout": 10,
             "onFailure": "block",
             "statusMessage": "Kontrollerar kommandot"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/metrics.mjs"],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/metrics.mjs"],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/metrics.mjs"],
+            "timeout": 5
           }
         ]
       }
@@ -148,6 +185,12 @@
             "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/require-verify.mjs"],
             "timeout": 30,
             "statusMessage": "Kontrollerar verifieringsposten"
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/metrics.mjs"],
+            "async": true
           }
         ]
       }

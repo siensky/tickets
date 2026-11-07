@@ -14,8 +14,16 @@ Läs det här avsnittet först och sedan bara de avsnitt fasdokumentet pekar på
 |---|---|---|
 | **Klart** | Fas 0–8, mergade till `main` | [`plan.md`](./plan.md) "Faser" |
 | **Klart** | Lasttester och CPU-arbete, mergat (PR #26, #27) | [`loadtest-cpu-plan.md`](./loadtest-cpu-plan.md) |
-| **Pågående** | `spiketest-fix`: kompakt stolsstatus (katalog + ett tecken per stol), Alloy-fix, bevis från 5/11, ny dokumentstruktur och agentiskt arbetsflöde (ADR-0012). Inte committat | [`loadtest-cpu-plan.md`](./loadtest-cpu-plan.md) "Mindre stolsstatus", [ADR-0012](./adr/0012-agentic-workflow.md) |
+| **Pågående** | `spiketest-fix`: kompakt stolsstatus (katalog + ett tecken per stol), Alloy-fix, bevis från 5/11, ny dokumentstruktur och agentiskt arbetsflöde (ADR-0012). Committat på grenen, inte mergat till `main` och därför inte driftsatt. Mätningen (steg 7 av workflow-bygget) är inte committad | [`loadtest-cpu-plan.md`](./loadtest-cpu-plan.md) "Mindre stolsstatus", [ADR-0012](./adr/0012-agentic-workflow.md), "Claude Code-arbetsflödet: mätning" nedan |
 | **Nästa** | Ingen fas planerad. Kandidater: [`plan.md`](./plan.md) "Kända begränsningar". Valfritt: köra om spike-sale med den kompakta stolsstatusen | — |
+
+## Claude Code-arbetsflödet: mätning (steg 7 av 8)
+
+- **Vad:** `.claude/hooks/metrics.mjs` skriver en JSON-rad per verktygsanrop till `.claude/metrics/tools-ÅÅÅÅ-MM.jsonl` (gitignorerad). `node .claude/hooks/metrics-report.mjs` visar anrop per verktyg, omläsningar, stora läsningar, upprepade fel, onödig `/verify` och tokens per session. Filerna rensas inte automatiskt.
+- **Integritet:** aldrig kommandotext, sökmönster, innehåll, felmeddelanden eller transkripttext. Bash sparas som en fast kategori. Read sparar också `offset` och `limit`, för att känna igen omläsningar. Sökvägar sparas i klartext bara inom repot; externa och hemliga sökvägar blir en HMAC med sessions-id som nyckel. Nyckeln står i loggen, så hashen stoppar inte den som gissar en sökväg: dela inte loggen.
+- **Overhead:** hooken körs asynkront (ca 50 ms i bakgrunden per anrop) och kan inte blockera. Tokens läses vid `SessionEnd` (synkront, tak 5 s) och `SubagentStop` (asynkront), bara de fyra numeriska `usage`-fälten, en gång per `message.id`.
+- **Begränsningar:** spärrade anrop och filer ändrade via Bash syns inte. Agenter skiljs på typ, så två omgångar av samma subagent räknas som en läsare. Svarsstorleken är det serialiserade svaret, inte filens storlek. Tokens saknas ("ej mätt") om sessionen dör utan `SessionEnd`, och markeras `OFULLSTÄNDIG` om en känd subagent saknas. `SubagentStop` ger också rader utan transkriptfil, av okänd orsak: de redovisas för sig och räknas inte med. Fälten i transkriptet är Claude Codes interna format och kan ändras; då visar rapporten "ej mätt" i stället för en uppskattning.
+- **Nästa:** steg 8, CI-integration och slutlig kvalitetssäkring inför PR:en till `main`.
 
 ## Efter Fas 8 — sessionsklocka, retention, `reservation.created` (`feature/adjustments`)
 

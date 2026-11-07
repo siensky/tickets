@@ -23,6 +23,8 @@ const VERIFY_COMMANDS = new Set([
   'Bash(node .claude/hooks/verify.mjs)',
   'Bash(node .claude/hooks/verify.mjs --scope full)',
 ]);
+// Mätrapporten: läser bara .claude/metrics/ och tar inga argument.
+const REPORT_COMMAND = 'Bash(node .claude/hooks/metrics-report.mjs)';
 const hooksFor = (event, script) =>
   (settings.hooks?.[event] ?? [])
     .flatMap((group) => group.hooks)
@@ -98,9 +100,33 @@ describe('.claude/settings.json', () => {
   });
 
   it('tillåter aldrig ett kommando som kan köra godtycklig kod', () => {
-    expect(allow.filter((rule) => WRAPPERS.test(rule) && !VERIFY_COMMANDS.has(rule))).toEqual(
-      [],
-    );
+    const exact = new Set([...VERIFY_COMMANDS, REPORT_COMMAND]);
+    expect(allow.filter((rule) => WRAPPERS.test(rule) && !exact.has(rule))).toEqual([]);
+  });
+
+  it('tillåter mätrapporten bara exakt så', () => {
+    expect(allow.filter((rule) => rule.includes('metrics'))).toEqual([REPORT_COMMAND]);
+  });
+
+  it('mäter varje verktygsanrop i bakgrunden, så att mätningen aldrig kan stoppa arbetet', () => {
+    for (const event of ['PostToolUse', 'PostToolUseFailure', 'SubagentStop']) {
+      const hooks = hooksFor(event, 'metrics.mjs');
+      expect(hooks, event).toHaveLength(1);
+      expect(hooks[0], event).toMatchObject({ type: 'command', command: 'node', async: true });
+      expect(hooks[0].onFailure, event).toBeUndefined();
+    }
+  });
+
+  it('läser tokens en gång när sessionen slutar, utan att kunna hindra avslutet', () => {
+    const hooks = hooksFor('SessionEnd', 'metrics.mjs');
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0].onFailure).toBeUndefined();
+    expect(hooks[0].timeout).toBeLessThanOrEqual(5);
+  });
+
+  it('håller mätdata utanför git', () => {
+    const gitignore = readFileSync(join(REPO, '.gitignore'), 'utf8');
+    expect(gitignore.split('\n')).toContain('.claude/metrics/');
   });
 
   it('tillåter verifieringsskriptet bara exakt så och skyddar posten mot redigering', () => {
