@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git merge *)",
+      "Bash(git rebase *)",
+      "Bash(git reset *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git revert *)",
+      "Bash(git tag *)",
+      "Bash(git clean *)",
+      "Bash(git filter-branch *)",
+      "Bash(gh pr merge *)",
+      "Bash(rm -rf *)",
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)",
+      "Bash(terraform import *)",
+      "Bash(terraform state *)",
+      "Bash(kubectl apply *)",
+      "Bash(kubectl delete *)",
+      "Bash(kubectl patch *)",
+      "Bash(kubectl scale *)",
+      "Bash(kubectl set *)",
+      "Bash(kubectl edit *)",
+      "Bash(kubectl replace *)",
+      "Bash(kubectl drain *)",
+      "Bash(kubectl cordon *)",
+      "Bash(kubectl rollout restart *)",
+      "Bash(kubectl rollout undo *)",
+      "Bash(kubectl *)",
+      "Bash(helm *)",
+      "Bash(terraform plan *)",
+      "Bash(terraform output *)",
+      "Bash(terraform show *)",
+      "Bash(terraform refresh *)",
+      "Bash(terraform workspace *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(sftp *)",
+      "Bash(rsync *)",
+      "Bash(psql *)",
+      "Bash(pg_dump *)",
+      "Bash(pg_restore *)",
+      "Bash(redis-cli *)",
+      "Bash(gh workflow *)",
+      "Bash(gh secret *)",
+      "Bash(gh variable *)",
+      "Bash(gh repo *)",
+      "Bash(gh release *)",
+      "Bash(scripts/loadtest-mode.sh *)",
+      "Bash(./scripts/loadtest-mode.sh *)",
+      "Read(/**/.env)",
+      "Read(/**/.env.local)",
+      "Read(/**/.env.*.local)",
+      "Read(/infra/terraform/**/*.tfstate*)",
+      "Read(/infra/terraform/**/.kube/**)",
+      "Read(/infra/terraform/**/.kube-config-raw)",
+      "Read(~/.tikknet-tf.env)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.kube/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.netrc)",
+      "Edit(/**/.env)",
+      "Edit(/**/.env.local)",
+      "Edit(/**/.env.*.local)",
+      "Edit(/infra/terraform/**/*.tfstate*)",
+      "Edit(/infra/terraform/**/.kube/**)",
+      "Edit(/infra/terraform/**/.kube-config-raw)",
+      "Edit(/.claude/state/**)"
+    ],
+    "ask": [
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git restore *)",
+      "Bash(git stash *)",
+      "Bash(git branch *)",
+      "Bash(git worktree *)",
+      "Bash(git config *)",
+      "Bash(gh *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(docker system *)",
+      "Bash(docker volume *)",
+      "Edit(/.claude/settings.json)",
+      "Edit(/.claude/settings.local.json)",
+      "Edit(/.claude/hooks/**)",
+      "Edit(/.claude/managed-settings.example.json)",
+      "Edit(/.claude/agents/**)",
+      "Edit(/.claude/skills/**)",
+      "Edit(/.github/workflows/**)",
+      "Edit(/.husky/**)",
+      "Edit(/scripts/check-secrets.sh)",
+      "Edit(/.gitleaks.toml)",
+      "Edit(/.lintstagedrc.json)",
+      "Edit(/infra/terraform/**)"
+    ],
+    "allow": [
+      "Bash(pnpm lint)",
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm test)",
+      "Bash(pnpm test:integration)",
+      "Bash(pnpm test:contract)",
+      "Bash(pnpm format:check)",
+      "Bash(node .claude/hooks/verify.mjs)",
+      "Bash(node .claude/hooks/verify.mjs --scope full)",
+      "Bash(node .claude/hooks/metrics-report.mjs)",
+      "Bash(node /Users/siennalansky/Downloads/tickets/.claude/hooks/ci-logs.mjs)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/guard.mjs"],
+            "timeout": 10,
+            "onFailure": "block",
+            "statusMessage": "Kontrollerar kommandot"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/metrics.mjs"],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/metrics.mjs"],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/metrics.mjs"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/require-verify.mjs"],
+            "timeout": 30,
+            "statusMessage": "Kontrollerar verifieringsposten"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/require-verify.mjs"],
+            "timeout": 30,
+            "statusMessage": "Kontrollerar verifieringsposten"
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/metrics.mjs"],
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

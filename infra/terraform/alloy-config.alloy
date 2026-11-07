@@ -1,8 +1,21 @@
 // Alloy config (docs/plan.md "Observability"): Kubernetes pod logs -> Loki. Tracing is removed
 // (docs/loadtest-cpu-plan.md steg 1), so there is no OTLP receiver.
+//
+// Alloy runs as a DaemonSet, one pod per node, and each pod reads the log FILES of the pods on its own
+// node from disk (/var/log/pods, mounted by the chart's `mounts.varlog`). Before, each Alloy pod
+// streamed every pod's logs in the whole cluster through the Kubernetes API (`loki.source.kubernetes`):
+// every line twice, every line through k3s-server on the control plane, and a reconnect each time a
+// stream closed. During the load test of 5 November that kept k3s-server at up to 2 cores
+// (docs/loadtest-cpu-plan.md, "Körning 5 november").
 
 discovery.kubernetes "pods" {
 	role = "pod"
+
+	// Only this node's pods. HOSTNAME is the node name (set by the Helm chart from spec.nodeName).
+	selectors {
+		role  = "pod"
+		field = "spec.nodeName=" + coalesce(sys.env("HOSTNAME"), constants.hostname)
+	}
 }
 
 discovery.relabel "pod_logs" {
@@ -24,10 +37,30 @@ discovery.relabel "pod_logs" {
 		source_labels = ["__meta_kubernetes_pod_label_app"]
 		target_label  = "app"
 	}
+	// The kubelet writes each container's log to /var/log/pods/<namespace>_<pod>_<uid>/<container>/.
+	rule {
+		source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+		separator     = "/"
+		target_label  = "__path__"
+		replacement   = "/var/log/pods/*$1/*.log"
+	}
 }
 
-loki.source.kubernetes "pods" {
-	targets    = discovery.relabel.pod_logs.output
+local.file_match "pod_logs" {
+	path_targets = discovery.relabel.pod_logs.output
+}
+
+loki.source.file "pod_logs" {
+	targets    = local.file_match.pod_logs.targets
+	forward_to = [loki.process.pod_logs.receiver]
+	// After a restart, start at the end instead of shipping every existing file again.
+	tail_from_end = true
+}
+
+// The files are in the container runtime's (CRI) format: "<time> <stream> <flag> <line>". stage.cri
+// unwraps that, so Loki stores the same JSON line the service printed, as before.
+loki.process "pod_logs" {
+	stage.cri {}
 	forward_to = [loki.write.default.receiver]
 }
 

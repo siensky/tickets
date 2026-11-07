@@ -1,0 +1,122 @@
+{
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git merge *)",
+      "Bash(git rebase *)",
+      "Bash(git reset *)",
+      "Bash(git tag *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh workflow *)",
+      "Bash(gh secret *)",
+      "Bash(gh variable *)",
+      "Bash(gh repo *)",
+      "Bash(gh release *)",
+      "Bash(kubectl *)",
+      "Bash(helm *)",
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)",
+      "Bash(terraform import *)",
+      "Bash(terraform state *)",
+      "Bash(terraform plan *)",
+      "Bash(terraform output *)",
+      "Bash(terraform show *)",
+      "Bash(terraform refresh *)",
+      "Bash(terraform workspace *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(sftp *)",
+      "Bash(rsync *)",
+      "Bash(psql *)",
+      "Bash(pg_dump *)",
+      "Bash(pg_restore *)",
+      "Bash(redis-cli *)",
+      "Bash(scripts/loadtest-mode.sh *)",
+      "Bash(./scripts/loadtest-mode.sh *)",
+      "Read(//Users/siennalansky/Downloads/tickets/**/.env)",
+      "Read(//Users/siennalansky/Downloads/tickets/**/.env.local)",
+      "Read(//Users/siennalansky/Downloads/tickets/**/.env.*.local)",
+      "Read(//Users/siennalansky/Downloads/tickets/infra/terraform/**/*.tfstate*)",
+      "Read(//Users/siennalansky/Downloads/tickets/infra/terraform/**/.kube/**)",
+      "Read(//Users/siennalansky/Downloads/tickets/infra/terraform/**/.kube-config-raw)",
+      "Read(//Users/siennalansky/.tikknet-tf.env)",
+      "Read(//Users/siennalansky/.ssh/**)",
+      "Read(//Users/siennalansky/.aws/**)",
+      "Read(//Users/siennalansky/.kube/**)",
+      "Read(//Users/siennalansky/.config/gh/**)",
+      "Read(//Users/siennalansky/.netrc)",
+      "Edit(//Users/siennalansky/Downloads/tickets/**/.env)",
+      "Edit(//Users/siennalansky/Downloads/tickets/**/.env.local)",
+      "Edit(//Users/siennalansky/Downloads/tickets/**/.env.*.local)",
+      "Edit(//Users/siennalansky/Downloads/tickets/infra/terraform/**/*.tfstate*)",
+      "Edit(//Users/siennalansky/Downloads/tickets/infra/terraform/**/.kube/**)",
+      "Edit(//Users/siennalansky/Downloads/tickets/infra/terraform/**/.kube-config-raw)",
+      "Edit(//Users/siennalansky/Downloads/tickets/.claude/state/**)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": [
+      "node .claude/hooks/verify.mjs",
+      "node .claude/hooks/verify.mjs --scope full",
+      "node /Users/siennalansky/Downloads/tickets/.claude/hooks/ci-logs.mjs",
+      "pnpm test:integration",
+      "pnpm test:contract"
+    ],
+    "filesystem": {
+      "denyRead": [
+        "/Users/siennalansky/.tikknet-tf.env",
+        "/Users/siennalansky/.ssh",
+        "/Users/siennalansky/.aws",
+        "/Users/siennalansky/.kube",
+        "/Users/siennalansky/.config/gh",
+        "/Users/siennalansky/.netrc",
+        "/Users/siennalansky/Downloads/tickets/infra/terraform/.kube/config",
+        "/Users/siennalansky/Downloads/tickets/infra/terraform/.kube-config-raw",
+        "/Users/siennalansky/Downloads/tickets/infra/terraform/.terraform/terraform.tfstate",
+        "/Users/siennalansky/Downloads/tickets/infra/terraform/terraform.tfstate*",
+        "/Users/siennalansky/Downloads/tickets/infra/terraform/*.tfvars",
+        "/Users/siennalansky/Downloads/tickets/tests/e2e/.env.local"
+      ],
+      "denyWrite": [
+        "/Users/siennalansky/Downloads/tickets/.github/workflows",
+        "/Users/siennalansky/Downloads/tickets/.husky",
+        "/Users/siennalansky/Downloads/tickets/scripts/check-secrets.sh",
+        "/Users/siennalansky/Downloads/tickets/.gitleaks.toml",
+        "/Users/siennalansky/Downloads/tickets/.lintstagedrc.json",
+        "/Users/siennalansky/Downloads/tickets/.claude/hooks",
+        "/Users/siennalansky/Downloads/tickets/.claude/agents",
+        "/Users/siennalansky/Downloads/tickets/.claude/skills",
+        "/Users/siennalansky/Downloads/tickets/.claude/settings.json",
+        "/Users/siennalansky/Downloads/tickets/.claude/settings.local.json",
+        "/Users/siennalansky/Downloads/tickets/.claude/managed-settings.example.json",
+        "/Users/siennalansky/Downloads/tickets/infra/terraform",
+        "/Users/siennalansky/Downloads/tickets/scripts/loadtest-mode.sh"
+      ]
+    },
+    "network": {
+      "allowedDomains": ["registry.npmjs.org", "*.npmjs.org"],
+      "allowManagedDomainsOnly": true
+    },
+    "credentials": {
+      "envVars": [
+        { "name": "KUBECONFIG", "mode": "deny" },
+        { "name": "GITHUB_TOKEN", "mode": "deny" },
+        { "name": "GH_TOKEN", "mode": "deny" },
+        { "name": "HCLOUD_TOKEN", "mode": "deny" },
+        { "name": "CLOUDFLARE_API_TOKEN", "mode": "deny" },
+        { "name": "STRIPE_SECRET_KEY", "mode": "deny" },
+        { "name": "AWS_ACCESS_KEY_ID", "mode": "deny" },
+        { "name": "AWS_SECRET_ACCESS_KEY", "mode": "deny" }
+      ]
+    }
+  }
+}

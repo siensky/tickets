@@ -125,6 +125,51 @@ describe('getSectionSeatStatusBody', () => {
   });
 });
 
+describe('getSectionSeatStatusBody: katalogens version', () => {
+  const CACHED_CATALOG = '{"version":"aaaaaaaaaaaaaaaa","seats":[]}';
+
+  function depsWithCachedCatalog() {
+    const { pool, query } = fakePool();
+    const redis = {
+      get: vi.fn().mockResolvedValue(CACHED_CATALOG),
+      set: vi.fn().mockResolvedValue('OK'),
+    } as unknown as RedisClient;
+    return { deps: { shardPools: fakeShardPools(pool), redis, logger: SILENT_LOGGER }, query };
+  }
+
+  it('använder den cachade katalogen när versionen stämmer', async () => {
+    const { deps, query } = depsWithCachedCatalog();
+
+    const body = await getSectionSeatStatusBody(
+      deps,
+      'event-1',
+      'section-1',
+      'catalog',
+      'aaaaaaaaaaaaaaaa',
+    );
+
+    expect(body).toBe(CACHED_CATALOG);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('läser om från Postgres när den cachade katalogen har en annan version', async () => {
+    const { deps, query } = depsWithCachedCatalog();
+
+    const body = await getSectionSeatStatusBody(
+      deps,
+      'event-1',
+      'section-1',
+      'catalog',
+      'bbbbbbbbbbbbbbbb',
+    );
+
+    expect(query).toHaveBeenCalledOnce();
+    expect(JSON.parse(body)).toMatchObject({
+      seats: [{ seatId: 'seat-1', venueSeatId: 'venue-seat-1', priceCents: 1000 }],
+    });
+  });
+});
+
 describe('getSectionSummaryBody', () => {
   function unknownEventDeps(summaryCacheSeconds: number) {
     const query = vi.fn().mockResolvedValue({ rows: [] });

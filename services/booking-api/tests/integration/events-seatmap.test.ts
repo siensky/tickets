@@ -11,6 +11,7 @@ import { NotFoundError } from '@tickets/domain';
 import type { Logger } from '@tickets/observability';
 import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { registerErrorHandler } from '../../src/routes/error-handler.js';
 import { registerEventRoutes } from '../../src/routes/events.js';
 import { getEvent, listAllEvents } from '../../src/services/events-service.js';
@@ -228,4 +229,79 @@ describe('events + seatmap', () => {
       seats: [{ seatId, venueSeatId, status: 'held', priceCents: 1000, heldUntil: null }],
     });
   }, 60_000);
+
+  it('catalog + compact describe exactly the same seats as the full view, in the same order', async () => {
+    const venueId = randomUUID();
+    const sectionId = randomUUID();
+    const eventId = randomUUID();
+    const pool = db.shardPools.pools[0];
+    await seedVenueWithSection(pool, {
+      venueId,
+      venueName: 'Vy Arena',
+      sectionId,
+      sectionName: 'C',
+    });
+    await seedEventForVenue(pool, { eventId, venueId });
+    const statuses = ['available', 'held', 'sold', 'available'] as const;
+    for (const [index, status] of statuses.entries()) {
+      await seedSeatForSection(pool, {
+        seatId: randomUUID(),
+        eventId,
+        venueSeatId: randomUUID(),
+        sectionId,
+        row: 'A',
+        number: index + 1,
+        ticketNumber: `TICKET-${eventId}-${String(index)}`,
+        status,
+      });
+    }
+    const deps = { shardPools: db.shardPools, redis: redis.client, logger: LOGGER };
+    const read = async (view: 'full' | 'catalog' | 'compact'): Promise<unknown> =>
+      JSON.parse(await getSectionSeatStatusBody(deps, eventId, sectionId, view));
+
+    const full = fullSeatsSchema.parse(await read('full'));
+    const catalog = catalogSchema.parse(await read('catalog'));
+    const compact = compactSchema.parse(await read('compact'));
+
+    const STATUS_BY_CHAR = { a: 'available', h: 'held', s: 'sold' } as const;
+    expect(catalog.version).toBe(compact.version);
+    expect(compact.statuses).toHaveLength(full.seats.length);
+    const rebuilt = catalog.seats.map((seat, index) => ({
+      ...seat,
+      status: STATUS_BY_CHAR[compactCharAt(compact.statuses, index)],
+      heldUntil: null,
+    }));
+    expect(rebuilt).toEqual(full.seats);
+  }, 60_000);
 });
+
+const fullSeatsSchema = z.object({
+  seats: z.array(
+    z.object({
+      seatId: z.string(),
+      venueSeatId: z.string(),
+      status: z.enum(['available', 'held', 'sold']),
+      priceCents: z.number(),
+      heldUntil: z.null(),
+    }),
+  ),
+});
+const catalogSchema = z.object({
+  version: z.string(),
+  seats: z.array(
+    z.object({ seatId: z.string(), venueSeatId: z.string(), priceCents: z.number() }),
+  ),
+});
+const compactSchema = z.object({
+  version: z.string(),
+  statuses: z.string(),
+  heldUntil: z.array(z.object({ index: z.number(), until: z.string() })),
+});
+
+function compactCharAt(statuses: string, index: number): 'a' | 'h' | 's' {
+  const char = statuses.charAt(index);
+  if (char !== 'a' && char !== 'h' && char !== 's') {
+    throw new Error(`unexpected status character ${char}`);
+  }
+  return char;
+}

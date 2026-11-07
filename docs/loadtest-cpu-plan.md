@@ -291,3 +291,37 @@ anrop.
   utan att räknas mot leveransgränsen. Under körningen hamnade 4 betalningshändelser i dödkön så.
 - En full pool svarar 503 med `Retry-After` i stället för 500.
 - Fel loggas med meddelande och stack, både under `err` och `error`.
+
+**spike-sale samma dag: kontrollplanet tog slut.** booking-api och databasen klarade toppen, men noden
+`tickets-cp-1` gick upp till 100 % CPU och anrop fick timeout. Det var processen `k3s-server`
+(Kubernetes API-server och datastore), inte någon podd: den låg på upp till 2 kärnor, och på ca 0,9
+kärnor även utan trafik. API-serverns egna mått visade 5 anrop per sekund mot `pods/log`, även utan trafik.
+Det var Alloy (bekräftat: efter bytet föll `pods/log` från 5 per sekund till 0 och `k3s-server` från
+ca 90 % till under 20 % utan trafik): båda Alloy-poddarna (en per nod) strömmade loggarna från ALLA poddar i klustret genom
+API-servern (`loki.source.kubernetes`), alltså varje rad två gånger och genom kontrollplanet, och
+öppnade strömmar på nytt när de stängdes. Nu läser varje Alloy-podd bara sin egen nods loggfiler från
+disken (`/var/log/pods`), så ingen loggtrafik går via API-servern (`infra/terraform/alloy-config.alloy`).
+
+## Mindre stolsstatus (grenen `spiketest-fix`)
+
+Efter spike-sale var nästa flaskhals ingress-nginx på `tickets-cp-1` och lastgeneratorernas nätverk (ca
+240 MB/s per maskin). Det mesta var stolsstatusen: 790 KB varannan sekund per besökare för arenans enda
+sektion med 5 000 stolar. Nu har `/events/:eventId/sections/:sectionId/seats/status` en valfri `?view=`:
+
+| Vy | Innehåll | Hämtas | Storlek (5 000 stolar), okomprimerat / gzip |
+|---|---|---|---|
+| `full` (standard) | som förut | av äldre klienter | 800 KB / 221 KB |
+| `catalog` | id, arenaplats och pris | en gång per besök, för statusens version (`&version=`) | 610 KB / 219 KB |
+| `compact` | ett tecken per stol + utgångstid per hållen stol | varannan sekund | 5 KB / 0,1 KB utan hållna, 30 KB / 1,5 KB med 500, 130 KB / 7 KB med 2 500 |
+
+Den kompakta statusen växer med antalet hållna stolar (ca 50 byte var), men är ändå 6–160 gånger
+mindre än förut. Mellan klustret och Cloudflare går svaren okomprimerade (varken booking-api eller
+ingress komprimerar), så det är de okomprimerade siffrorna som ingress bär.
+
+Samma sökväg betyder att Cloudflares befintliga cacheregel gäller (frågesträngen ingår i cachenyckeln),
+så ingen Terraform-ändring behövs. Webbappen (`apps/web/src/lib/seat-status.ts`) hämtar statusen först och
+katalogen sedan för exakt den versionen, slår ihop dem till samma lista som komponenterna alltid fått och
+vägrar slå ihop om version eller antal skiljer sig. API:t läser om katalogen från databasen om Redis har en
+annan version än den som efterfrågas. k6 hämtar på samma sätt. Motivering:
+`docs/forsvar.md` "Varför är stolsstatusen uppdelad i en katalog och en kompakt status?".
+

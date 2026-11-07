@@ -56,5 +56,14 @@ apps/web/dist/
 *.local
 pacts/
 
+# Claude Code: personliga inställningar och lokalt tillstånd (ADR-0012). .claude/settings.json,
+# agents/, skills/ och hooks/ versionshanteras.
+.claude/settings.local.json
+.claude/worktrees/
+.claude/state/
+.claude/metrics/
+.claude/scheduled_tasks.lock
+.claude/.cc-writes/
+
 # Exportfiler från remove-demo-events (innehåller personuppgifter, docs/plan.md 8.3)
 demo-events-export-*.json

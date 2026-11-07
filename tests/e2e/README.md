@@ -1,6 +1,6 @@
 # tests/e2e
 
-Playwright mot en riktig stack (docs/plan.md 7.15). Körs i pipelinen vid varje merge (G-krav).
+Playwright mot en riktig stack (docs/phases/phase-07.md 7.15). Körs i pipelinen vid varje merge (G-krav).
 
 - `booking-flow.spec.ts`: startsida → event → kö → karta → reservation → riktig Auth0-inloggning → betalning mot payment-mock → bekräftelse → QR.
 - `keyboard-booking`, `mobile-booking` (375 × 812), `reservation-expiry`, `seat-taken`, `a11y` (axe).

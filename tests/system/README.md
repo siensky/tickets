@@ -1,6 +1,6 @@
 # Systemtester (black-box)
 
-Tester som kör hela flöden mot systemet utifrån, som en klient (docs/plan.md 7.14).
+Tester som kör hela flöden mot systemet utifrån, som en klient (docs/phases/phase-07.md 7.14).
 De använder bara det publika HTTP-API:t (booking-api, payment-mock via `checkoutUrl`)
 och läsande SQL mot databasen. De importerar aldrig något från `services/` eller
 `shared/` (upprätthålls av `no-restricted-imports` i `eslint.config.js`), så de ska
@@ -25,7 +25,7 @@ config-rad.
 
 F7 kräver också personalkontot (`SYSTEMTEST_STAFF_EMAIL`/`SYSTEMTEST_STAFF_PASSWORD`, rollen staff).
 
-CI kör två delmängder parallellt (docs/plan.md 8.1): `test:system:fast` (allt utom F5) och
+CI kör två delmängder parallellt (docs/phases/phase-08.md 8.1): `test:system:fast` (allt utom F5) och
 `test:system:slow` (bara F5, som väntar på att en reservation ska gå ut). `test:system` kör allt.
 
 ## Köra lokalt
@@ -36,7 +36,7 @@ CI kör två delmängder parallellt (docs/plan.md 8.1): `test:system:fast` (allt
    `.github/workflows/e2e.yml` (viktigt: `PAYMENT_MOCK_FAILURE_RATE=0`,
    `PAYMENT_MOCK_LATE_WEBHOOK_RATE=0`, `PAYMENT_MOCK_DUPLICATE_WEBHOOK_RATE=1`,
    `PAYMENT_MOCK_LATENCY_MIN_MS=50`, `PAYMENT_MOCK_LATENCY_MAX_MS=200`).
-4. Exportera Auth0-uppgifterna för den egna CI-appen "CI System Tests" (docs/plan.md 7.17):
+4. Exportera Auth0-uppgifterna för den egna CI-appen "CI System Tests" (docs/phases/phase-07.md 7.17):
    `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_CI_CLIENT_ID`, `AUTH0_CI_CLIENT_SECRET`,
    `AUTH0_TEST_USER_EMAIL`, `AUTH0_TEST_USER_PASSWORD`, `SYSTEMTEST_USER2_EMAIL`,
    `SYSTEMTEST_USER2_PASSWORD`, och för F7 `SYSTEMTEST_STAFF_EMAIL`/`SYSTEMTEST_STAFF_PASSWORD`

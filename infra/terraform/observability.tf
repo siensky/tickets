@@ -287,6 +287,8 @@ resource "helm_release" "alloy" {
         create  = true
         content = file("${path.module}/alloy-config.alloy")
       }
+      # Loggfilerna läses från noden (/var/log/pods), inte via Kubernetes API (se alloy-config.alloy).
+      mounts = { varlog = true }
     }
     # Alloys egna mått (loki_write_dropped_entries_total) skrapas av
     # Prometheus via en ServiceMonitor — utan den kan larmet i
