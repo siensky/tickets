@@ -4,12 +4,12 @@
  * som ett bevis från CI, och en session som ändrat filer får inte sluta utan en post för just det trädet.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { evaluateCommand } from './guard.mjs';
+import { evaluateCommand } from './guard-core.mjs';
 import { sessionEditedFiles, stopDecision } from './require-verify.mjs';
 import {
   MAX_RUNS,
@@ -353,6 +353,65 @@ describe('require-verify.mjs som hook', () => {
 
   afterEach(() => {
     expect(readFileSync(join(repo, 'services/a.ts'), 'utf8')).toContain('export const a');
+  });
+});
+
+describe('felutdata från /verify', () => {
+  // Byggs vid körning så att gitleaks inte tar testdatat för en riktig nyckel.
+  const fakeKeyData = Buffer.from('fake-kube-credential-for-test').toString('base64');
+  // Loggen sparar slutet av utdatan, så hemligheterna ligger sist.
+  const secretOutput = [
+    'x'.repeat(100_000),
+    ' × testet',
+    'API_TOKEN=abc123secret',
+    'Authorization: Bearer abcdef.ghi',
+    'password: hunter2',
+    'db at postgres://admin:s3cr3t@host/db',
+    `client-key-data: ${fakeKeyData}`,
+    '+   "cookie": "session=sessid99"',
+    'webhook whsec_abc123def456',
+  ].join('\n');
+  const failing = () => ({ status: 1, timedOut: false, output: secretOutput });
+  const passing = () => ({ status: 0, timedOut: false, output: '' });
+  const logFile = (repo) => join(repo, '.claude/state/verify-failure.log');
+
+  it('sparar rensad och begränsad utdata för steg som fallerar, och visar var den ligger', () => {
+    const repo = tempRepo();
+    const record = runVerify({ cwd: repo, exec: failing, dockerCheck: () => true });
+    const log = readFileSync(logFile(repo), 'utf8');
+    expect(record.failureLog).toBe('.claude/state/verify-failure.log');
+    expect(log).toMatch(/### lint \(\w+\)/);
+    expect(log).toContain('[redigerat]');
+    for (const secret of [
+      'abc123secret',
+      'abcdef.ghi',
+      'hunter2',
+      's3cr3t',
+      fakeKeyData,
+      'sessid99',
+      'whsec_abc123',
+    ])
+      expect(log).not.toContain(secret);
+    expect(log.length).toBeLessThanOrEqual(32 * 1024 + 1);
+    expect(formatReport(record)).toContain('Felutdata: .claude/state/verify-failure.log');
+  });
+
+  it('tar bort utdatan när allt blir grönt, så att inget gammalt ligger kvar', () => {
+    const repo = tempRepo();
+    runVerify({ cwd: repo, exec: failing, dockerCheck: () => true });
+    expect(existsSync(logFile(repo))).toBe(true);
+    const record = runVerify({ cwd: repo, exec: passing, dockerCheck: () => true });
+    expect(record.failureLog).toBeNull();
+    expect(existsSync(logFile(repo))).toBe(false);
+    expect(formatReport(record)).not.toContain('Felutdata');
+  });
+
+  it('är gitignorerad i projektet', () => {
+    expect(() =>
+      execFileSync('git', ['check-ignore', '-q', '.claude/state/verify-failure.log'], {
+        cwd: join(HOOKS, '..', '..'),
+      }),
+    ).not.toThrow();
   });
 });
 

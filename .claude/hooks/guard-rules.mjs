@@ -7,6 +7,12 @@
  */
 
 import { SECRET_PATH } from './guard-paths.mjs';
+import {
+  checkGitGrepIgnore,
+  checkRecursiveGrep,
+  checkRgIgnore,
+  checkSearchPaths,
+} from './guard-search.mjs';
 
 const words = (text) => new Set(text.split(' '));
 
@@ -155,6 +161,7 @@ const INLINE_DANGER = new RegExp(
 );
 
 export const deny = (rule, reason) => ({ decision: 'deny', rule, reason });
+const fromSearch = (finding) => (finding === null ? null : deny(finding.rule, finding.reason));
 const ask = (rule, reason) => ({ decision: 'ask', rule, reason });
 
 /** Starkaste beslutet vinner: deny före ask före inget beslut (`null`). */
@@ -221,6 +228,8 @@ function checkGit(args) {
       `git ${sub.text} med pager, extern diff eller --output kör ett annat program eller skriver en fil.`,
     );
   }
+  const ignored = sub.text === 'grep' ? checkGitGrepIgnore(rest) : null;
+  if (ignored !== null) return deny(ignored.rule, ignored.reason);
   if (GIT_READ_ONLY.has(sub.text) || GIT_READ_FORMS[sub.text]?.(rest)) return null;
   if (GIT_ASK.has(sub.text))
     return ask('git-mutating', `git ${sub.text} ändrar arbetskatalogen eller repot.`);
@@ -234,15 +243,26 @@ function checkKubectl(args) {
   const [first, second] = skipOptions(args, KUBECTL_VALUE_OPTIONS).map((a) => a.text);
   const isRolloutWrite =
     first === 'rollout' && ['restart', 'undo', 'pause', 'resume'].includes(second);
-  if (!KUBECTL_WRITE.has(first) && !isRolloutWrite) return null;
-  return deny('kubectl-write', `kubectl ${first} ändrar klustret. ${ASK_USER}`);
+  if (KUBECTL_WRITE.has(first) || isRolloutWrite)
+    return deny('kubectl-write', `kubectl ${first} ändrar klustret. ${ASK_USER}`);
+  // Även läsning nekas: produktionen sköter användaren (CLAUDE.md), och `get secret` visar hemligheter.
+  return deny('prod-tool', `kubectl mot klustret kör användaren själv. ${ASK_USER}`);
 }
+
+// Terraform-kommandon som inte rör state eller leverantörernas inloggning. Allt annat, med eller utan
+// flaggor före underkommandot (`-chdir=… output`), nekas.
+const TERRAFORM_LOCAL = words('fmt validate version');
 
 function checkTerraform(args) {
   const sub = args.find((a) => !a.text.startsWith('-'))?.text;
-  if (!TERRAFORM_WRITE.has(sub)) return null;
-  return deny('terraform-write', `terraform ${sub} ändrar infrastrukturen. ${ASK_USER}`);
+  if (sub === undefined || TERRAFORM_LOCAL.has(sub)) return null;
+  const rule = TERRAFORM_WRITE.has(sub) ? 'terraform-write' : 'prod-tool';
+  return deny(rule, `terraform ${sub} rör infrastrukturen eller dess state. ${ASK_USER}`);
 }
+
+/** Produktionsverktyg som användaren kör själv, oavsett flaggor och omslag (`env`, `sudo`, `xargs`). */
+const denyProdTool = () =>
+  deny('prod-tool', `Produktionsverktyg kör användaren själv. ${ASK_USER}`);
 
 function checkRm(args) {
   const flags = args.map((a) => a.text).filter((t) => t.startsWith('-'));
@@ -264,9 +284,12 @@ function checkGh(args) {
 
 function checkRg(args) {
   const runsPreprocessor = args.some((a) => /^--pre(=|$)/.test(a.text));
-  return runsPreprocessor
-    ? deny('rg-pre', 'rg --pre kör ett annat program för varje fil.')
-    : null;
+  if (runsPreprocessor) return deny('rg-pre', 'rg --pre kör ett annat program för varje fil.');
+  return fromSearch(checkRgIgnore(args) ?? checkSearchPaths(args));
+}
+
+function checkGrep(args) {
+  return fromSearch(checkRecursiveGrep(args) ?? checkSearchPaths(args));
 }
 
 /** Kontroller per program för de program som inte kör andra kommandon. */
@@ -277,6 +300,16 @@ export const PROGRAM_CHECKS = {
   rm: checkRm,
   gh: checkGh,
   rg: checkRg,
+  grep: checkGrep,
+  egrep: checkGrep,
+  fgrep: checkGrep,
+  zgrep: checkGrep,
+  ggrep: checkGrep,
+  ...Object.fromEntries(
+    ['helm', 'ssh', 'scp', 'sftp', 'rsync', 'psql', 'pg_dump', 'pg_restore', 'redis-cli'].map(
+      (name) => [name, denyProdTool],
+    ),
+  ),
 };
 
 /**
@@ -305,6 +338,8 @@ export function wrappedByRunner(program, args) {
 // Verifieringsposten och försöksräknaren skrivs bara av verify.mjs (ADR-0012). Kod som nämner både
 // .claude och state nekas, eftersom sökvägen kan byggas ihop i koden (`join('.claude', 'state')`).
 const MENTIONS_VERIFY_STATE = (code) => /\.claude/.test(code) && /state/.test(code);
+const MENTIONS_CLAUDE_CONFIG = (code) =>
+  /\.claude/.test(code) && /hooks|agents|skills|settings/.test(code);
 // Program som bara läser. Alla andra som nämner .claude/state/ nekas (vitlista, som för git), så att
 // varken posten eller försöksräknaren kan skrivas eller nollställas av någon annan än användaren.
 // (less och more är inte med: `less -o fil` skriver.)
@@ -313,10 +348,19 @@ export const STATE_READERS = words('cat head tail jq ls wc grep rg diff stat fil
 export const DIR_WRITERS = words('rm rmdir mv cp chmod chown ln rsync tar unlink shred');
 export const denyStateWrite = () =>
   deny('verify-state', 'Bara verify.mjs skriver i .claude/state/. Kör /verify i stället.');
+// Hooks, agenter, skills och settings ändras med Edit/Write (som frågar), inte med Bash. Program som
+// bara kör eller formaterar filerna får nämna dem.
+export const CONFIG_NON_WRITERS = words('node vitest prettier eslint gitleaks');
+export const denyConfigWrite = () =>
+  deny(
+    'claude-config',
+    'Hooks, agenter, skills och settings ändras med Edit/Write (som frågar), inte med Bash. Läs dem med Read, cat eller rg.',
+  );
 
 /** Kod som körs inline (`node -e`, `python -c`, heredoc till en tolk) granskas som text. */
 export function checkInlineCode(code) {
   if (MENTIONS_VERIFY_STATE(code)) return denyStateWrite();
+  if (MENTIONS_CLAUDE_CONFIG(code)) return denyConfigWrite();
   if (SECRET_PATH.test(code)) {
     return deny(
       'secret-path',

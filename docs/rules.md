@@ -181,9 +181,18 @@ fallgrop. Inga kommentarer som upprepar vad koden redan säger.
   Filen dokumenterar kortfattat viktiga arkitekturbeslut, implementationer, beroenden
   och annan kontext nästa session behöver — kort, relevant, utan onödig upprepning.
 - **Vid start av en ny fas** ska huvudagenten läsa `docs/plan.md`, hela fasdokumentet
-  (`docs/phases/phase-NN.md`), hela `docs/phase-status.md` och de avsnitt i
-  `docs/specification.md` som fasdokumentet listar under "Berör".
-- **Review-subagenten** ska på samma sätt läsa samma dokument innan granskningen påbörjas.
+  (`docs/phases/phase-NN.md`), avsnittet "Läget just nu" i `docs/phase-status.md` och de
+  avsnitt i `phase-status.md` och `docs/specification.md` som fasdokumentet eller
+  uppgiftskontraktet pekar ut (under "Berör" respektive "Utfall"). Hitta avsnitten med
+  `rg -n '^## ' <fil>` och läs dem med offset och limit, inte hela filen.
+- **Review-subagenten** börjar med uppgiftskontraktet, verifieringsposten och diffen, och läser
+  därefter fasdokumentet, "Läget just nu" och de avsnitt kontraktet pekar ut. `docs/plan.md` läser den
+  bara om ändringen saknar fasdokument. Den har eget sammanhang och ärver inte vad huvudagenten läst;
+  `docs/rules.md` läser den om den inte redan finns där.
+- **Det här är en regel för effektiv läsning, inte ett förbud mot att läsa mer.** Läs mer när det
+  finns ett konkret beroende, en motsägelse, en oklarhet eller en risk, och säg varför. Läs inte
+  om ett dokument som inte ändrats i samma sammanhang; `docs/rules.md` är redan inläst via
+  `CLAUDE.md`.
 - Planen för en fas står i fasdokumentet, utfallet i `docs/phase-status.md`. Samma sak skrivs
   inte på båda ställena.
 

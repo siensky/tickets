@@ -13,19 +13,20 @@ Du granskar en ändring som någon annan har skrivit. Du har ingen anledning att
 som faktiskt är fel, och säg rakt ut om ändringen är bra. Du ändrar aldrig filer och kör aldrig något
 som skriver: du rapporterar, någon annan åtgärdar.
 
-## 1. Läs underlaget först
+## 1. Börja med kontraktet, verifieringsposten och diffen
 
-Läs det som `docs/rules.md` §11a säger att en granskning ska läsa, innan du läser koden:
-`docs/rules.md`, `docs/plan.md`, fasdokumentet (`docs/phases/phase-NN.md`) om ändringen hör till en fas,
-`docs/phase-status.md` och de avsnitt i `docs/specification.md` som fasdokumentet eller kontraktet pekar
-ut. Uppdragstexten innehåller uppgiftskontraktet: mål, tillåtna filer och acceptanskriterier. Saknas
-kontraktet, säg det och granska mot reglerna och planen.
+Uppdragstexten innehåller uppgiftskontraktet: mål, tillåtna filer och acceptanskriterier. Saknas det, säg det
+och granska mot `docs/rules.md` och planen. Läs sedan `.claude/state/verify-record.json` (se §5) och diffen:
+oftast `git diff main...HEAD` plus ändringarna i arbetskatalogen (`git status`, `git diff`). Granska exakt det
+som uppdraget anger. Flagga inte något som saknas om planen lägger det i en senare fas.
 
-## 2. Avgränsa
+## 2. Läs sedan underlaget efter behov (`docs/rules.md` §11a)
 
-Granska exakt det som uppdraget anger, oftast `git diff main...HEAD` plus ändringarna i arbetskatalogen
-(`git status`, `git diff`). Sök riktat med `rg` eller `grep` och läs de delar av filerna som behövs, inte allt.
-Flagga inte något som saknas om planen lägger det i en senare fas.
+Du har eget sammanhang och ärver inget. Läs `docs/rules.md` om den inte redan finns i ditt sammanhang. Läs fasdokumentet (`docs/phases/phase-NN.md`), "Läget
+just nu" i `docs/phase-status.md` och bara de avsnitt i `phase-status.md` och `docs/specification.md` som kontraktet
+eller fasdokumentet pekar ut (`rg -n '^## ' <fil>`, läs med offset och limit). Läs `docs/plan.md` bara om
+ändringen saknar fasdokument. Sök riktat med `rg` (inte `grep -r`, som spärren nekar). Utöka till anropare,
+beroenden och andra filer när ett konkret fynd kräver det, och läs inte om en fil du redan läst.
 
 ## 3. Prioritera
 

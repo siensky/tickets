@@ -34,5 +34,6 @@ $ARGUMENTS
 
 !`git status --short`
 
-Granska både commitsen och arbetskatalogen. Läs diffarna med `git diff main...HEAD -- <fil>` och
-`git diff -- <fil>`. Svara med rubrikerna Granskat, Inte granskat, Tester och Fynd.
+Börja med kontraktet ovan, verifieringsposten och diffarna (`git diff main...HEAD -- <fil>`, `git diff -- <fil>`),
+och läs dokument och övrig kod först när fynd eller kontraktet kräver det. Granska både commitsen och
+arbetskatalogen. Svara med rubrikerna Granskat, Inte granskat, Tester och Fynd.

@@ -5,15 +5,16 @@
  * Fallgrop: en sökväg kan skrivas på många sätt (`.claude//state`, `.claude/./state`, `--output=…`,
  * `.claude/stat?`, versaler på ett filsystem som inte skiljer på dem). Allt normaliseras först, varje
  * del efter ett `=` bedöms för sig, och ett ociterat globmönster bedöms efter vad det kan matcha.
- * Rekursiv läsning (`grep -r … infra`) nämner ingen hemlig fil och fångas inte; se ADR-0012.
+ * Rekursiv sökning (`grep -r … infra`) nämner ingen hemlig fil; den hanteras i guard-search.mjs. Andra
+ * rekursiva läsare (`find infra -exec cat {} +`) fångas inte; se ADR-0012.
  */
 import { posix } from 'node:path';
 
 export const SECRET_PATH =
-  /(^|[^\w.-])\.env(\.local|\.[\w-]+\.local)?(?![\w.-])|\.tfstate|\.kube(\/|-config-raw)|\.tikknet-tf\.env/i;
+  /(^|[^\w.-])\.env(\.local|\.[\w-]+\.local)?(?![\w.-])|\.tfstate|\.kube(\/|-config-raw|$)|\.tikknet-tf\.env|(^|\/)\.(ssh|aws|config)(\/|$)|(^|\/)\.netrc$|demo-events-export/i;
 const SECRET_DIR = /(^|\/)infra\/terraform(\/|$)/i;
 // Namn som ett globmönster inte får kunna matcha (punktfiler matchas bara av mönster som börjar med punkt).
-const SECRET_NAMES = [
+export const SECRET_NAMES = [
   '.env',
   '.env.local',
   '.env.production.local',
@@ -104,6 +105,26 @@ export function touchesClaudeState(word) {
   return claudeSegments(
     word,
     (next) => next !== undefined && segmentMatches(next, 'state', word.glob),
+  );
+}
+
+const CLAUDE_CONFIG = [
+  'hooks',
+  'agents',
+  'skills',
+  'commands',
+  'settings.json',
+  'settings.local.json',
+  'managed-settings.example.json',
+];
+
+/** Om ordet pekar på hooks, agenter, skills eller settings i .claude/ (skyddsfilerna). */
+export function touchesClaudeConfig(word) {
+  return claudeSegments(
+    word,
+    (next) =>
+      next !== undefined &&
+      CLAUDE_CONFIG.some((name) => segmentMatches(next, name, word.glob)),
   );
 }
 

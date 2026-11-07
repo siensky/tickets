@@ -12,6 +12,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CI_ONLY, classify, failingTests, overallResult, planSteps } from './verify-steps.mjs';
 import {
+  FAILURE_LOG,
   RECORD_KIND,
   git,
   repoRoot,
@@ -19,6 +20,7 @@ import {
   treeHash,
   verifierHash,
   workingChanges,
+  writeFailureLog,
   writeRecord,
 } from './verify-record.mjs';
 
@@ -124,7 +126,7 @@ const describe = (step) => ({
   reason: step.reason,
 });
 
-function runSteps(planned, { repo, exec, dockerCheck }) {
+function runSteps(planned, { repo, exec, dockerCheck, logs }) {
   let isDockerUp;
   return planned.map((step) => {
     const base = describe(step);
@@ -143,6 +145,7 @@ function runSteps(planned, { repo, exec, dockerCheck }) {
     const result = exec(step.command, { cwd: repo, timeoutMs: step.timeoutMs });
     const outcome = classify(step, result);
     const failed = outcome === 'test_failure' ? failingTests(result.output) : [];
+    if (outcome !== 'passed') logs.push({ ...base, outcome, output: result.output ?? '' });
     return {
       ...base,
       outcome,
@@ -153,7 +156,17 @@ function runSteps(planned, { repo, exec, dockerCheck }) {
   });
 }
 
-function buildRecord({ repo, branch, tree, scope, startedAt, steps, result, attempts }) {
+function buildRecord({
+  repo,
+  branch,
+  tree,
+  scope,
+  startedAt,
+  steps,
+  result,
+  attempts,
+  failureLog,
+}) {
   const ciOnly = CI_ONLY.map((c) => ({
     ...c,
     required: false,
@@ -177,6 +190,7 @@ function buildRecord({ repo, branch, tree, scope, startedAt, steps, result, atte
     finishedAt: new Date().toISOString(),
     steps: [...steps, ...ciOnly],
     attempts,
+    failureLog,
   };
 }
 
@@ -200,8 +214,9 @@ export function runVerify({
     changed === null
       ? planSteps([], 'full', 'ingen main att jämföra med: alla steg')
       : planSteps(changed, scope);
+  const logs = [];
   const steps = gate.allowed
-    ? runSteps(planned, { repo, exec, dockerCheck })
+    ? runSteps(planned, { repo, exec, dockerCheck, logs })
     : planned.map((step) => ({
         ...describe(step),
         outcome: 'not_run',
@@ -213,6 +228,12 @@ export function runVerify({
   const next = gate.allowed ? nextAttempts(state, { branch, tree, result, failures }) : state;
   const stop = next.stop ?? gate.stop ?? null;
   const attempts = { runsSinceGreen: next.runsSinceGreen, max: MAX_RUNS, stop };
+  // Vid ett stopp körs inget: den senaste felutdatan ligger kvar, och posten pekar på den.
+  const failureLog = gate.allowed
+    ? writeFailureLog(repo, logs)
+    : existsSync(statePath(repo, 'verify-failure.log'))
+      ? FAILURE_LOG
+      : null;
   const record = buildRecord({
     repo,
     branch,
@@ -222,6 +243,7 @@ export function runVerify({
     steps,
     result,
     attempts,
+    failureLog,
   });
   writeRecord(repo, record);
   writeFileSync(attemptsFile, `${JSON.stringify(next, null, 2)}\n`);
@@ -252,8 +274,10 @@ export function formatReport(record) {
           `${STOP_TEXT[stop]} Fråga användaren. Taket nollställs när användaren tar bort .claude/state/verify-attempts.json.`,
         ]
       : []),
+    ...(record.failureLog
+      ? [`Felutdata: ${record.failureLog} (läs med Read, bara vid fel)`]
+      : []),
     `Post: .claude/state/verify-record.json (träd ${record.treeHash})`,
-    'Återge raden "Lokal verifiering: …" och tabellen ordagrant i rapporten.',
   ].join('\n');
 }
 

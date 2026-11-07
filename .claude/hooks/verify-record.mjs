@@ -8,7 +8,14 @@
  */
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -79,6 +86,53 @@ export function readRecord(repo) {
   } catch {
     return null;
   }
+}
+
+export const FAILURE_LOG = '.claude/state/verify-failure.log';
+const LOG_BYTES_PER_STEP = 8 * 1024;
+const LOG_BYTES_TOTAL = 32 * 1024;
+// Bästa möjliga rensning, ingen garanti: nyckel=värde för namn som låter hemliga, Bearer, nyckelblock,
+// JWT, vanliga nyckelprefix och inloggning i URL:er.
+const REDACTIONS = [
+  [
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+    '[redigerat]',
+  ],
+  // Hela raden för rubriker där värdet kan innehålla mellanslag (`Authorization: Bearer …`).
+  [/^([+\-\s]*"?(?:authorization|cookie|set-cookie)"?\s*[:=]).*$/gim, '$1 [redigerat]'],
+  [/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer [redigerat]'],
+  [
+    /(secret|token|password|passwd|api[_-]?key|credential|(?:client-)?(?:key|certificate)-data)(["']?\s*[:=]\s*["']?)[^\s"',;]+/gi,
+    '$1$2[redigerat]',
+  ],
+  [/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[redigerat]'],
+  [
+    /\b(sk_live_|sk_test_|rk_live_|rk_test_|whsec_|ghp_|gho_|xox[abp]-|AKIA)[\w-]+/g,
+    '[redigerat]',
+  ],
+  [/:\/\/[^\s/:@]+:[^\s/@]+@/g, '://[redigerat]@'],
+];
+
+export const redact = (text) =>
+  REDACTIONS.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), text);
+
+/**
+ * Utdatan från steg som inte blev gröna, för felsökning utan ny körning. En enda fil som skrivs över
+ * varje körning (och tas bort när allt blev grönt), högst LOG_BYTES_TOTAL, och gitignorerad.
+ */
+export function writeFailureLog(repo, entries) {
+  const file = statePath(repo, 'verify-failure.log');
+  if (entries.length === 0) {
+    rmSync(file, { force: true });
+    return null;
+  }
+  const sections = entries.map(
+    ({ name, command, outcome, output }) =>
+      `### ${name} (${outcome}): ${command}\n${redact(output).slice(-LOG_BYTES_PER_STEP)}`,
+  );
+  mkdirSync(statePath(repo, ''), { recursive: true });
+  writeFileSync(file, `${sections.join('\n\n').slice(0, LOG_BYTES_TOTAL)}\n`);
+  return FAILURE_LOG;
 }
 
 export function writeRecord(repo, record) {

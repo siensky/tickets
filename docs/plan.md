@@ -27,7 +27,8 @@ De tas fram av `/phase` och står i sessionen och i PR-beskrivningen (ADR-0012).
 [0009 PostHog EU via proxy](./adr/0009-posthog-eu-reverse-proxy.md) ·
 [0010 scannern som webbapp](./adr/0010-scanner-as-web-app.md) ·
 [0011 Pact utan broker](./adr/0011-pact-without-broker.md) ·
-[0012 dokumentstruktur och arbetsflöde](./adr/0012-agentic-workflow.md).
+[0012 dokumentstruktur och arbetsflöde](./adr/0012-agentic-workflow.md) ·
+[0013 Auto mode med sandbox](./adr/0013-auto-mode-with-sandbox.md).
 Nya beslut skrivs med [mallen](./adr/0000-template.md).
 
 ---
@@ -59,8 +60,9 @@ Fasplanen hade från början datum (Fas 0 19/10 till Fas 8 efter försvaret 4/11
 
 ## Ny fas eller feature
 
-`/phase N` läser `phases/phase-NN.md`, `phase-status.md`, `rules.md` och de avsnitt i
-`specification.md` som fasdokumentet listar under "Berör", och tar fram ett uppgiftskontrakt.
+`/phase N` läser `plan.md`, `phases/phase-NN.md`, "Läget just nu" i `phase-status.md` och de avsnitt i
+`phase-status.md` och `specification.md` som fasdokumentet pekar ut (`rules.md` §11a), och tar fram
+ett uppgiftskontrakt.
 `/phase "<beskrivning>"` gör samma sak för en feature utan fasdokument. En ny fas får ett nytt
 fasdokument med samma rubriker som de befintliga.
 

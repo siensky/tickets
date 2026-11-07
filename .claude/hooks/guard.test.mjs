@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { decide, evaluateCommand } from './guard.mjs';
+import { decide, evaluateCommand } from './guard-core.mjs';
 
 const GUARD = join(dirname(fileURLToPath(import.meta.url)), 'guard.mjs');
 
@@ -175,7 +175,7 @@ const MUST_PASS = [
   'pnpm --filter @tickets/booking-api test:integration',
   'pnpm exec vitest run .claude/hooks',
   'npx prettier --check docs',
-  'grep -rn "git commit" docs',
+  'rg -n "git commit" docs',
   'echo "git push"',
   'cat .env.example',
   'node -e "console.log(1)"',
@@ -184,9 +184,6 @@ const MUST_PASS = [
   'S=/tmp/x; node $S/check.mjs "$PWD"',
   'bash -c "git status && git diff"',
   "cat <<'EOF' > notes.md\ngit push står bara i texten\nEOF",
-  'kubectl -n ticketing get pods',
-  'kubectl rollout status deploy/booking-api',
-  'terraform plan',
   'rm -r /tmp/scratch-dir',
   'docker info --format "{{.ServerVersion}}"',
   'ls docs | head -5 2>/dev/null',

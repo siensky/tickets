@@ -7,6 +7,9 @@ hänvisar till `docs/plan.md` med gamla avsnittsnamn; tabellen "Hänvisningar fr
 
 ## Läget just nu
 
+Läs det här avsnittet först och sedan bara de avsnitt fasdokumentet pekar på. Lista avsnitten med
+`rg -n '^## ' docs/phase-status.md` (docs/rules.md §11a).
+
 | | Vad | Var |
 |---|---|---|
 | **Klart** | Fas 0–8, mergade till `main` | [`plan.md`](./plan.md) "Faser" |
