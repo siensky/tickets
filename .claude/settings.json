@@ -94,6 +94,9 @@
       "Edit(/.claude/skills/**)",
       "Edit(/.github/workflows/**)",
       "Edit(/.husky/**)",
+      "Edit(/scripts/check-secrets.sh)",
+      "Edit(/.gitleaks.toml)",
+      "Edit(/.lintstagedrc.json)",
       "Edit(/infra/terraform/**)"
     ],
     "allow": [

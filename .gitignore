@@ -63,6 +63,7 @@ pacts/
 .claude/state/
 .claude/metrics/
 .claude/scheduled_tasks.lock
+.claude/.cc-writes/
 
 # Exportfiler från remove-demo-events (innehåller personuppgifter, docs/plan.md 8.3)
 demo-events-export-*.json

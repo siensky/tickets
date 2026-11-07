@@ -76,3 +76,22 @@ och version) oavsett flaggor och omslag, sökning med `grep -r`, `rg -u`, positi
 filändelser, sökningar i hemkatalogen, samt skrivande Bash-kommandon mot `.claude/hooks`, `agents`, `skills` och
 settings. `find … | xargs grep` nekas; använd `rg`. Det stänger luckor som ADR-0012 beskrev, men guarden är
 textbaserad och är därför inte ett bevis.
+
+## Notering 2026-11-07
+
+Faktaläget, inget beslut ovan ändras. Managed-filen är installerad och var identisk med mallen när den
+jämfördes. Texten ovan om att den inte är installerad beskriver läget när beslutet togs.
+
+Tillägg i samma riktning: `scripts/check-secrets.sh`, `.gitleaks.toml` och `.lintstagedrc.json` ger en fråga vid
+Edit och ligger i mallens `denyWrite`, och gitleaks körs i CI. Mallens `denyWrite` börjar gälla först när mallen
+installerats om.
+
+Ytterligare lucka, samma klass som de undantagna kommandona: skripten i `package.json` saknar `ask`, och
+`pnpm test:integration` och `pnpm test:contract` kör dem utanför sandboxen. Det går inte att stänga utan att
+även alla testfiler skyddas. `lint-staged` kan också konfigureras där, så pre-commit-kedjan är inte helt låst.
+`.gitleaksignore` läses av gitleaks om den skapas och tystar en träff lokalt och i CI. Filen finns inte och saknar
+skydd. `.gitleaks.toml` undantar `docs/**/*.md` från skanningen, så hemligheter i dokumentationen hittas inte.
+
+Frågan vid `.claude/hooks/` beror på `ask`-regeln, och utan den skulle klassificeraren ändå avgöra eftersom
+`.claude` är en skyddad sökväg. Regeln ligger kvar, eftersom hookarna och `verify.mjs` körs utanför sandboxen.
+Vid större hookarbete: se `docs/runbook.md`, "Claude Code-arbetsflödet".

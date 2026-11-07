@@ -88,6 +88,9 @@
       "denyWrite": [
         "/Users/siennalansky/Downloads/tickets/.github/workflows",
         "/Users/siennalansky/Downloads/tickets/.husky",
+        "/Users/siennalansky/Downloads/tickets/scripts/check-secrets.sh",
+        "/Users/siennalansky/Downloads/tickets/.gitleaks.toml",
+        "/Users/siennalansky/Downloads/tickets/.lintstagedrc.json",
         "/Users/siennalansky/Downloads/tickets/.claude/hooks",
         "/Users/siennalansky/Downloads/tickets/.claude/agents",
         "/Users/siennalansky/Downloads/tickets/.claude/skills",

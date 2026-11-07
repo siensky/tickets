@@ -1,7 +1,7 @@
 /**
  * Stegen som `verify.mjs` kör och hur ett stegs utfall klassas. Stegen är kontrollerna i
- * `.github/workflows/test.yml` utom e2e, plus `claude-hooks` (testerna för .claude/hooks, som CI inte
- * kör förrän de läggs till där). Ändras CI-stegen ska de ses över här också.
+ * `.github/workflows/test.yml` utom e2e och gitleaks (lokalt körs gitleaks i pre-commit). Ändras
+ * CI-stegen ska de ses över här också.
  *
  * Fallgrop: ett miljöfel (Docker nere, disken full, ett program som saknas) är inte ett testfel. Det
  * klassas som `env_error` så att ingen försöker "laga" ett test som aldrig fick köra.

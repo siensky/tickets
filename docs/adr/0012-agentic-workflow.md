@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Datum:** 2026-11-05
+**Delvis ersatt av:** [ADR-0013](./0013-auto-mode-with-sandbox.md): Auto mode är tillåtet och OS-sandboxen är på.
 
 ## Kontext
 

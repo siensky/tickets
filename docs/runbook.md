@@ -670,3 +670,60 @@ Cloudflares SSL-läge kopplat till letsencrypt_use_staging?"):
 
 Gör det **en gång**, mot slutet av Fas 1 eller i Fas 7, aldrig fram och tillbaka — Let's
 Encrypt ger bara 5 identiska certifikat per vecka på produktions-CA:n.
+
+## Claude Code-arbetsflödet
+
+Beslut och luckor: [ADR-0012](./adr/0012-agentic-workflow.md) och
+[ADR-0013](./adr/0013-auto-mode-with-sandbox.md). Det här är hur det används.
+
+**Installera eller uppdatera managed settings.** Krävs innan Auto mode startas, och igen varje gång
+`.claude/managed-settings.example.json` ändrats. Kör från repots rot och starta sedan om Claude Code:
+
+```
+sudo mkdir -p "/Library/Application Support/ClaudeCode"
+sudo install -o root -g wheel -m 644 .claude/managed-settings.example.json "/Library/Application Support/ClaudeCode/managed-settings.json"
+diff .claude/managed-settings.example.json "/Library/Application Support/ClaudeCode/managed-settings.json"
+```
+
+**Starta.** `claude --permission-mode auto`, från ett skal där `~/.tikknet-tf.env` inte är sourcad. Använd inte
+`acceptEdits`, då gäller inte frågorna.
+
+| Vad | Hur |
+|---|---|
+| Fas eller feature | `/phase 9` eller `/phase "beskrivning"`. Kontraktet väntar på ditt godkännande, sedan körs implementation, `/verify` och `/review` |
+| Lokal verifiering | `/verify` väljer steg utifrån det som ändrats, `/verify full` kör alla. Högst 6 körningar utan grönt |
+| Nollställ taket | Bara du: `rm .claude/state/verify-attempts.json` |
+| Granskning | `/review` med kontraktet som argument, högst två omgångar. Ändrar ingen kod. Har `.claude/agents/` eller en skill ändrats: starta om Claude Code först |
+| Mätrapport | `node .claude/hooks/metrics-report.mjs`. Dela inte `.claude/metrics/` |
+| PR | `ci-ok` i GitHub Actions avgör. Allt lokalt är stöd, inte bevis |
+
+**Vad som faktiskt stoppar** (hela tabellen står i ADR-0013):
+
+- Sandboxen är tvingande för Bash: nätverk, hemliga filer och skrivskydd. Den gäller inte Edit, Write, Read, MCP
+  eller hooks, och de fyra undantagna kommandona kör testkod utanför den.
+- `deny` på Edit och Read är tvingande, och managed-filen kan inte ändras av agenten.
+- `deny` på kommandonamn och `guard.mjs` stoppar misstag, men kan kringgås med skript.
+- En `ask`-regel är ett klick: läs vad du godkänner, särskilt i `.claude/hooks/`, eftersom hookarna och
+  `verify.mjs` körs utanför sandboxen.
+- Verifieringsposten och `/review` upptäcker, de hindrar inte.
+
+**Större hookarbete, färre frågor.** Varje Edit i `.claude/hooks/` ger en fråga. Be Claude skriva hela ändringen
+som en patch i scratchpad-mappen, granska den och applicera den själv i en egen terminal:
+
+```
+git apply --check /sökväg/till/hooks.patch
+git apply /sökväg/till/hooks.patch
+```
+
+Be sedan Claude köra `/verify`: Stop-hooken ser bara ändringar via Edit och Write.
+
+**Kontrollera att `main` kräver `ci-ok`.** Kör i en egen terminal, sandboxen når inte GitHub. Det första
+kommandot läser klassisk branch protection, det andra rulesets:
+
+```
+gh api repos/{owner}/{repo}/branches/main/protection --jq '.required_status_checks.contexts'
+gh api repos/{owner}/{repo}/rules/branches/main
+```
+
+`ci-ok` måste stå med i svaret från något av dem. Annars, även om något annat skydd finns, är `ci-ok` bara en
+signal och inget hindrar en merge med rött bygge.

@@ -10,6 +10,7 @@ Projektets regler gäller fullt ut och står bara på ett ställe:
   Utfall och läget just nu: `docs/phase-status.md`. Arkitekturbeslut: `docs/adr/`.
 - Vad som läses före en fas och en granskning: `docs/rules.md` §11a. Arbetsflödet (`/phase`, `/verify`,
   `/review`) och spärrarna: `docs/adr/0012-agentic-workflow.md`. Auto mode och sandbox: `docs/adr/0013-auto-mode-with-sandbox.md`.
+  Så används det i praktiken: `docs/runbook.md`, "Claude Code-arbetsflödet".
 
 ## Kommandon
 

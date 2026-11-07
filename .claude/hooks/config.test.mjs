@@ -3,6 +3,7 @@
  * settings-fil tyst i `-p`-läge, och `claude doctor` validerar inte projektets inställningar. Då
  * försvinner alla neka-regler utan att någon märker det, så formen kontrolleras här i stället.
  */
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,10 @@ const VERIFY_COMMANDS = new Set([
 ]);
 // Mätrapporten: läser bara .claude/metrics/ och tar inga argument.
 const REPORT_COMMAND = 'Bash(node .claude/hooks/metrics-report.mjs)';
+// Filerna som styr hemlighetskontrollen i pre-commit. Ändras de i tysthet skyddar den inte längre.
+const SECRET_SCAN_FILES = ['scripts/check-secrets.sh', '.gitleaks.toml', '.lintstagedrc.json'];
+const isIgnored = (path) =>
+  spawnSync('git', ['check-ignore', '--no-index', '-q', path], { cwd: REPO }).status === 0;
 const hooksFor = (event, script) =>
   (settings.hooks?.[event] ?? [])
     .flatMap((group) => group.hooks)
@@ -71,6 +76,7 @@ describe('.claude/settings.json', () => {
       '/.claude/agents/**',
       '/.claude/skills/**',
       '/.github/workflows/**',
+      ...SECRET_SCAN_FILES.map((file) => `/${file}`),
     ]) {
       expect(ask, path).toContain(`Edit(${path})`);
     }
@@ -127,6 +133,39 @@ describe('.claude/settings.json', () => {
   it('håller mätdata utanför git', () => {
     const gitignore = readFileSync(join(REPO, '.gitignore'), 'utf8');
     expect(gitignore.split('\n')).toContain('.claude/metrics/');
+  });
+
+  it('håller lokalt tillstånd och personliga inställningar utanför git', () => {
+    for (const path of [
+      '.claude/state/verify-record.json',
+      '.claude/metrics/tools-2026-11.jsonl',
+      '.claude/settings.local.json',
+      '.claude/worktrees/x',
+      '.claude/scheduled_tasks.lock',
+    ]) {
+      expect(isIgnored(path), path).toBe(true);
+    }
+    // Står i .gitignore, inte bara i en personlig git-konfiguration som check-ignore också läser.
+    const gitignore = readFileSync(join(REPO, '.gitignore'), 'utf8');
+    expect(gitignore.split('\n')).toContain('.claude/.cc-writes/');
+    const tracked = spawnSync('git', ['ls-files', '.claude/state', '.claude/metrics'], {
+      cwd: REPO,
+      encoding: 'utf8',
+    });
+    expect(tracked.status).toBe(0);
+    expect(tracked.stdout).toBe('');
+  });
+
+  it('versionshanterar konfigurationen, ignoreringen är inte för bred', () => {
+    for (const path of [
+      '.claude/settings.json',
+      '.claude/managed-settings.example.json',
+      '.claude/hooks/guard.mjs',
+      '.claude/agents/reviewer.md',
+      '.claude/skills/verify/SKILL.md',
+    ]) {
+      expect(isIgnored(path), path).toBe(false);
+    }
   });
 
   it('tillåter verifieringsskriptet bara exakt så och skyddar posten mot redigering', () => {
@@ -232,6 +271,7 @@ describe('.claude/managed-settings.example.json', () => {
     ])
       expect(write, path).toContain(path);
     expect(write).toContain('.github/workflows');
+    for (const file of SECRET_SCAN_FILES) expect(write, file).toContain(file);
     const read = sandbox.filesystem.denyRead.join('\n');
     for (const path of ['.tikknet-tf.env', '/.ssh', '/.aws', '/.kube', 'infra/terraform'])
       expect(read, path).toContain(path);
@@ -240,6 +280,62 @@ describe('.claude/managed-settings.example.json', () => {
 
   it('frågar innan mallen ändras, eftersom användaren installerar den som root', () => {
     expect(ask).toContain('Edit(/.claude/managed-settings.example.json)');
+  });
+});
+
+// `ci-ok` är den slutliga kontrollen (ADR-0012). Försvinner ett steg eller ett krav blir CI bara grönare,
+// utan att något annat märker det, så kopplingen låses här.
+describe('GitHub Actions', () => {
+  const workflow = (name) =>
+    parseYaml(readFileSync(join(REPO, '.github/workflows', name), 'utf8'));
+  const test = workflow('test.yml');
+  const ci = workflow('ci.yml');
+  const deploy = workflow('deploy.yml');
+  // Ett steg som finns men inte kan fälla bygget skyddar inget.
+  const expectCanFail = (step) => {
+    expect(step['continue-on-error']).toBeUndefined();
+    expect(step.if).toBeUndefined();
+    expect(step.run).not.toMatch(/\|\|\s*(true|:)|--exit-code|--baseline-path|--log-opts/);
+  };
+
+  it('kör hooktesterna i testjobbet och låter dem fälla bygget', () => {
+    const step = test.jobs.tests.steps.find(
+      ({ run }) => run === 'pnpm exec vitest run .claude/hooks',
+    );
+    expect(step).toBeDefined();
+    expectCanFail(step);
+  });
+
+  it('kör test.yml både på pull requests och före deploy', () => {
+    expect(ci.jobs.test.uses).toBe('./.github/workflows/test.yml');
+    expect(ci.on).toHaveProperty('pull_request');
+    expect(deploy.jobs.test.uses).toBe('./.github/workflows/test.yml');
+    for (const job of ['build-and-push', 'deploy-frontend']) {
+      expect(deploy.jobs[job].needs, job).toContain('test');
+    }
+  });
+
+  it('låter ci-ok kräva varje annat jobb, även när ett av dem fallerat', () => {
+    const { 'ci-ok': gate, ...others } = ci.jobs;
+    expect([...gate.needs].sort()).toEqual(Object.keys(others).sort());
+    expect(gate.if).toBe('always()');
+    const check = gate.steps.map((step) => step.run).join('\n');
+    for (const result of ['failure', 'cancelled', 'skipped']) expect(check).toContain(result);
+  });
+
+  it('skannar hela historiken med en versionslåst gitleaks vars kontrollsumma verifieras', () => {
+    const { steps } = test.jobs.static;
+    const checkout = steps.find((step) => step.uses?.startsWith('actions/checkout'));
+    expect(checkout.with['fetch-depth']).toBe(0);
+    const scan = steps.find((step) => /gitleaks/i.test(step.name ?? ''));
+    expectCanFail(scan);
+    expect(scan.env.GITLEAKS_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(scan.env.GITLEAKS_SHA256).toMatch(/^[0-9a-f]{64}$/);
+    const verified = scan.run.indexOf('sha256sum --check --strict');
+    expect(verified).toBeGreaterThan(-1);
+    expect(scan.run.indexOf('tar -xzf')).toBeGreaterThan(verified);
+    expect(scan.run.indexOf('gitleaks" detect')).toBeGreaterThan(verified);
+    expect(scan.run).toContain('--config .gitleaks.toml');
   });
 });
 
