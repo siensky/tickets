@@ -26,6 +26,10 @@ const VERIFY_COMMANDS = new Set([
 ]);
 // Mätrapporten: läser bara .claude/metrics/ och tar inga argument.
 const REPORT_COMMAND = 'Bash(node .claude/hooks/metrics-report.mjs)';
+// CI-läsningen (ADR-0014): körs med utvecklarens gh-inloggning och tar därför inga argument. Absolut
+// sökväg, annars matchar regeln en kopia av skriptet i vilken underkatalog som helst.
+const CI_LOGS_SCRIPT = '/Users/siennalansky/Downloads/tickets/.claude/hooks/ci-logs.mjs';
+const CI_LOGS_COMMAND = `Bash(node ${CI_LOGS_SCRIPT})`;
 // Filerna som styr hemlighetskontrollen i pre-commit. Ändras de i tysthet skyddar den inte längre.
 const SECRET_SCAN_FILES = ['scripts/check-secrets.sh', '.gitleaks.toml', '.lintstagedrc.json'];
 const isIgnored = (path) =>
@@ -106,8 +110,14 @@ describe('.claude/settings.json', () => {
   });
 
   it('tillåter aldrig ett kommando som kan köra godtycklig kod', () => {
-    const exact = new Set([...VERIFY_COMMANDS, REPORT_COMMAND]);
+    const exact = new Set([...VERIFY_COMMANDS, REPORT_COMMAND, CI_LOGS_COMMAND]);
     expect(allow.filter((rule) => WRAPPERS.test(rule) && !exact.has(rule))).toEqual([]);
+  });
+
+  it('tillåter CI-läsningen bara exakt så, och aldrig gh självt', () => {
+    expect(allow.filter((rule) => rule.includes('ci-logs'))).toEqual([CI_LOGS_COMMAND]);
+    expect(allow.filter((rule) => /^Bash\(gh\b/.test(rule))).toEqual([]);
+    expect(deny).toContain('Bash(gh pr merge *)');
   });
 
   it('tillåter mätrapporten bara exakt så', () => {
@@ -231,9 +241,20 @@ describe('.claude/managed-settings.example.json', () => {
     expect(sandbox.excludedCommands).toEqual([
       'node .claude/hooks/verify.mjs',
       'node .claude/hooks/verify.mjs --scope full',
+      `node ${CI_LOGS_SCRIPT}`,
       'pnpm test:integration',
       'pnpm test:contract',
     ]);
+  });
+
+  // ADR-0014: CI-loggarna läses via skriptet, inte genom att ge sandboxen gh-inloggningen.
+  it('håller gh-inloggningen och GitHub utom räckhåll för sandboxade kommandon', () => {
+    expect(sandbox.filesystem.denyRead.join('\n')).toContain('/.config/gh');
+    const denied = sandbox.credentials.envVars.filter((v) => v.mode === 'deny');
+    expect(denied.map((v) => v.name)).toEqual(
+      expect.arrayContaining(['GH_TOKEN', 'GITHUB_TOKEN']),
+    );
+    expect(sandbox.excludedCommands.filter((command) => /^gh\b/.test(command))).toEqual([]);
   });
 
   it('skyddar hemliga filer och nekar produktion och git-skrivande, utan att tillåta något', () => {

@@ -28,7 +28,8 @@ De tas fram av `/phase` och står i sessionen och i PR-beskrivningen (ADR-0012).
 [0010 scannern som webbapp](./adr/0010-scanner-as-web-app.md) ·
 [0011 Pact utan broker](./adr/0011-pact-without-broker.md) ·
 [0012 dokumentstruktur och arbetsflöde](./adr/0012-agentic-workflow.md) ·
-[0013 Auto mode med sandbox](./adr/0013-auto-mode-with-sandbox.md).
+[0013 Auto mode med sandbox](./adr/0013-auto-mode-with-sandbox.md) ·
+[0014 CI-loggar utanför sandboxen](./adr/0014-ci-logs-outside-sandbox.md).
 Nya beslut skrivs med [mallen](./adr/0000-template.md).
 
 ---

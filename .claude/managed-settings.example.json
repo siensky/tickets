@@ -67,6 +67,7 @@
     "excludedCommands": [
       "node .claude/hooks/verify.mjs",
       "node .claude/hooks/verify.mjs --scope full",
+      "node /Users/siennalansky/Downloads/tickets/.claude/hooks/ci-logs.mjs",
       "pnpm test:integration",
       "pnpm test:contract"
     ],

@@ -695,12 +695,13 @@ diff .claude/managed-settings.example.json "/Library/Application Support/ClaudeC
 | Nollställ taket | Bara du: `rm .claude/state/verify-attempts.json` |
 | Granskning | `/review` med kontraktet som argument, högst två omgångar. Ändrar ingen kod. Har `.claude/agents/` eller en skill ändrats: starta om Claude Code först |
 | Mätrapport | `node .claude/hooks/metrics-report.mjs`. Dela inte `.claude/metrics/` |
+| CI-fel | Be Claude läsa dem: `ci-logs.mjs` visar senaste röda körningen på grenen. Koden anropar bara läsande `gh`-kommandon, men inloggningen den använder kan skriva ([ADR-0014](./adr/0014-ci-logs-outside-sandbox.md)) |
 | PR | `ci-ok` i GitHub Actions avgör. Allt lokalt är stöd, inte bevis |
 
 **Vad som faktiskt stoppar** (hela tabellen står i ADR-0013):
 
 - Sandboxen är tvingande för Bash: nätverk, hemliga filer och skrivskydd. Den gäller inte Edit, Write, Read, MCP
-  eller hooks, och de fyra undantagna kommandona kör testkod utanför den.
+  eller hooks. `verify.mjs` och testkörarna kör testkod utanför den, och `ci-logs.mjs` läser CI utanför den.
 - `deny` på Edit och Read är tvingande, och managed-filen kan inte ändras av agenten.
 - `deny` på kommandonamn och `guard.mjs` stoppar misstag, men kan kringgås med skript.
 - En `ask`-regel är ett klick: läs vad du godkänner, särskilt i `.claude/hooks/`, eftersom hookarna och

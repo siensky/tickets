@@ -108,7 +108,8 @@
       "Bash(pnpm format:check)",
       "Bash(node .claude/hooks/verify.mjs)",
       "Bash(node .claude/hooks/verify.mjs --scope full)",
-      "Bash(node .claude/hooks/metrics-report.mjs)"
+      "Bash(node .claude/hooks/metrics-report.mjs)",
+      "Bash(node /Users/siennalansky/Downloads/tickets/.claude/hooks/ci-logs.mjs)"
     ]
   },
   "env": {

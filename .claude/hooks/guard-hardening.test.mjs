@@ -115,6 +115,7 @@ const ALLOWED = [
   'terraform fmt -check',
   'terraform validate',
   'node .claude/hooks/verify.mjs',
+  'node /Users/siennalansky/Downloads/tickets/.claude/hooks/ci-logs.mjs',
   'pnpm exec vitest run .claude/hooks',
   'pnpm exec prettier --write .claude/skills/phase/SKILL.md',
   'cat .claude/hooks/guard.mjs',

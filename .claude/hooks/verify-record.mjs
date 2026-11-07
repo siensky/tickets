@@ -107,7 +107,7 @@ const REDACTIONS = [
   ],
   [/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[redigerat]'],
   [
-    /\b(sk_live_|sk_test_|rk_live_|rk_test_|whsec_|ghp_|gho_|xox[abp]-|AKIA)[\w-]+/g,
+    /\b(sk_live_|sk_test_|rk_live_|rk_test_|whsec_|ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|xox[abp]-|AKIA)[\w-]+/g,
     '[redigerat]',
   ],
   [/:\/\/[^\s/:@]+:[^\s/@]+@/g, '://[redigerat]@'],
