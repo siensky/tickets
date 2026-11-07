@@ -167,7 +167,8 @@ fallgrop. Inga kommentarer som upprepar vad koden redan säger.
 
 - Innan en ny fil skapas: **leta upp en liknande befintlig fil och följ dess mönster**
 - Nya tjänster kopierar strukturen från `booking-api` **exakt**
-- **Inga nya mappar** utanför den beslutade strukturen
+- **Inga nya mappar** utanför den beslutade strukturen. `docs/phases/` och `.claude/` hör till
+  strukturen ([ADR-0012](./adr/0012-agentic-workflow.md))
 - **Inga nya beroenden utan att fråga först**
 - Arkitekturbeslut i `docs/adr/` ändras inte utan att en ny ADR skrivs
 - **Ändra inte fler filer än uppgiften kräver**
@@ -179,10 +180,21 @@ fallgrop. Inga kommentarer som upprepar vad koden redan säger.
   åtgärdade: `docs/phase-status.md` ska skapas (om den inte finns) eller uppdateras.
   Filen dokumenterar kortfattat viktiga arkitekturbeslut, implementationer, beroenden
   och annan kontext nästa session behöver — kort, relevant, utan onödig upprepning.
-- **Vid start av en ny fas** ska huvudagenten läsa både hela `docs/plan.md` och
-  `docs/phase-status.md`.
-- **Review-subagenten** ska på samma sätt läsa hela `docs/plan.md` och
-  `docs/phase-status.md` innan granskningen påbörjas.
+- **Vid start av en ny fas** ska huvudagenten läsa `docs/plan.md`, hela fasdokumentet
+  (`docs/phases/phase-NN.md`), avsnittet "Läget just nu" i `docs/phase-status.md` och de
+  avsnitt i `phase-status.md` och `docs/specification.md` som fasdokumentet eller
+  uppgiftskontraktet pekar ut (under "Berör" respektive "Utfall"). Hitta avsnitten med
+  `rg -n '^## ' <fil>` och läs dem med offset och limit, inte hela filen.
+- **Review-subagenten** börjar med uppgiftskontraktet, verifieringsposten och diffen, och läser
+  därefter fasdokumentet, "Läget just nu" och de avsnitt kontraktet pekar ut. `docs/plan.md` läser den
+  bara om ändringen saknar fasdokument. Den har eget sammanhang och ärver inte vad huvudagenten läst;
+  `docs/rules.md` läser den om den inte redan finns där.
+- **Det här är en regel för effektiv läsning, inte ett förbud mot att läsa mer.** Läs mer när det
+  finns ett konkret beroende, en motsägelse, en oklarhet eller en risk, och säg varför. Läs inte
+  om ett dokument som inte ändrats i samma sammanhang; `docs/rules.md` är redan inläst via
+  `CLAUDE.md`.
+- Planen för en fas står i fasdokumentet, utfallet i `docs/phase-status.md`. Samma sak skrivs
+  inte på båda ställena.
 
 ## 12. Säkerhetsspärrar — hårda förbud
 

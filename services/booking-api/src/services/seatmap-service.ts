@@ -15,7 +15,12 @@
 import { getGlobalPool, getPoolForEvent, type ShardPools } from '@tickets/db';
 import { NotFoundError } from '@tickets/domain';
 import type { Logger } from '@tickets/observability';
-import { seatmapStatusKey, seatmapSummaryKey, type RedisClient } from '@tickets/redis';
+import {
+  seatmapStatusKey,
+  seatmapSummaryKey,
+  seatmapViewKey,
+  type RedisClient,
+} from '@tickets/redis';
 import { getEventById } from '../repositories/events-repository.js';
 import {
   aggregateSeatsBySection,
@@ -28,14 +33,11 @@ import {
   listSectionsWithLayout,
   sectionBelongsToVenue,
 } from '../repositories/venues-repository.js';
-import {
-  toSeatStatusEntries,
-  toSectionSummary,
-  toSectionSummaryEntry,
-} from '../mappers/seatmap-mapper.js';
+import { toSectionSummary, toSectionSummaryEntry } from '../mappers/seatmap-mapper.js';
 import { computeSeatAvailability } from './event-availability.js';
 import { createSingleFlight } from './read-cache.js';
-import type { SectionSummary } from '../types/seatmap.js';
+import { toSeatStatusBody } from './seat-status-views.js';
+import type { SeatStatusView, SectionSummary } from '../types/seatmap.js';
 import type { VenueSeatGeometryRow, VenueSectionRow } from '../types/venue.js';
 
 export interface SeatmapServiceDeps {
@@ -46,7 +48,15 @@ export interface SeatmapServiceDeps {
   readonly summaryCacheSeconds?: number;
 }
 
-const SEAT_STATUS_CACHE_TTL_SECONDS = 2;
+/**
+ * Hur länge varje vy av stolsstatusen sparas i Redis. Statusen följer klientens 2 s polling. Katalogen ändras
+ * inte under en försäljning, men hålls ändå kort: lägger någon till stolar i sektionen syns det inom 10 s.
+ */
+const SEAT_STATUS_CACHE_TTL_SECONDS: Readonly<Record<SeatStatusView, number>> = {
+  full: 2,
+  compact: 2,
+  catalog: 10,
+};
 
 /**
  * När Redis-nyckeln går ut missar alla samtidiga anrop i podden på en gång. Utan det här frågade vart
@@ -114,22 +124,42 @@ async function writeCachedBody(
   }
 }
 
-/** Stolsstatus för en sektion som färdigt svar: `{"seats":[...]}`. */
+/** Katalogens svar börjar alltid med versionen (toSeatCatalog lägger den först), så det räcker att titta där. */
+function isWantedCatalog(body: string, catalogVersion: string | undefined): boolean {
+  return catalogVersion === undefined || body.startsWith(`{"version":"${catalogVersion}"`);
+}
+
+function seatStatusCacheKey(view: SeatStatusView, eventId: string, sectionId: string): string {
+  return view === 'full'
+    ? seatmapStatusKey(eventId, sectionId)
+    : seatmapViewKey(view, eventId, sectionId);
+}
+
+/**
+ * Stolsstatus för en sektion som färdigt svar, i den vy klienten bad om (services/seat-status-views.ts).
+ *
+ * `catalogVersion`: den version klienten fick i den kompakta statusen. Katalogen ligger i Redis längre än
+ * statusen, så när en sektions stolar ändras kan Redis ha den gamla katalogen medan statusen redan visar den
+ * nya. Står en annan version i den cachade katalogen läses den om från databasen direkt, i stället för att
+ * klienten ska få fel version, fråga igen och till slut visa ett fel.
+ */
 export async function getSectionSeatStatusBody(
   deps: SeatmapServiceDeps,
   eventId: string,
   sectionId: string,
+  view: SeatStatusView = 'full',
+  catalogVersion?: string,
 ): Promise<string> {
-  const key = seatmapStatusKey(eventId, sectionId);
+  const key = seatStatusCacheKey(view, eventId, sectionId);
   const cached = await readCachedBody(deps, key);
-  if (cached !== undefined) {
+  if (cached !== undefined && isWantedCatalog(cached, catalogVersion)) {
     return cached;
   }
   return statusLoads.get(key, async () => {
     const pool = getPoolForEvent(deps.shardPools, eventId);
     const rows = await listSeatStatusesForSection(pool, eventId, sectionId);
-    const body = JSON.stringify({ seats: toSeatStatusEntries(rows) });
-    await writeCachedBody(deps, key, body, SEAT_STATUS_CACHE_TTL_SECONDS);
+    const body = toSeatStatusBody(rows, view);
+    await writeCachedBody(deps, key, body, SEAT_STATUS_CACHE_TTL_SECONDS[view]);
     return body;
   });
 }

@@ -48,9 +48,9 @@ hittat live efter den första riktiga deployen. En vanlig R2 "Custom Domain" dö
    overifierat om Workers Scripts-behörigheten ensam räcker för en R2-binding.
 
 Samma script (`workers/frontend-proxy.js`) körs också som `tickets-scanner-proxy` för
-`scan.<domän>` (bindingen `PREFIX=scanner`, docs/plan.md 7.8). På apex har den dessutom
+`scan.<domän>` (bindingen `PREFIX=scanner`, docs/phases/phase-07.md 7.8). På apex har den dessutom
 bindingen `POSTHOG_PROXY=true`, som vidarebefordrar `/ingest/static/*` till
-`eu-assets.i.posthog.com` och övriga `/ingest/*` till `eu.i.posthog.com` (docs/plan.md 7.7);
+`eu-assets.i.posthog.com` och övriga `/ingest/*` till `eu.i.posthog.com` (docs/phases/phase-07.md 7.7);
 inga andra sökvägar skickas vidare. Kontroll efter `terraform apply`:
 `curl -sI https://tikknet.se/ingest/static/array.js` ger 200, och `curl -s -o /dev/null -w '%{http_code}' https://tikknet.se/ingestx` ger inte ett svar från PostHog.
 
@@ -64,7 +64,7 @@ till ett prefix utan att kolla vad mer som ligger under det.
 
 Samma Cloudflare-token-behörigheter som frontend-proxy-Workern räcker. `deploy-frontend`
 laddar upp `apps/web/public/brand/` till `brand/`; eventbilderna (`images/`) laddas upp av
-seed-steget (docs/plan.md 7.6). Filnamnen är inte versionerade, så cachen är
+seed-steget (docs/phases/phase-07.md 7.6). Filnamnen är inte versionerade, så cachen är
 `max-age=86400` och inte `immutable`: en ändrad fil kan ta upp till ett dygn att nå ut.
 
 **Verifiering efter `terraform apply` och en deploy:**
@@ -105,7 +105,7 @@ Lasttestets 5 000-platsersarena och event, samt de gamla demo-eventen från
 
 ## Systemtester och kontraktstester (Fas 7, steg 4–5)
 
-**Systemtester** (`tests/system`, docs/plan.md 7.14) körs i CI-jobbet `e2e` efter e2e-sviten och
+**Systemtester** (`tests/system`, docs/phases/phase-07.md 7.14) körs i CI-jobbet `e2e` efter e2e-sviten och
 lokalt enligt `tests/system/README.md`. De kräver en egen Auth0-applikation (skapas en gång):
 
 1. Auth0 → **Applications → Create Application → Regular Web Application**, namn
@@ -130,7 +130,7 @@ gitignorerat. Kör även i CI (`test.yml`).
 
 ## PostHog — produktanalys (Fas 7, steg 8)
 
-Koden fungerar utan nycklar (analytics är då av). Så här slår du på den (docs/plan.md 7.7):
+Koden fungerar utan nycklar (analytics är då av). Så här slår du på den (docs/phases/phase-07.md 7.7):
 
 1. Skapa ett konto på **https://eu.posthog.com** (EU-regionen) och ett projekt, t.ex. "tikknet".
 2. Kopiera projektnyckeln: **Settings → Project → Project API key** (börjar med `phc_`, publik).
@@ -157,7 +157,7 @@ cookielöst och flaggan utvärderas inte; valet ändras via "Cookie-inställning
 ## Biljettscannern (Fas 7, steg 9)
 
 Webbappen `apps/scanner` serveras på `https://scan.tikknet.se` (Workern `tickets-scanner-proxy`,
-prefixet `scanner/` i R2). Engångssteg (docs/plan.md 7.17):
+prefixet `scanner/` i R2). Engångssteg (docs/phases/phase-07.md 7.17):
 
 1. **Auth0 → Applications → Create Application → Single Page Web Applications**, namn "Scanner".
    Under **Settings**: Allowed Callback URLs, Allowed Logout URLs och Allowed Web Origins =
@@ -199,7 +199,7 @@ Vi kör en tenant, så `loki.auth_enabled = false` i `helm_release.loki` (`obser
 ## Ta bort de gamla demo-eventen (Fas 8, steg 0)
 
 `seed-demo-events.ts` la fem event (id `…0201`–`…0205`, 30-sätesarenan, utan bild) i produktion. De tas bort med ett
-fristående skript (docs/plan.md 8.3). Lasttestets event och CSV-eventen rörs aldrig.
+fristående skript (docs/phases/phase-08.md 8.3). Lasttestets event och CSV-eventen rörs aldrig.
 
 1. Port-forward och miljö som i "Lokal DB-åtkomst" i `infra/LASTTEST-NOTES.md` (`DATABASE_URL_SHARD_0/1`).
 2. Torrkörning (raderar inget, listar vad som finns och antalet betalda ordrar):
@@ -215,7 +215,7 @@ fristående skript (docs/plan.md 8.3). Lasttestets event och CSV-eventen rörs a
 ## Auth0: inloggningens utseende och refresh tokens (Fas 8, steg 2)
 
 Rubriken "Log in to dev-… to continue to Tickets Web" och Auth0-loggan kommer från Auth0-tenantens inställningar, inte
-från vår kod (docs/plan.md 8.2). Koden ber bara om svenska (`ui_locales: 'sv'`). **Gör detta efter försvaret** och
+från vår kod (docs/phases/phase-08.md 8.2). Koden ber bara om svenska (`ui_locales: 'sv'`). **Gör detta efter försvaret** och
 anteckna dagens värden först (för att kunna ställa tillbaka dem). Menynamn i Auth0 ändras ibland: hittar du inte
 något, sök i dashboardens sökruta på ordet.
 
@@ -340,7 +340,7 @@ kubectl -n data cp ./restore-test.dump restore-test:/tmp/restore-test.dump
 kubectl -n data exec restore-test -- pg_restore -U postgres -d postgres --create --clean \
   --if-exists /tmp/restore-test.dump
 
-# 4. Verifiera. Antal events/ordrar/biljetter, samt kronjuvel-queryn (docs/plan.md "Tester"):
+# 4. Verifiera. Antal events/ordrar/biljetter, samt kronjuvel-queryn (docs/specification.md "Tester"):
 kubectl -n data exec restore-test -- psql -U postgres -d tickets -c \
   "SELECT (SELECT count(*) FROM events) AS events, (SELECT count(*) FROM orders) AS orders, (SELECT count(*) FROM tickets) AS tickets;"
 kubectl -n data exec restore-test -- psql -U postgres -d tickets -c \
@@ -370,7 +370,7 @@ bucketen och R2-nyckeln saknar den rättigheten (403). Fixat med `--s3-no-check-
 `infra/k8s/base/backup/cronjob.yaml`.
 
 RPO är i praktiken **upp till 24 timmar** (nattlig dump, inget kontinuerligt WAL-arkiv)
-— ett medvetet val, inte en brist: `docs/plan.md` kräver inte point-in-time recovery
+— ett medvetet val, inte en brist: `docs/specification.md` kräver inte point-in-time recovery
 (se "Flyttat till efter inlämningen"), och 24h RPO för en biljettdatabas där varje
 transaktion redan är beroende av Postgres' egna ACID-garantier under drift är rimligt
 för en examinationsuppgift. En skarp produktion med riktiga pengar hade motiverat WAL-
@@ -389,7 +389,7 @@ Larmreglerna: `infra/k8s/base/monitoring/prometheusrule.yaml`.
 
 ## Shard nere (Fas 6)
 
-**Döda ALDRIG en hel nod** — bara podden (docs/plan.md "Demomanus"):
+**Döda ALDRIG en hel nod** — bara podden (docs/specification.md "Demomanus"):
 Cloudflare Free gör inga origin-healthchecks, så en död nod hade fått
 ~halva trafiken att fortsätta gå dit och få 5xx tills `terraform apply`
 hunnit köra. Poddnivå räcker för att visa samma sak utan den risken.
@@ -426,7 +426,7 @@ shard ett givet id hashar till via `shared/db/src/shard-router.ts`s
 ## Lasttest: `loadtest-mode` (Fas 7)
 
 `scripts/loadtest-mode.sh on|off` växlar allt som medvetet **inte** är permanent i git
-(docs/plan.md 7.1), så inget manuellt steg kan glömmas. Kräver `kubectl` mot klustret
+(docs/phases/phase-07.md 7.1), så inget manuellt steg kan glömmas. Kräver `kubectl` mot klustret
 (Tailscale), `jq` och terraform initierat i `infra/terraform`.
 
 ```sh
@@ -492,7 +492,7 @@ probes, preStop). Se `docs/forsvar.md`.
 > bakgrund till motiveringen.
 
 `services/booking-api/src/routes/rate-limit.ts`s `RATE_LIMIT_ALLOWLISTED_IPS`
-(docs/plan.md "Lasttest": "Lastgeneratorernas CF-verifierade adresser
+(gamla docs/plan.md, `git show be65709:docs/plan.md`, "Lasttest": "Lastgeneratorernas CF-verifierade adresser
 allowlistas i rate limitern under testet, med dokumenterad motivering")
 — utan den mäter `normal-sale`/`spike-sale`/`queue-storm` vårt eget
 botskydd (429:or) i stället för systemet, eftersom alla VU:er på en
@@ -500,7 +500,7 @@ generator-VM delar samma källIP.
 
 **Motivering:** adresserna är lastgeneratorernas EGNA, kända IP:n
 (`hcloud_server.loadgen`, aldrig en header en klient kan förfalska —
-samma princip som `CF-Connecting-IP`-litandet, docs/plan.md "Botskydd").
+samma princip som `CF-Connecting-IP`-litandet, docs/specification.md "Botskydd").
 Allowlistningen är TILLFÄLLIG, bara under den faktiska körningen.
 
 ```sh
@@ -517,7 +517,7 @@ kubectl set env deployment/booking-api -n ticketing RATE_LIMIT_ALLOWLISTED_IPS-
 
 ## Lasttest: förutfärdade Auth0-tokens (Fas 6)
 
-`tests/load/lib/config.js`s `AUTH_TOKENS` (docs/plan.md "Auth": "Lasttest
+`tests/load/lib/config.js`s `AUTH_TOKENS` (gamla docs/plan.md, `git show be65709:docs/plan.md`, "Auth": "Lasttest
 använder förutfärdade tokens") — checkout kräver en riktig Auth0-
 inloggning, men VILKEN användare som betalar är inte det scenariot
 mäter. En liten pool av riktiga access-tokens räcker, återanvänd över
@@ -561,7 +561,7 @@ körning, inte dagen före.
 
 ## Botskydd: proof of work och Turnstile (Fas 8, steg 6)
 
-`POST /events/:eventId/queue/join` utmanar misstänkta klienter (docs/plan.md 8.5). Nivå 0 = ingen utmaning (alla
+`POST /events/:eventId/queue/join` utmanar misstänkta klienter (docs/phases/phase-08.md 8.5). Nivå 0 = ingen utmaning (alla
 vanliga besökare), nivå 1 = proof of work (webbläsaren löser det osynligt, ca 0,3 s), nivå 2 = Cloudflare Turnstile
 (synlig ruta). Nivån räknas ur fyra signaler: fler än 30 joinförsök per IP och minut (varje försök räknas, även med bevis), fler än 10 reserverade join
 per IP och event på 10 min (dessa två räknas som EN signal, så ett delat nät ensamt ger högst nivå 1), ködjup över `challenge_global_queue_depth` (0 = av) och saknad eller uppenbart
@@ -601,13 +601,13 @@ Utan den utmanas lasttestets enda IP-adresser. Värdet jämförs i konstant tid 
 `ticketing`) från fyra repo-secrets vid VARJE deploy — saknas någon av
 dem misslyckas "Create/update app secrets"-steget:
 
-- `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` — från Auth0-tenanten (docs/plan.md "Auth").
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — från Stripes testläge (docs/plan.md "Betalning").
+- `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` — från Auth0-tenanten (docs/specification.md "Auth").
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — från Stripes testläge (docs/specification.md "Betalning").
 - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_BUCKET` — Fas 4,
   se "Backup-lagring: Cloudflare R2" nedan. Återanvänds i Fas 5 av
   `deploy-frontend`-jobbet för att ladda upp PWA:ns statiska filer till
-  samma bucket, under prefixet `frontend/` (medvetet val — se docs/plan.md
-  "Fas 5 — kända luckor": en egen bucket vore renare men är inte
+  samma bucket, under prefixet `frontend/` (medvetet val — se docs/phases/phase-05.md
+  "Kända luckor efter granskningen": en egen bucket vore renare men är inte
   prioriterat).
 
 **Fas 5 — en till secret:** `AUTH0_WEB_CLIENT_ID` — Client ID för en
@@ -670,3 +670,60 @@ Cloudflares SSL-läge kopplat till letsencrypt_use_staging?"):
 
 Gör det **en gång**, mot slutet av Fas 1 eller i Fas 7, aldrig fram och tillbaka — Let's
 Encrypt ger bara 5 identiska certifikat per vecka på produktions-CA:n.
+
+## Claude Code-arbetsflödet
+
+Beslut och luckor: [ADR-0012](./adr/0012-agentic-workflow.md) och
+[ADR-0013](./adr/0013-auto-mode-with-sandbox.md). Det här är hur det används.
+
+**Installera eller uppdatera managed settings.** Krävs innan Auto mode startas, och igen varje gång
+`.claude/managed-settings.example.json` ändrats. Kör från repots rot och starta sedan om Claude Code:
+
+```
+sudo mkdir -p "/Library/Application Support/ClaudeCode"
+sudo install -o root -g wheel -m 644 .claude/managed-settings.example.json "/Library/Application Support/ClaudeCode/managed-settings.json"
+diff .claude/managed-settings.example.json "/Library/Application Support/ClaudeCode/managed-settings.json"
+```
+
+**Starta.** `claude --permission-mode auto`, från ett skal där `~/.tikknet-tf.env` inte är sourcad. Använd inte
+`acceptEdits`, då gäller inte frågorna.
+
+| Vad | Hur |
+|---|---|
+| Fas eller feature | `/phase 9` eller `/phase "beskrivning"`. Kontraktet väntar på ditt godkännande, sedan körs implementation, `/verify` och `/review` |
+| Lokal verifiering | `/verify` väljer steg utifrån det som ändrats, `/verify full` kör alla. Högst 6 körningar utan grönt |
+| Nollställ taket | Bara du: `rm .claude/state/verify-attempts.json` |
+| Granskning | `/review` med kontraktet som argument, högst två omgångar. Ändrar ingen kod. Har `.claude/agents/` eller en skill ändrats: starta om Claude Code först |
+| Mätrapport | `node .claude/hooks/metrics-report.mjs`. Dela inte `.claude/metrics/` |
+| PR | `ci-ok` i GitHub Actions avgör. Allt lokalt är stöd, inte bevis |
+
+**Vad som faktiskt stoppar** (hela tabellen står i ADR-0013):
+
+- Sandboxen är tvingande för Bash: nätverk, hemliga filer och skrivskydd. Den gäller inte Edit, Write, Read, MCP
+  eller hooks, och de fyra undantagna kommandona kör testkod utanför den.
+- `deny` på Edit och Read är tvingande, och managed-filen kan inte ändras av agenten.
+- `deny` på kommandonamn och `guard.mjs` stoppar misstag, men kan kringgås med skript.
+- En `ask`-regel är ett klick: läs vad du godkänner, särskilt i `.claude/hooks/`, eftersom hookarna och
+  `verify.mjs` körs utanför sandboxen.
+- Verifieringsposten och `/review` upptäcker, de hindrar inte.
+
+**Större hookarbete, färre frågor.** Varje Edit i `.claude/hooks/` ger en fråga. Be Claude skriva hela ändringen
+som en patch i scratchpad-mappen, granska den och applicera den själv i en egen terminal:
+
+```
+git apply --check /sökväg/till/hooks.patch
+git apply /sökväg/till/hooks.patch
+```
+
+Be sedan Claude köra `/verify`: Stop-hooken ser bara ändringar via Edit och Write.
+
+**Kontrollera att `main` kräver `ci-ok`.** Kör i en egen terminal, sandboxen når inte GitHub. Det första
+kommandot läser klassisk branch protection, det andra rulesets:
+
+```
+gh api repos/{owner}/{repo}/branches/main/protection --jq '.required_status_checks.contexts'
+gh api repos/{owner}/{repo}/rules/branches/main
+```
+
+`ci-ok` måste stå med i svaret från något av dem. Annars, även om något annat skydd finns, är `ci-ok` bara en
+signal och inget hindrar en merge med rött bygge.

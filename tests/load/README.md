@@ -1,6 +1,6 @@
 # tests/load
 
-k6-scenarier (docs/plan.md "Lasttest"), byggda i **Fas 6**. Körs manuellt,
+k6-scenarier (docs/specification.md "Lasttest"), byggda i **Fas 6**. Körs manuellt,
 separat från CI-pipelinen — inte vid varje merge.
 
 | Script                 | Vad det mäter                                                          |
@@ -41,7 +41,7 @@ obegränsad kö och nästan alla VU:er väntar i onödan.
 ## Flera generator-VM:er (queue-storm/spike-sale)
 
 `maxVUs` i queue-storm.js/spike-sale.js är dimensionerat PER MASKIN
-(docs/plan.md "Lasttest": k6:s per-VU-modell för WebSockets är
+(gamla docs/plan.md, `git show be65709:docs/plan.md`, "Lasttest": k6:s per-VU-modell för WebSockets är
 minnestung vid 50 000 VU — en ensam generator klarar inte hela skalan).
 Kör SAMMA script på varje generator-VM (`terraform output
 loadgen_ipv4s`) med k6:s `--execution-segment`, så lasten delas i
@@ -71,7 +71,7 @@ pnpm run generate-sale-report <eventId> normal-sale /tmp/k6-summary.json <körni
 pnpm run reset-sale <eventId>   # ENDAST mellan normal-sale och spike-sale, manuellt
 ```
 
-**Rate limitern** (docs/plan.md "Lasttest": "Lastgeneratorernas
+**Rate limitern** (gamla docs/plan.md, `git show be65709:docs/plan.md`, "Lasttest": "Lastgeneratorernas
 CF-verifierade adresser allowlistas i rate limitern under testet") —
 se docs/runbook.md "Lasttest: allowlista generatorernas IP:n i rate
 limitern".

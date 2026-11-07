@@ -44,6 +44,18 @@ export function seatmapStatusKey(eventId: string, sectionId: string): string {
   return `seatmap:v2:${eventId}:${sectionId}`;
 }
 
+/**
+ * Cache för stolsstatusens `?view=catalog` och `?view=compact` (services/booking-api seatmap-service): det
+ * färdiga svaret som sträng. Egen nyckel per vy, med version, av samma skäl som ovan.
+ */
+export function seatmapViewKey(
+  view: 'catalog' | 'compact',
+  eventId: string,
+  sectionId: string,
+): string {
+  return `seatmap-${view}:v1:${eventId}:${sectionId}`;
+}
+
 /** Cache för sektionssammanfattningen per event: det färdiga svaret som sträng (docs/loadtest-cpu-plan.md steg 4). */
 export function seatmapSummaryKey(eventId: string): string {
   return `seatmap-summary:v1:${eventId}`;

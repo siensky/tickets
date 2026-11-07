@@ -34,6 +34,37 @@ export interface SeatStatusEntry {
   readonly heldUntil: string | null;
 }
 
+/**
+ * `?view=` på stolsstatusen. `full` (standard) är svaret ovan, oförändrat för äldre klienter. `catalog`
+ * och `compact` delar upp det: det som aldrig ändras under en försäljning hämtas en gång, och det som
+ * pollas varannan sekund blir ett tecken per stol (docs/loadtest-cpu-plan.md, spike-sale).
+ */
+export type SeatStatusView = 'full' | 'catalog' | 'compact';
+
+/** En stol i katalogen: det som är fast för eventet. */
+export interface SeatCatalogEntry {
+  readonly seatId: string;
+  readonly venueSeatId: string;
+  readonly priceCents: number;
+}
+
+/**
+ * `version` är samma i katalogen och den kompakta statusen så länge sektionens stolar är desamma.
+ * Klienten matchar dem på position och hämtar om katalogen om versionerna skiljer sig.
+ */
+export interface SeatCatalog {
+  readonly version: string;
+  readonly seats: readonly SeatCatalogEntry[];
+}
+
+export interface CompactSeatStatus {
+  readonly version: string;
+  /** Ett tecken per stol i katalogens ordning: `a` ledig, `h` hållen, `s` såld. */
+  readonly statuses: string;
+  /** Utgångstid för hållna stolar som har en (samma regel som `heldUntil` ovan), per position. */
+  readonly heldUntil: readonly { readonly index: number; readonly until: string }[];
+}
+
 /** Aggregat per sektion över ett events stolar (docs/plan.md 7.13 E2). */
 export interface SectionSeatAggregateRow {
   readonly sectionId: string;

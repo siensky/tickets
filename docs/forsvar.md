@@ -1,6 +1,6 @@
 # Försvarsmaterial
 
-Motiveringar till vägvalen i [`plan.md`](./plan.md), som förberedda svar inför det muntliga
+Motiveringar till vägvalen i [`specification.md`](./specification.md), som förberedda svar inför det muntliga
 försvaret. Sorterat efter tema. Sist finns ärliga svar om det som inte är byggt.
 
 ---
@@ -59,6 +59,18 @@ Stolsstatus är systemets mest lästa data (alla tittande klienter, var 2:a seku
 på en indexerad statuskolumn är mycket snabbare än en join mot reservationer med
 tidsjämförelse. Kolumnen uppdateras i samma transaktion som redan låser stolen, och invarianten
 mot `reservations` testas.
+
+### Varför är stolsstatusen uppdelad i en katalog och en kompakt status?
+
+Det fulla svaret (id, arenaplats, pris, status och utgångstid för varje stol) var ca 790 KB för en
+sektion med 5 000 stolar, och det hämtades varannan sekund av varje besökare. I spike-sale var det
+den största posten för ingress och lastgeneratorernas nätverk. Det mesta av svaret ändras aldrig under
+en försäljning. Därför hämtas katalogen (id, arenaplats, pris) en gång per besök, och pollningen är
+bara ett tecken per stol (`a`, `h`, `s`) i katalogens ordning, plus utgångstiden för hållna stolar: 5 KB
+utan hållna stolar och ca 130 KB med 2 500 hållna, mot 800 KB förut.
+Båda bär en version (en hash av stolarnas id) och klienten slår aldrig ihop dem om versionen eller
+antalet skiljer sig: en förskjuten position skulle annars kunna reservera fel stol. Det fulla svaret
+finns kvar utan `?view=`, så äldre klienter och en webbapp som rullas ut före API:t fungerar.
 
 ### Varför jitter på frisläppandet?
 

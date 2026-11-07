@@ -102,7 +102,7 @@ The assignment was a ticketing system for a concert venue. These were the requir
 | Hold seats while the buyer pays      | Reservations that expire on their own after five minutes                |
 | Survive deploys and crashes mid-sale | Zero-downtime rollouts and no lost payment events                       |
 
-The whole plan (in Swedish) is in [docs/plan.md](docs/plan.md).
+The roadmap (in Swedish) is in [docs/plan.md](docs/plan.md), the system specification in [docs/specification.md](docs/specification.md) and one document per build phase in [docs/phases/](docs/phases/).
 
 ---
 

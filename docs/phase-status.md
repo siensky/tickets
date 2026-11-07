@@ -1,7 +1,36 @@
 # Fasstatus mellan sessioner
 
-Kort kontext nästa session behöver utöver `docs/plan.md` själv (docs/rules.md §11a).
-Läs båda innan en ny fas påbörjas.
+Kort kontext nästa session behöver utöver fasdokumentet i `docs/phases/` och `docs/specification.md`
+(docs/rules.md §11a). Planen för en fas står i fasdokumentet, utfallet här. Äldre anteckningar nedan
+hänvisar till `docs/plan.md` med gamla avsnittsnamn; tabellen "Hänvisningar från koden" i
+[`plan.md`](./plan.md) visar var de står nu.
+
+## Läget just nu
+
+Läs det här avsnittet först och sedan bara de avsnitt fasdokumentet pekar på. Lista avsnitten med
+`rg -n '^## ' docs/phase-status.md` (docs/rules.md §11a).
+
+| | Vad | Var |
+|---|---|---|
+| **Klart** | Fas 0–8, mergade till `main` | [`plan.md`](./plan.md) "Faser" |
+| **Klart** | Lasttester och CPU-arbete, mergat (PR #26, #27) | [`loadtest-cpu-plan.md`](./loadtest-cpu-plan.md) |
+| **Pågående** | `spiketest-fix`: kompakt stolsstatus (katalog + ett tecken per stol), Alloy-fix, bevis från 5/11, ny dokumentstruktur och agentiskt arbetsflöde (ADR-0012). Committat på grenen, inte mergat till `main` och därför inte driftsatt. Steg 8 av workflow-bygget är inte committat | [`loadtest-cpu-plan.md`](./loadtest-cpu-plan.md) "Mindre stolsstatus", [ADR-0012](./adr/0012-agentic-workflow.md), "Claude Code-arbetsflödet" nedan |
+| **Nästa** | Ingen fas planerad. Kandidater: [`plan.md`](./plan.md) "Kända begränsningar". Valfritt: köra om spike-sale med den kompakta stolsstatusen | — |
+
+## Claude Code-arbetsflödet: mätning (steg 7 av 8)
+
+- **Vad:** `.claude/hooks/metrics.mjs` skriver en JSON-rad per verktygsanrop till `.claude/metrics/tools-ÅÅÅÅ-MM.jsonl` (gitignorerad). `node .claude/hooks/metrics-report.mjs` visar anrop per verktyg, omläsningar, stora läsningar, upprepade fel, onödig `/verify` och tokens per session. Filerna rensas inte automatiskt.
+- **Integritet:** aldrig kommandotext, sökmönster, innehåll, felmeddelanden eller transkripttext. Bash sparas som en fast kategori. Read sparar också `offset` och `limit`, för att känna igen omläsningar. Sökvägar sparas i klartext bara inom repot; externa och hemliga sökvägar blir en HMAC med sessions-id som nyckel. Nyckeln står i loggen, så hashen stoppar inte den som gissar en sökväg: dela inte loggen.
+- **Overhead:** hooken körs asynkront (ca 50 ms i bakgrunden per anrop) och kan inte blockera. Tokens läses vid `SessionEnd` (synkront, tak 5 s) och `SubagentStop` (asynkront), bara de fyra numeriska `usage`-fälten, en gång per `message.id`.
+- **Begränsningar:** spärrade anrop och filer ändrade via Bash syns inte. Agenter skiljs på typ, så två omgångar av samma subagent räknas som en läsare. Svarsstorleken är det serialiserade svaret, inte filens storlek. Tokens saknas ("ej mätt") om sessionen dör utan `SessionEnd`, och markeras `OFULLSTÄNDIG` om en känd subagent saknas. `SubagentStop` ger också rader utan transkriptfil, av okänd orsak: de redovisas för sig och räknas inte med. Fälten i transkriptet är Claude Codes interna format och kan ändras; då visar rapporten "ej mätt" i stället för en uppskattning.
+
+## Claude Code-arbetsflödet: CI och kvalitetssäkring (steg 8 av 8)
+
+- **CI:** `test.yml` kör hooktesterna och gitleaks (8.30.1, kontrollsumman verifieras, hela historiken, därför `fetch-depth: 0` i `static`). `config.test.mjs` låser att stegen finns och att `ci-ok` kräver varje annat jobb. Grenen hade ingen upstream när steget skrevs, så inget av detta är bekräftat på GitHub.
+- **gitleaks lokalt 2026-11-07:** 8.30.1 över hela historiken (90 commits, alla 56 lokala refs): inga fynd. CI skannar också fjärrgrenar som kan saknas lokalt.
+- **Skydd:** `scripts/check-secrets.sh`, `.gitleaks.toml` och `.lintstagedrc.json` har `ask` och ligger i mallens `denyWrite`. `denyWrite` gäller först när mallen installerats om (`docs/runbook.md`).
+- **Auto mode vid hookändringar:** reglerna är oförändrade (ADR-0013, noteringen). Större hookarbete görs som en samlad patch som utvecklaren granskar och applicerar själv.
+- **Öppet:** om branch protection finns på `main` (ADR-0012 och "Fas 8 — efterarbete", Steg 1, säger olika), kontrollera med kommandot i runbooken. Ej provat: om `excludedCommands` också undantar sammansatta kommandon; prov, bara på utvecklarens begäran eftersom det försöker ta sig runt sandboxen: låt Claude köra `node .claude/hooks/verify.mjs --prov; touch ~/tikknet-sandbox-prov` (avbryts utan att räknas som försök). Dyker filen upp i hemkatalogen undantas hela kommandot. `sed -n` mot hookfiler nekas av spärren trots att det bara läser (lämnat medvetet, använd Read, `cat` eller `rg`).
 
 ## Efter Fas 8 — sessionsklocka, retention, `reservation.created` (`feature/adjustments`)
 

@@ -1,7 +1,7 @@
 # Arkitektur
 
 Översikt över hur systemet hänger ihop. Detaljerna och motiveringarna finns i
-[plan.md](./plan.md), [forsvar.md](./forsvar.md) och ADR:erna i [adr/](./adr/). Diagrammen är
+[specification.md](./specification.md), [forsvar.md](./forsvar.md) och ADR:erna i [adr/](./adr/). Diagrammen är
 Mermaid-block som GitHub ritar upp. Klustret (noder, namnrymder, poddar) ritas separat i
 [cluster.md](./cluster.md).
 

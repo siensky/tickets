@@ -7,13 +7,18 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { SeatmapServiceDeps } from '../../src/services/seatmap-service.js';
 import { describe, expect, it, vi } from 'vitest';
 
+const service = vi.hoisted(() => ({
+  getSectionSeatStatusBody: vi.fn(() => Promise.resolve('{"seats":[]}')),
+}));
+
 vi.mock('../../src/services/seatmap-service.js', () => ({
   getSectionSummaryBody: vi.fn().mockResolvedValue('{"stage":null,"sections":[]}'),
-  getSectionSeatStatusBody: vi.fn().mockResolvedValue('{"seats":[]}'),
+  getSectionSeatStatusBody: service.getSectionSeatStatusBody,
   getSectionGeometry: vi.fn().mockResolvedValue([]),
   listVenueSections: vi.fn().mockResolvedValue([]),
 }));
 
+import { registerErrorHandler } from '../../src/routes/error-handler.js';
 import { registerSeatmapRoutes } from '../../src/routes/seatmap.js';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
@@ -23,6 +28,7 @@ const DEPS = { shardPools: {}, redis: {}, logger: {} } as unknown as SeatmapServ
 
 function appWith(summaryCacheSeconds: number): FastifyInstance {
   const app = Fastify();
+  registerErrorHandler(app);
   registerSeatmapRoutes(app, { ...DEPS, summaryCacheSeconds });
   return app;
 }
@@ -73,6 +79,55 @@ describe('seatmap cache headers', () => {
     // Det färdiga svaret skickas som det är, men fortfarande som JSON.
     expect(response.headers['content-type']).toBe('application/json; charset=utf-8');
     expect(response.json()).toEqual({ seats: [] });
+    await app.close();
+  });
+
+  it('skickar vyn vidare och ger katalogen längre webbläsarcache än statusen', async () => {
+    const app = appWith(0);
+    const url = `/events/${EVENT_ID}/sections/${SECTION_ID}/seats/status`;
+
+    const catalog = await app.inject({ method: 'GET', url: `${url}?view=catalog` });
+    const compact = await app.inject({ method: 'GET', url: `${url}?view=compact` });
+
+    expect(catalog.headers['cache-control']).toBe('public, max-age=300');
+    expect(compact.headers['cache-control']).toBe('public, max-age=1');
+    expect(catalog.headers['access-control-allow-origin']).toBe('*');
+    expect(service.getSectionSeatStatusBody).toHaveBeenCalledWith(
+      expect.anything(),
+      EVENT_ID,
+      SECTION_ID,
+      'catalog',
+      undefined,
+    );
+    expect(service.getSectionSeatStatusBody).toHaveBeenLastCalledWith(
+      expect.anything(),
+      EVENT_ID,
+      SECTION_ID,
+      'compact',
+      undefined,
+    );
+    await app.close();
+  });
+
+  it('svarar 400 på en okänd vy eller en okänd parameter (docs/rules.md §8)', async () => {
+    const app = appWith(0);
+    const url = `/events/${EVENT_ID}/sections/${SECTION_ID}/seats/status`;
+
+    const unknownView = await app.inject({ method: 'GET', url: `${url}?view=everything` });
+    const unknownParam = await app.inject({ method: 'GET', url: `${url}?foo=1` });
+    const badVersion = await app.inject({
+      method: 'GET',
+      url: `${url}?view=catalog&version=not-a-hash`,
+    });
+    const versionWithoutCatalog = await app.inject({
+      method: 'GET',
+      url: `${url}?view=compact&version=aaaaaaaaaaaaaaaa`,
+    });
+
+    expect(unknownView.statusCode).toBe(400);
+    expect(unknownParam.statusCode).toBe(400);
+    expect(badVersion.statusCode).toBe(400);
+    expect(versionWithoutCatalog.statusCode).toBe(400);
     await app.close();
   });
 });
