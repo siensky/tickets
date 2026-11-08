@@ -42,10 +42,6 @@ export async function retryWhileBusy<T>(
         throw error;
       }
       await sleep(baseDelayMs * attempt + Math.random() * baseDelayMs);
-      // Anroparen kan ha slutat bry sig medan vi väntade: då skickas inget nytt försök.
-      if (options.isCancelled?.() === true) {
-        throw error;
-      }
     }
   }
 }

@@ -27,49 +27,35 @@ export function joinQueue() {
 
 // Samma tider som webbappen (apps/web/src/hooks/use-queue-admission.ts och SeatmapPage), så att testet
 // belastar systemet som riktiga besökare gör (docs/loadtest-cpu-plan.md steg 3 och 6).
-// Med socket: fast 15 s. Webbappen tar max(15 s, nextPollSeconds), så skriptet belastar här något MER än
-// riktiga besökare när servern ber om längre; k6:s socket.setInterval kan inte ändra takt i farten.
 const QUEUE_FALLBACK_POLL_SECONDS = 15;
-// Utan socket: serverns `nextPollSeconds`, aldrig tätare än 5 s, ±20 % spridning (som webbappen).
-const QUEUE_MIN_POLL_SECONDS = 5;
-const QUEUE_POLL_JITTER = 0.2;
+const QUEUE_NO_SOCKET_POLL_SECONDS = 2;
 const SEAT_STATUS_POLL_SECONDS = 2;
 const SECTION_SUMMARY_POLL_SECONDS = 10;
 const QUEUE_END_TYPES = new Set(['sales_closed', 'sold_out']);
 
 /**
- * En statusläsning: `state` är 'admitted', 'closed' (stängt eller slutsålt) eller 'waiting', och
- * `nextPollSeconds` serverns besked om när det är lönt att fråga igen. Ett tillfälligt fel (429, 5xx,
- * ett Cloudflare-svar) räknas som 'waiting', precis som webbappen fortsätter vänta.
+ * En statusläsning: 'admitted', 'closed' (stängt eller slutsålt) eller 'waiting'. Ett tillfälligt fel
+ * (429, 5xx, ett Cloudflare-svar) räknas som 'waiting', precis som webbappen fortsätter vänta.
  */
 function readQueueStatus(token) {
   const res = http.get(`${BASE_URL}/events/${EVENT_ID}/queue/status`, {
     headers: { [QUEUE_TOKEN_HEADER]: token },
   });
   if (res.status !== 200) {
-    return { state: 'waiting', nextPollSeconds: undefined };
+    return 'waiting';
   }
   const status = res.json('status');
-  const nextPollSeconds = res.json('nextPollSeconds');
   if (status === 'admitted') {
-    return { state: 'admitted', nextPollSeconds };
+    return 'admitted';
   }
-  return { state: QUEUE_END_TYPES.has(status) ? 'closed' : 'waiting', nextPollSeconds };
-}
-
-function noSocketPollDelaySeconds(nextPollSeconds) {
-  const base = Math.max(
-    QUEUE_MIN_POLL_SECONDS,
-    typeof nextPollSeconds === 'number' ? nextPollSeconds : 0,
-  );
-  return base * (1 - QUEUE_POLL_JITTER + Math.random() * 2 * QUEUE_POLL_JITTER);
+  return QUEUE_END_TYPES.has(status) ? 'closed' : 'waiting';
 }
 
 /**
  * Väntar på insläpp som webbappen gör: först en statusläsning (direktinsläppet skickar inget
  * WebSocket-meddelande), sedan WebSocket mot realtime-gateway, med en statusläsning var 15:e
  * sekund som reserv. Stängs socketen i förtid (uppgraderingen misslyckas, servern eller Cloudflare
- * stänger) pollas status i serverns takt, aldrig tätare än var 5:e sekund, som webbappen gör utan socket.
+ * stänger) pollas status varannan sekund fram till tidsgränsen, som webbappen gör utan socket.
  * Returnerar `true`/`false`, aldrig ett fel: att INTE bli insläppt inom fönstret är ett giltigt,
  * mätbart utfall.
  *
@@ -79,8 +65,8 @@ function noSocketPollDelaySeconds(nextPollSeconds) {
 export function waitForAdmissionViaWebSocket(token, maxWaitSeconds) {
   const deadline = Date.now() + maxWaitSeconds * 1000;
   const first = readQueueStatus(token);
-  if (first.state !== 'waiting') {
-    return first.state === 'admitted';
+  if (first !== 'waiting') {
+    return first === 'admitted';
   }
   let admitted = false;
   let finished = false;
@@ -98,9 +84,9 @@ export function waitForAdmissionViaWebSocket(token, maxWaitSeconds) {
       }
     });
     socket.setInterval(() => {
-      const { state } = readQueueStatus(token);
-      if (state === 'admitted' || state === 'closed') {
-        admitted = state === 'admitted';
+      const status = readQueueStatus(token);
+      if (status === 'admitted' || status === 'closed') {
+        admitted = status === 'admitted';
         finished = true;
         socket.close();
       }
@@ -117,11 +103,11 @@ export function waitForAdmissionViaWebSocket(token, maxWaitSeconds) {
 /** Socketen stängdes utan besked: polla som webbappen gör utan socket, fram till tidsgränsen. */
 function pollUntilDeadline(token, deadline) {
   while (Date.now() < deadline) {
-    const { state, nextPollSeconds } = readQueueStatus(token);
-    if (state !== 'waiting') {
-      return state === 'admitted';
+    const status = readQueueStatus(token);
+    if (status !== 'waiting') {
+      return status === 'admitted';
     }
-    sleep(noSocketPollDelaySeconds(nextPollSeconds));
+    sleep(QUEUE_NO_SOCKET_POLL_SECONDS);
   }
   return false;
 }
@@ -213,42 +199,25 @@ function shuffleInPlace(array) {
   }
 }
 
-// Som webbappen (apps/web/src/lib/retry-while-busy.ts): 503 betyder "upptaget, försök igen".
-const BUSY_ATTEMPTS = 5;
-const BUSY_BASE_DELAY_SECONDS = 1;
-// 409 som är väntade utfall. IDEMPOTENCY_CONFLICT är det inte: då fastnade nyckeln efter ett 503.
-const EXPECTED_CONFLICTS = new Set(['SEAT_UNAVAILABLE', 'ACTIVE_RESERVATION_EXISTS']);
-
-/**
- * Allt-eller-inget-reservationen (docs/plan.md "Concurrency-kärnan"). Ett 409 för en tagen stol är ett
- * FÖRVÄNTAT utfall, inte ett testfel. 503 försöks om med SAMMA Idempotency-Key, som webbappen gör.
- */
+/** Allt-eller-inget-reservationen (docs/plan.md "Concurrency-kärnan"). Ett 409 är ett FÖRVÄNTAT utfall (stolen hann tas), inte ett testfel. */
 export function reserveSeats(token, seatIds) {
   if (seatIds.length === 0) {
     return undefined;
   }
-  const idempotencyKey = randomUuid();
-  let res;
-  for (let attempt = 1; attempt <= BUSY_ATTEMPTS; attempt += 1) {
-    res = http.post(
-      `${BASE_URL}/events/${EVENT_ID}/reservations`,
-      JSON.stringify({ seatIds }),
-      {
-        headers: {
-          ...JSON_HEADERS,
-          [QUEUE_TOKEN_HEADER]: token,
-          'Idempotency-Key': idempotencyKey,
-        },
+  const res = http.post(
+    `${BASE_URL}/events/${EVENT_ID}/reservations`,
+    JSON.stringify({ seatIds }),
+    {
+      headers: {
+        ...JSON_HEADERS,
+        [QUEUE_TOKEN_HEADER]: token,
+        'Idempotency-Key': randomUuid(),
       },
-    );
-    if (res.status !== 503 || attempt === BUSY_ATTEMPTS) {
-      break;
-    }
-    sleep(BUSY_BASE_DELAY_SECONDS * attempt + Math.random() * BUSY_BASE_DELAY_SECONDS);
-  }
+    },
+  );
   check(res, {
     'reservations: 201 or 409 (seat already taken)': (r) =>
-      r.status === 201 || (r.status === 409 && EXPECTED_CONFLICTS.has(r.json('error.code'))),
+      r.status === 201 || r.status === 409,
   });
   return res.status === 201 ? res.json('reservationId') : undefined;
 }
