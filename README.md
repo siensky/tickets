@@ -21,13 +21,13 @@ Cloud behind Cloudflare.
 - **Stack:** TypeScript end to end, React + Vite, Fastify, Postgres, Redis, RabbitMQ, Kubernetes
   (k3s), Terraform, Cloudflare, Prometheus + Grafana + Loki, k6 and Playwright.
 
-|                  | Live                                                     |
-| ---------------- | -------------------------------------------------------- |
-| Web app          | [tikknet.se](https://tikknet.se)                         |
-| API              | [api.tikknet.se](https://api.tikknet.se)                 |
-| Ticket scanner   | [scan.tikknet.se](https://scan.tikknet.se) (staff login) |
-| Grafana          | [grafana.tikknet.se](https://grafana.tikknet.se) (login) |
-| Images and brand | [cdn.tikknet.se](https://cdn.tikknet.se)                 |
+|                  | Live                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Web app          | [tikknet.se](https://tikknet.se)                                                                                    |
+| API              | [api.tikknet.se](https://api.tikknet.se/events) (the list of events, JSON)                                          |
+| Ticket scanner   | [scan.tikknet.se](https://scan.tikknet.se) (staff login)                                                            |
+| Grafana          | [grafana.tikknet.se](https://grafana.tikknet.se) (login)                                                            |
+| Images and brand | [cdn.tikknet.se](https://cdn.tikknet.se/brand/tikknet-logo.svg) (the logo; files live under `brand/` and `images/`) |
 
 ### Try it yourself
 
@@ -179,7 +179,10 @@ and the 5xx panels stay flat at zero through both rollouts.
 
 ![Grafana during the zero-downtime run](docs/evidence/zero-downtime-grafana.png)
 
-The full run, with timestamps and how to repeat it, is in
+The test was repeated on 8 November 2026 before the code submission: **0 failed requests out of
+43,401**, the ingress 5xx counter unchanged (8,521 before and after), p95 65 ms.
+
+The full runs, with timestamps and how to repeat them, are in
 [docs/evidence/zero-downtime.md](docs/evidence/zero-downtime.md).
 
 ### Load tests
@@ -188,10 +191,15 @@ Two sales were simulated with k6, each with about 50,000 booking attempts. In `n
 were spread evenly over 15 minutes, and in `spike-sale` they came in sharp bursts over six and a
 half minutes.
 
-| Scenario      | Purchases | Tickets sold | Double-sold seats |
-| ------------- | --------- | ------------ | ----------------- |
-| `normal-sale` | 539       | 2,695        | 0                 |
-| `spike-sale`  | 483       | 2,415        | 0                 |
+| Scenario      | Requests | Failed | p95   | Purchases | Tickets sold | Double-sold seats | Evidence                                                             |
+| ------------- | -------- | ------ | ----- | --------- | ------------ | ----------------- | -------------------------------------------------------------------- |
+| `normal-sale` | 636,249  | 0.6 %  | 52 ms | 992       | 4,960        | 0                 | [normal-sale-2026-11-07.md](docs/evidence/normal-sale-2026-11-07.md) |
+| `spike-sale`  | 622,104  | 0.8 %  | 1.2 s | 919       | 4,595        | 0                 | [spike-sale-2026-11-07.md](docs/evidence/spike-sale-2026-11-07.md)   |
+
+Both runs went through Cloudflare from two load generators. The failed requests are mostly 409 "seat
+already taken", which is a correct answer; in the spike, about 150 were 503s in the first burst,
+before the autoscaler had added pods. In both runs no more than 5,000 tickets were sold and no
+ticket number appears twice.
 
 Not every seat sells inside the window, and that is on purpose. The waiting room lets people in at a
 fixed rate and most attempts end in a clean 409 "seat already taken", which is the honest answer
