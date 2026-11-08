@@ -117,7 +117,7 @@ misslyckas.
 
 Zero-downtime kräver fyra saker samtidigt: `readinessProbe`, `maxUnavailable: 0`, `preStop` med
 `terminationGracePeriodSeconds`, och graceful shutdown i appen. Beviset ligger i
-[evidence/zero-downtime.md](./evidence/zero-downtime.md): 0 misslyckade av 22 978 requests under två
+[evidence/zero-downtime.md](./evidence/zero-downtime.md): 0 misslyckade av 22 978 requests (30/10) och 0 av 43 401 (8/11), båda under två
 rolloutar.
 
 ## Observability, skalning och drift

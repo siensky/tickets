@@ -1,0 +1,207 @@
+{
+  "metrics": {
+    "http_req_failed": {
+      "passes": 0,
+      "fails": 43401,
+      "thresholds": {
+        "rate==0": false
+      },
+      "value": 0
+    },
+    "data_received": {
+      "count": 1978437850,
+      "rate": 6110692.535491309
+    },
+    "iteration_duration": {
+      "min": 4072.746076,
+      "med": 9026.454125,
+      "p(50)": 9026.454125,
+      "p(95)": 13069.370149,
+      "p(99)": 14197.595803,
+      "max": 27270.034968,
+      "avg": 9232.678612452508
+    },
+    "ws_session_duration": {
+      "med": 514.0195705,
+      "p(50)": 514.0195705,
+      "p(95)": 937.97660775,
+      "p(99)": 15014.01879335,
+      "max": 15089.489492,
+      "avg": 699.8279900385778,
+      "min": 9.131868
+    },
+    "http_req_blocked": {
+      "max": 32.988438,
+      "avg": 0.023417070044469437,
+      "min": 0.00011,
+      "med": 0.000321,
+      "p(50)": 0.000321,
+      "p(95)": 0.00051,
+      "p(99)": 0.000761
+    },
+    "http_req_waiting": {
+      "med": 4.877623,
+      "p(50)": 4.877623,
+      "p(95)": 61.882982,
+      "p(99)": 193.575266,
+      "max": 2271.648471,
+      "avg": 18.27964524418792,
+      "min": 0.531541
+    },
+    "http_req_tls_handshaking": {
+      "med": 0,
+      "p(50)": 0,
+      "p(95)": 0,
+      "p(99)": 0,
+      "max": 14.754694,
+      "avg": 0.018926291237529088,
+      "min": 0
+    },
+    "vus_max": {
+      "max": 200,
+      "value": 200,
+      "min": 200
+    },
+    "iterations": {
+      "count": 3001,
+      "rate": 9.269024194522672
+    },
+    "http_reqs": {
+      "count": 43401,
+      "rate": 134.0502895922954
+    },
+    "http_req_duration{expected_response:true}": {
+      "avg": 19.287932959056103,
+      "min": 0.598453,
+      "med": 5.125694,
+      "p(50)": 5.125694,
+      "p(95)": 64.980177,
+      "p(99)": 194.032475,
+      "max": 2271.737633
+    },
+    "http_req_connecting": {
+      "p(95)": 0,
+      "p(99)": 0,
+      "max": 3.848349,
+      "avg": 0.002958772793253609,
+      "min": 0,
+      "med": 0,
+      "p(50)": 0
+    },
+    "http_req_sending": {
+      "avg": 0.05120854689984174,
+      "min": 0.007621,
+      "med": 0.042728,
+      "p(50)": 0.042728,
+      "p(95)": 0.10887,
+      "p(99)": 0.142667,
+      "max": 0.621845
+    },
+    "ws_msgs_sent": {
+      "rate": 6.1649357854939195,
+      "count": 1996
+    },
+    "http_req_duration": {
+      "med": 5.125694,
+      "p(50)": 5.125694,
+      "p(95)": 64.980177,
+      "p(99)": 194.032475,
+      "max": 2271.737633,
+      "avg": 19.287932959056103,
+      "min": 0.598453
+    },
+    "ws_msgs_received": {
+      "count": 1969,
+      "rate": 6.081542365549864
+    },
+    "vus": {
+      "value": 1,
+      "min": 1,
+      "max": 107
+    },
+    "data_sent": {
+      "count": 18124166,
+      "rate": 55979.118013843785
+    },
+    "dropped_iterations": {
+      "count": 0,
+      "rate": 0,
+      "thresholds": {
+        "count==0": false
+      }
+    },
+    "completed_bookings": {
+      "rate": 9.2288718071422,
+      "count": 2988,
+      "thresholds": {
+        "count>0": false
+      }
+    },
+    "ws_sessions": {
+      "count": 1996,
+      "rate": 6.1649357854939195
+    },
+    "ws_connecting": {
+      "p(99)": 36.105065699999976,
+      "max": 167.021339,
+      "avg": 7.999344576152306,
+      "min": 3.83566,
+      "med": 6.346901000000001,
+      "p(50)": 6.346901000000001,
+      "p(95)": 15.7354975
+    },
+    "http_req_receiving": {
+      "min": 0.005588,
+      "med": 0.054054,
+      "p(50)": 0.054054,
+      "p(95)": 6.04014,
+      "p(99)": 21.33789,
+      "max": 117.193803,
+      "avg": 0.9570791679684845
+    },
+    "checks": {
+      "fails": 0,
+      "passes": 10986,
+      "thresholds": {
+        "rate==1.00": false
+      },
+      "value": 1
+    }
+  },
+  "root_group": {
+    "groups": {},
+    "checks": {
+      "queue/join: 201": {
+        "path": "::queue/join: 201",
+        "id": "81b14ca939b26d53058accf6464a9def",
+        "passes": 3001,
+        "fails": 0,
+        "name": "queue/join: 201"
+      },
+      "reservations: 201 or 409 (seat already taken)": {
+        "id": "42412bc395a16a13872b66d8d963e8d0",
+        "passes": 3001,
+        "fails": 0,
+        "name": "reservations: 201 or 409 (seat already taken)",
+        "path": "::reservations: 201 or 409 (seat already taken)"
+      },
+      "checkout: 201": {
+        "name": "checkout: 201",
+        "path": "::checkout: 201",
+        "id": "0fb4e5e8930802a8ba7a8725b069f2ca",
+        "passes": 2988,
+        "fails": 0
+      },
+      "ws: upgraded (101)": {
+        "name": "ws: upgraded (101)",
+        "path": "::ws: upgraded (101)",
+        "id": "675e18dd7af140b1e29a103b92b8d79c",
+        "passes": 1996,
+        "fails": 0
+      }
+    },
+    "name": "",
+    "path": "",
+    "id": "d41d8cd98f00b204e9800998ecf8427e"
+  }
+}

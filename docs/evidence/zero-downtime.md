@@ -74,3 +74,43 @@ sekunden gav **noll misslyckade requests** på klienten och **noll 5xx** på ing
 
 Förbehåll: k6 mäter HTTP-anropen. En del simulerade betalningar i payment-mock misslyckas medvetet
 (5 % kaos), vilket påverkar orderstatusen men inte `http_req_failed`.
+
+## Omkörning 8 november 2026
+
+Samma körordning och profil som ovan, inför inlämningen. Koden var den som spiken 7 november (23:40)
+kördes mot (`de993c6`, återställd via grenen `revert-spike-code`).
+
+| Fält | Värde |
+|---|---|
+| Datum och tid | 8 november 2026, cirka 16:30–16:36 svensk tid |
+| Profil | `tests/load/deploy-under-load.js`: 10 iterationer/s i 5 min |
+| Event | lasttest-eventet, nollställt med `reset-sale` före körningen |
+| Deploy | `kubectl rollout restart deployment/booking-api -n ticketing` två gånger (efter ca 1 och ca 3 min) |
+| Loadtest-läge | `loadtest-mode on` |
+| Last | k6 från loadgen-VM 1 (`167.233.220.60`) mot `https://loadtest.tikknet.se` |
+
+| Mått | Krav | Utfall |
+|---|---|---|
+| `http_req_failed` | 0,00 % | **0,00 %** (0 av 43 401 requests) |
+| `dropped_iterations` | 0 | **0** |
+| `checks` | 100 % | **100 %** (10 986 av 10 986) |
+| Thresholds | alla gröna | **Alla gröna** |
+| Genomförda bokningar | > 0 | 2 988 av 3 001 försök (resten 409, "stolen redan tagen") |
+| Svarstider | — | avg 19,3 ms, median 5,1 ms, p(95) 65 ms, p(99) 194 ms, max 2,27 s |
+| WebSocket | — | 1 996 sessioner, alla uppgraderade (101) |
+
+Hela k6-summaryn: [`zero-downtime-2026-11-08.json`](zero-downtime-2026-11-08.json).
+
+5xx-räknaren i ingress-nginx (samma fråga som ovan, typ Instant). Värdet är summerat från tidigare
+spike-körningar; det som avgör är skillnaden.
+
+| | Värde |
+|---|---|
+| Före körningen (16:29) | 8 521 |
+| Efter körningen (16:39) | 8 521 |
+| Skillnad (krav: 0) | **0** |
+
+![5xx-räknaren platt genom körningen](zero-downtime-2026-11-08.png)
+
+Slutsats: kravet i 7.3 håller fortfarande. Två rullande deployer under last gav noll misslyckade
+requests och noll nya 5xx.
