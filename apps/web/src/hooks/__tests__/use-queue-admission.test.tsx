@@ -1,8 +1,8 @@
 /**
  * Insläppet kommer över WebSocket: ett meddelande ger en omedelbar statusläsning, så sidan aldrig
  * litar på socketen ensam. När socketen är uppe pollas status bara var 15:e sekund som reserv; när den
- * inte är uppe följs serverns `nextPollSeconds`, aldrig tätare än var 5:e sekund, och varje
- * (åter)anslutning läser status direkt. Platskartan (redan insläppt) ansluter inte alls.
+ * inte är uppe (ingen gateway, återanslutning) varannan sekund som förut, och varje (åter)anslutning
+ * läser status direkt. Platskartan (redan insläppt) ansluter inte alls.
  */
 import { act, screen, waitFor } from '@testing-library/react';
 import type { JSX } from 'react';
@@ -107,51 +107,21 @@ describe('useQueueAdmission', () => {
 });
 
 describe('useQueueAdmission: pollingintervall', () => {
-  it('pollar aldrig oftare än var 5:e sekund utan socket, även när servern ber om tätare', async () => {
+  it('pollar varannan sekund utan socket men inte med en öppen socket', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.mocked(api.getQueueStatus).mockResolvedValue({ ...WAITING, nextPollSeconds: 1 });
-    renderWithProviders(<Probe />);
-    expect(await screen.findByText('waiting')).toBeInTheDocument();
-
-    // Golvet 5 s minus 20 % spridning: inget nytt anrop före 4 s, ett senast efter 6 s.
-    await act(() => vi.advanceTimersByTimeAsync(3900));
-    expect(api.getQueueStatus).toHaveBeenCalledTimes(1);
-    await act(() => vi.advanceTimersByTimeAsync(2200));
-    expect(api.getQueueStatus).toHaveBeenCalledTimes(2);
-  });
-
-  it('följer serverns längre intervall utan socket', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.mocked(api.getQueueStatus).mockResolvedValue({ ...WAITING, nextPollSeconds: 20 });
-    renderWithProviders(<Probe />);
-    expect(await screen.findByText('waiting')).toBeInTheDocument();
-
-    await act(() => vi.advanceTimersByTimeAsync(15_900));
-    expect(api.getQueueStatus).toHaveBeenCalledTimes(1);
-    await act(() => vi.advanceTimersByTimeAsync(8200));
-    expect(api.getQueueStatus).toHaveBeenCalledTimes(2);
-  });
-
-  it('pollar bara som sällsynt reserv med en öppen socket', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    socket.isOpen = true;
     vi.mocked(api.getQueueStatus).mockResolvedValue(WAITING);
-    renderWithProviders(<Probe />);
+    const { unmount } = renderWithProviders(<Probe />);
     expect(await screen.findByText('waiting')).toBeInTheDocument();
 
-    await act(() => vi.advanceTimersByTimeAsync(11_900));
-    expect(api.getQueueStatus).toHaveBeenCalledTimes(1);
-  });
+    await act(() => vi.advanceTimersByTimeAsync(2100));
+    expect(api.getQueueStatus).toHaveBeenCalledTimes(2);
+    unmount();
 
-  it('följer serverns längre intervall även med en öppen socket', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.mocked(api.getQueueStatus).mockClear();
     socket.isOpen = true;
-    vi.mocked(api.getQueueStatus).mockResolvedValue({ ...WAITING, nextPollSeconds: 30 });
     renderWithProviders(<Probe />);
     expect(await screen.findByText('waiting')).toBeInTheDocument();
-
-    // 30 s minus 20 % spridning: inget nytt anrop före 24 s, trots reservens 15 s.
-    await act(() => vi.advanceTimersByTimeAsync(23_900));
+    await act(() => vi.advanceTimersByTimeAsync(2100));
     expect(api.getQueueStatus).toHaveBeenCalledTimes(1);
   });
 

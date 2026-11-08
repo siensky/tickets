@@ -250,38 +250,7 @@ describe('getQueueStatus', () => {
       'token-1',
     );
 
-    // Tom config-cache: golvet, utan att fråga databasen.
-    expect(status).toEqual({
-      status: 'waiting',
-      position: 4,
-      queueDepth: 4823,
-      nextPollSeconds: 5,
-    });
-  });
-
-  it('räknar pollningsintervallet från insläppstakten i cachen, aldrig från databasen', async () => {
-    const { redis } = fakeRedis({
-      exists: vi.fn().mockResolvedValue(0),
-      zrank: vi.fn().mockResolvedValue(4799),
-      zcard: vi.fn().mockResolvedValue(9000),
-      get: vi
-        .fn()
-        .mockImplementation((key: string) =>
-          Promise.resolve(key === 'config:queue_admission_rate_per_minute' ? '3600' : null),
-        ),
-    });
-    const { query } = shardPools.pools[0] as unknown as { query: ReturnType<typeof vi.fn> };
-    query.mockClear();
-
-    const status = await getQueueStatus(
-      { shardPools, redis, queueTokenSecret: SECRET, businessMetrics: fakeBusinessMetrics() },
-      'event-1',
-      'token-1',
-    );
-
-    // 3600/min = 60/s: plats 4 800 är framme om 80 s, alltså fråga om 20 s.
-    expect(status).toMatchObject({ status: 'waiting', position: 4800, nextPollSeconds: 20 });
-    expect(query).not.toHaveBeenCalled();
+    expect(status).toEqual({ status: 'waiting', position: 4, queueDepth: 4823 });
   });
 
   it('reports "not_found" for an unknown token', async () => {
