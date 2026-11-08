@@ -7,11 +7,14 @@
  * Admission arrives over WebSocket (scheduler-worker publishes `admitted`,
  * `sales_closed` and `sold_out` to `ws:<kötoken>`): a message triggers an
  * immediate status read, so the page never trusts the socket alone. While the
- * socket is up, polling is only a slow fallback (every 15 s) for a missed
- * message; while it is down (no gateway, reconnecting) the page polls every
- * 2 s as before, and every (re)connect reads the status at once
- * (docs/loadtest-cpu-plan.md steg 3). Polling every 2 s for everyone was what
- * made a large queue cost tens of thousands of requests per second.
+ * socket is up, polling is only a slow fallback (every 15 s or the server's
+ * `nextPollSeconds`, whichever is longer) for a missed message; every
+ * (re)connect reads the status at once (docs/loadtest-cpu-plan.md steg 3).
+ * While it is down the page follows the server's `nextPollSeconds`, never
+ * faster than every 5 s, spread ±20 % so that everyone who lost their socket
+ * at once doesn't ask at once. The old fixed 2 s without a socket was what made
+ * the spike test 7/11 collapse: an overloaded ingress dropped sockets, every
+ * dropped socket polled every 2 s, and that made the overload worse.
  */
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
@@ -22,8 +25,20 @@ import { retryWhileBusy } from '../lib/retry-while-busy.js';
 import { useQueueSocket } from './use-queue-socket.js';
 
 export const WAITING_FALLBACK_POLL_MS = 15_000;
-export const WAITING_NO_SOCKET_POLL_MS = 2000;
+export const WAITING_MIN_POLL_MS = 5000;
+const POLL_JITTER = 0.2;
 const QUEUE_MESSAGE_TYPES = new Set(['admitted', 'sales_closed', 'sold_out']);
+
+/** Nästa statusfråga för den som väntar: serverns intervall, aldrig under golvet, med spridning. */
+export function waitingPollDelayMs(
+  isSocketOpen: boolean,
+  serverNextPollSeconds: number | undefined,
+): number {
+  const serverMs = (serverNextPollSeconds ?? 0) * 1000;
+  const floorMs = isSocketOpen ? WAITING_FALLBACK_POLL_MS : WAITING_MIN_POLL_MS;
+  const baseMs = Math.max(floorMs, serverMs);
+  return Math.round(baseMs * (1 - POLL_JITTER + Math.random() * 2 * POLL_JITTER));
+}
 
 function isQueueMessage(payload: unknown): boolean {
   if (typeof payload !== 'object' || payload === null || !('type' in payload)) {
@@ -114,10 +129,14 @@ export function useQueueAdmission(
     queryFn: () => getQueueStatus(eventId, token ?? ''),
     enabled: token !== undefined,
     refetchInterval: (query) => {
-      if (query.state.data?.status === 'admitted') {
+      const data = query.state.data;
+      if (data?.status === 'admitted') {
         return ADMITTED_KEEPALIVE_INTERVAL_MS;
       }
-      return isSocketOpen ? WAITING_FALLBACK_POLL_MS : WAITING_NO_SOCKET_POLL_MS;
+      return waitingPollDelayMs(
+        isSocketOpen,
+        data?.status === 'waiting' ? data.nextPollSeconds : undefined,
+      );
     },
   });
   refetchRef.current = () => void statusQuery.refetch();

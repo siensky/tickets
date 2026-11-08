@@ -140,7 +140,13 @@ export function joinQueue(
 }
 
 export type QueueStatusResult =
-  | { readonly status: 'waiting'; readonly position: number; readonly queueDepth: number }
+  | {
+      readonly status: 'waiting';
+      readonly position: number;
+      readonly queueDepth: number;
+      /** Valfri: en äldre booking-api skickar den inte, då gäller klientens golv. */
+      readonly nextPollSeconds?: number;
+    }
   | { readonly status: 'admitted' }
   | { readonly status: 'not_found' }
   | { readonly status: 'sales_closed' }

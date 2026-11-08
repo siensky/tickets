@@ -39,7 +39,13 @@ export interface JoinQueueResult {
 }
 
 export type QueueStatusResult =
-  | { readonly status: 'waiting'; readonly position: number; readonly queueDepth: number }
+  | {
+      readonly status: 'waiting';
+      readonly position: number;
+      readonly queueDepth: number;
+      /** När klienten får fråga igen (services/queue-poll-interval.ts). */
+      readonly nextPollSeconds: number;
+    }
   | { readonly status: 'admitted' }
   | { readonly status: 'sales_closed' }
   | { readonly status: 'sold_out' }

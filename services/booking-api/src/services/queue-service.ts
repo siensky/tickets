@@ -10,6 +10,7 @@ import { SalesClosedError, SalesNotOpenError } from '@tickets/domain';
 import {
   getCachedConfigValue,
   getWaitingRoomStatus,
+  peekCachedConfigValue,
   joinOrAdmitWaitingRoom,
   touchAdmittedActivity,
   type RedisClient,
@@ -29,6 +30,7 @@ import type {
   QueueConfig,
   QueueStatusResult,
 } from '../types/queue.js';
+import { MIN_POLL_SECONDS, nextPollSeconds } from './queue-poll-interval.js';
 import type { ReadCache } from './read-cache.js';
 import { readSalesWindow, type TimedSalesWindowSnapshot } from './sales-window.js';
 
@@ -173,10 +175,19 @@ export async function getQueueStatus(
     return { status: 'not_found' };
   }
   if (waitingRoomStatus.kind === 'waiting') {
+    // Bara cachen (en Redis-GET), aldrig Postgres: varje väntande besökare gör det här anropet, och
+    // intervallet är ett råd. En cachemiss (join fyller den) ger golvet, inte en databasfråga.
+    const cachedRate = Number(
+      await peekCachedConfigValue(deps.redis, 'queue_admission_rate_per_minute'),
+    );
     return {
       status: 'waiting',
       position: waitingRoomStatus.position,
       queueDepth: waitingRoomStatus.queueDepth,
+      nextPollSeconds:
+        Number.isInteger(cachedRate) && cachedRate > 0
+          ? nextPollSeconds(waitingRoomStatus.position, cachedRate)
+          : MIN_POLL_SECONDS,
     };
   }
 

@@ -12,6 +12,17 @@
 import type { Redis } from 'ioredis';
 import { configCacheKey } from './keys.js';
 
+/**
+ * Bara cachen, aldrig källan: för värden som är ett råd, inte ett krav (köstatusens pollningsintervall).
+ * En miss ger `null`, så att en het väg aldrig hamnar i kö mot databasen när cachen gått ut.
+ */
+export async function peekCachedConfigValue(
+  redis: Redis,
+  key: string,
+): Promise<string | null> {
+  return redis.get(configCacheKey(key));
+}
+
 export async function getCachedConfigValue(
   redis: Redis,
   key: string,

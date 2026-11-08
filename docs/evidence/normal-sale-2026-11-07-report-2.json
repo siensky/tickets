@@ -1,0 +1,21 @@
+{
+  "scenario": "normal-sale",
+  "eventId": "d401abe5-2b8b-494e-81ce-6d8bc388d18c",
+  "generatedAt": "2026-11-07T21:58:37.307Z",
+  "runDurationSeconds": 900,
+  "k6": {
+    "totalRequests": 318019,
+    "requestsPerSecond": 343.30101824593135,
+    "requestsFailedRate": 0.005927318807995748,
+    "latencyMsP50": 16.276513,
+    "latencyMsP95": 48.524712399999956,
+    "latencyMsP99": 117.26579848000011
+  },
+  "oversellPreventedDuringRun": 0,
+  "completedPurchaseCount": 992,
+  "proof": {
+    "soldTicketCount": 4960,
+    "soldWithinInventory": true,
+    "duplicateTicketNumbers": []
+  }
+}

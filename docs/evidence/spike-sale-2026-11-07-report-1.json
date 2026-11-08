@@ -1,0 +1,21 @@
+{
+  "scenario": "spike-sale",
+  "eventId": "d401abe5-2b8b-494e-81ce-6d8bc388d18c",
+  "generatedAt": "2026-11-07T22:48:05.026Z",
+  "runDurationSeconds": 390,
+  "k6": {
+    "totalRequests": 310268,
+    "requestsPerSecond": 802.4130681430793,
+    "requestsFailedRate": 0.014584165946858844,
+    "latencyMsP50": 16.070113,
+    "latencyMsP95": 1209.6154956999987,
+    "latencyMsP99": 5513.476231270001
+  },
+  "oversellPreventedDuringRun": 0,
+  "completedPurchaseCount": 919,
+  "proof": {
+    "soldTicketCount": 4595,
+    "soldWithinInventory": true,
+    "duplicateTicketNumbers": []
+  }
+}
