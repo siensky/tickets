@@ -24,6 +24,9 @@ driftsatts. Samma scenario och samma event som [körningen 5 november](./normal-
 | `http_req_failed` | 0,68 % | **0,61 % / 0,59 %**, inga 5xx (ingress-5xx 0, se Grafana). k6 skiljer inte på 4xx-koder; reservationscheckarna (201 eller 409) gick igenom till 100 % |
 | Mottagen data per maskin | — | 17 GB (ca 18 MB/s) |
 
+Hela k6-summaryn per maskin: [`normal-sale-2026-11-07-k6-1.json`](normal-sale-2026-11-07-k6-1.json),
+[`-k6-2.json`](normal-sale-2026-11-07-k6-2.json).
+
 Enstaka anrop tog mycket lång tid (max 52 s respektive 36 s), men p99 ligger på ca 120 ms.
 
 ## Resultat från databasen (`normal-sale-2026-11-07-report-1.json`, `-report-2.json`)

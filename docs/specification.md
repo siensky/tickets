@@ -32,7 +32,7 @@ portfolioprojekt.
 | **G** Dagliga DB-backups till S3 | Nattlig `pg_dump` av båda shardarna till R2 (S3-kompatibelt) | Återställningsövning i runbook |
 | **G** Metrics och logging | Prometheus + Grafana, Loki + Alloy | `https://grafana.tikknet.se` |
 | **VG** ≥2 instanser bakom load balancer | booking-api 2–6 repliker bakom ingress-nginx + Service | HPA min 2 |
-| **VG** Deploy utan downtime | Probes, `maxUnavailable: 0`, preStop, graceful shutdown | [`evidence/zero-downtime.md`](./evidence/zero-downtime.md): 0 fel av 22 978 |
+| **VG** Deploy utan downtime | Probes, `maxUnavailable: 0`, preStop, graceful shutdown | [`evidence/zero-downtime.md`](./evidence/zero-downtime.md): 0 fel av 22 978 (30/10) och 0 av 43 401 (8/11) |
 | **VG** Autoscaling upp **och** ner | HPA (CPU) på booking-api, KEDA (ködjup) på notification-worker | Grafana "Autoscaling & lasttest" |
 
 Vid försvaret ska hela lösningen kunna förklaras: demo av app, pipeline och dashboard,
