@@ -39,6 +39,20 @@ describe('retryWhileBusy', () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
+  it('skickar inget nytt försök när anroparen slutade bry sig under väntan', async () => {
+    let isCancelled = false;
+    const sleep = () => {
+      isCancelled = true;
+      return Promise.resolve();
+    };
+    const run = vi.fn().mockRejectedValueOnce(busy()).mockResolvedValueOnce('ok');
+
+    await expect(
+      retryWhileBusy(run, { sleep, isCancelled: () => isCancelled }),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
   it('väntar längre för varje försök', async () => {
     const delays: number[] = [];
     const sleep = (ms: number) => {

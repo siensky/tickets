@@ -55,7 +55,9 @@ function openReconnectingSocket(token: string, handlers: SocketHandlers): () => 
       if (stopped) {
         return;
       }
-      reconnectTimer = setTimeout(connect, delayMs);
+      // Slumpad halva till hela väntan: alla som tappade socketen samtidigt (en överbelastad ingress)
+      // ska inte återansluta i samma ögonblick och slå ut den igen.
+      reconnectTimer = setTimeout(connect, delayMs * (0.5 + Math.random() * 0.5));
       delayMs = Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS);
     });
   }
