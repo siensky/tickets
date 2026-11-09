@@ -295,4 +295,4 @@ docs/       plan, rules, architecture, ADRs, runbook, evidence, diagrams
 ```
 
 The code rules (layering, naming, database and security) are in [docs/rules.md](docs/rules.md) and
-are enforced by ESLint.
+are enforced by ESLint. test
